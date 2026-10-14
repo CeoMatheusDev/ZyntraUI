@@ -29,3 +29,10 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `widgets/checkbox`: estado `*bool` do chamador, toggle por press-inside, 2-3 draws.
 - Exemplo M3: `EdgeInsets` + `StackPlacer` + botão/checkbox interativos em 2 frames.
 - Compatibilidade: só adições sobre M1/M2, sem breaking.
+
+### Adicionado — Milestone 4 (texto + renderer externo)
+- `text/metrics`: decodificador UTF-8 próprio (RFC 3629, sem alloc), `FontMetrics.withSize/lineHeight`, `measure` (multilinha), `truncateToWidth` em fronteira UTF-8.
+- `draw/renderer`: contrato de backend externo — `cull` puro, `NullRenderer` test-double (valida + conta), `Backend` via vtable (`submit`/`name`); a ZyntraUI empresta `cmds`, GPU pertence ao backend. Sem renderer próprio.
+- `widgets/label`: mede sem emitir draws (rasterização é do backend); `debug_draw` emite 1 outline; detecta `truncated` vs `bounds`.
+- Exemplo M4: label medido + `NullRenderer.submit` com stats + frame de culling.
+- Compatibilidade: só adições; `DrawCommand` inalterado (sem nova variante).

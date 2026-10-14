@@ -21,6 +21,11 @@ pub const event = struct {
 
 pub const draw = struct {
     pub const commands = @import("draw/commands.zig");
+    pub const renderer = @import("draw/renderer.zig");
+};
+
+pub const text = struct {
+    pub const metrics = @import("text/metrics.zig");
 };
 
 pub const layout = struct {
@@ -34,9 +39,10 @@ pub const style = struct {
 pub const widgets = struct {
     pub const button = @import("widgets/button.zig");
     pub const checkbox = @import("widgets/checkbox.zig");
+    pub const label = @import("widgets/label.zig");
 };
 
-// Re-exportações ergonômicas (M1+M2+M3; compatível com M1/M2).
+// Re-exportações ergonômicas (M1..M4; compatível com anteriores).
 pub const Vec2 = core.types.Vec2;
 pub const Size = core.types.Size;
 pub const Rect = core.types.Rect;
@@ -54,6 +60,12 @@ pub const Modifiers = event.event_mod.Modifiers;
 
 pub const DrawCommand = draw.commands.DrawCommand;
 pub const DrawList = draw.commands.DrawList;
+pub const FrameStats = draw.renderer.FrameStats;
+pub const NullRenderer = draw.renderer.NullRenderer;
+pub const Backend = draw.renderer.Backend;
+
+pub const FontMetrics = text.metrics.FontMetrics;
+pub const TextMetrics = text.metrics.TextMetrics;
 
 pub const Constraints = layout.layout_mod.Constraints;
 pub const EdgeInsets = layout.layout_mod.EdgeInsets;
@@ -66,6 +78,7 @@ pub const CheckboxStyle = style.style_mod.CheckboxStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
+pub const LabelResult = widgets.label.LabelResult;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -80,7 +93,10 @@ test {
     _ = @import("draw/commands.zig");
     _ = @import("layout/layout.zig");
     _ = @import("style/style.zig");
+    _ = @import("text/metrics.zig");
+    _ = @import("draw/renderer.zig");
     _ = @import("widgets/input.zig");
     _ = @import("widgets/button.zig");
     _ = @import("widgets/checkbox.zig");
+    _ = @import("widgets/label.zig");
 }
