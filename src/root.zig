@@ -91,6 +91,7 @@ pub const LabelResult = widgets.label.LabelResult;
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
 pub const version_patch = core.types.version_patch;
+pub const version_prerelease = core.types.version_prerelease;
 
 // NOTA (verificado em Zig 0.17.0): arquivos importados mas não
 // referenciados sequer são analisados no build da lib, e `export fn`

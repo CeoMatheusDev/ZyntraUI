@@ -5,6 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.0.0-alpha.1] - 2026-10-14
+
+Primeiro pré-lançamento: núcleo validado de ponta a ponta em Zig 0.17.0,
+sem renderer próprio (contrato com backend externo) e sem estado global.
+Pré-release instável: API pode mudar até a beta.
+
+### Desempenho (medido — ver docs/BENCHMARKS.md)
+- Pipeline de 1,1M comandos: ~17 ns/comando (`ReleaseFast`), ~257 ns (`Debug`).
+- Step `run-bench` + `examples/bench.zig` reproduzíveis.
+
 ### Adicionado — Milestone 1 (fundação)
 - `build.zig` / `build.zig.zon` funcionais no Zig 0.17.0 (`zyntra_ui` como módulo + lib estática).
 - API pública mínima em `src/root.zig` (`Context`, `Rect`, `Vec2`, `Color`, `Id`).

@@ -41,6 +41,25 @@ pub fn build(b: *std.Build) void {
     run_example.dependOn(&run_example_cmd.step);
     run_example_cmd.step.dependOn(b.getInstallStep());
 
+    // Benchmark da pipeline por frame (medir por fora; ver examples/bench.zig).
+    const bench_exe = b.addExecutable(.{
+        .name = "zyntra-bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/bench.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zyntra_ui", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(bench_exe);
+
+    const run_bench = b.step("run-bench", "Executa o benchmark da pipeline");
+    const run_bench_cmd = b.addRunArtifact(bench_exe);
+    run_bench.dependOn(&run_bench_cmd.step);
+    run_bench_cmd.step.dependOn(b.getInstallStep());
+
     // Testes unitários do módulo da biblioteca.
     const mod_tests = b.addTest(.{
         .root_module = mod,
