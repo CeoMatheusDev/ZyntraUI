@@ -15,6 +15,8 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - Exemplo em 2 frames (press → release) provando captura entre frames.
 - CI (`.github/workflows/ci.yml`, actions pinadas por SHA): fmt, testes
   Debug+ReleaseFast, build, exemplo, integração C e smoke do bench.
+  Correção real vinda do CI: `std.debug.print` escreve em stderr, então o
+  smoke do bench funde stderr (`2>&1`) antes do `grep`.
 - Docs: licença MIT no README (antes negava existência); branch `master`
   residual removido; logo mantido fora do git (binário não referenciado).
 - Compatibilidade: `Context` ganha 3 campos + 1 método (aditivo);
