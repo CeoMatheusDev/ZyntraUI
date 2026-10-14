@@ -1,0 +1,17 @@
+.{
+    .name = .zyntra_ui,
+    .version = "0.0.0",
+    .fingerprint = 0x7aefb13a24db0cb2, // Gerado localmente para identidade do pacote; não alterar sem revisão.
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "examples",
+        "LICENSE",
+        "README.md",
+        "CHANGELOG.md",
+    },
+}
