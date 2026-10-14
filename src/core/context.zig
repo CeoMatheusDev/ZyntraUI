@@ -20,6 +20,7 @@
 
 const std = @import("std");
 const types = @import("types.zig");
+const id_mod = @import("id.zig");
 const event_mod = @import("../event/event.zig");
 const draw_mod = @import("../draw/commands.zig");
 
@@ -55,6 +56,15 @@ pub const Context = struct {
     state: FrameState,
     events: event_mod.EventQueue,
     draw: draw_mod.DrawList,
+    /// Última posição conhecida do mouse (retida entre frames).
+    mouse_pos: ?types.Vec2 = null,
+    /// Botão esquerdo atualmente pressionado (retido entre frames).
+    mouse_down_left: bool = false,
+    /// Id com captura de press ativa (release-to-activate, M7).
+    /// Exclusivo: só o dono recebe o release. Limpo no release,
+    /// em `clearPressCapture` ou `deinit`. Widgets inativos devem ser
+    /// sondados todo frame — captura órfã bloqueia outros widgets.
+    press_owner: ?id_mod.Id = null,
 
     const Self = @This();
 
@@ -87,6 +97,9 @@ pub const Context = struct {
         self.draw = draw_mod.DrawList.initEmpty();
         self.state = .idle;
         self.frame_index = 0;
+        self.mouse_pos = null;
+        self.mouse_down_left = false;
+        self.press_owner = null;
     }
 
     /// Inicia um novo frame: limpa eventos/draw do frame anterior
@@ -114,11 +127,27 @@ pub const Context = struct {
     /// Enfileira um evento no frame atual. Aceita fora de frame
     /// (para adaptadores que coletam antes de `beginFrame`), mas o
     /// padrão é enfileirar entre `beginFrame`/`endFrame`.
+    /// Atualiza `mouse_pos`/`mouse_down_left` (estado retido entre
+    /// frames; `beginFrame` NÃO limpa — só a fila).
     pub fn pushEvent(self: *Self, ev: event_mod.Event) ContextError!void {
         self.events.push(self.allocator, ev) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             error.InvalidEvent => return error.InvalidEvent,
         };
+        switch (ev) {
+            .mouse_move => |m| self.mouse_pos = m.pos,
+            .mouse_wheel => |w| self.mouse_pos = w.pos,
+            .mouse_button => |b| {
+                self.mouse_pos = b.pos;
+                if (b.button == .left) self.mouse_down_left = b.pressed;
+            },
+            else => {},
+        }
+    }
+
+    /// Libera captura de press órfã (ex.: widget sumiu, foco perdido).
+    pub fn clearPressCapture(self: *Self) void {
+        self.press_owner = null;
     }
 
     pub fn pendingEvents(self: *const Self) []const event_mod.Event {
@@ -210,4 +239,34 @@ test "Context M2: eventos + draw por frame" {
     }));
     try std.testing.expectEqual(@as(usize, 0), ctx.pendingEvents().len);
     ctx.endFrame();
+}
+
+test "Context M7: mouse retido entre frames + captura" {
+    const allocator = std.testing.allocator;
+    var ctx = try Context.init(allocator, .{});
+    defer ctx.deinit();
+    try std.testing.expect(ctx.mouse_pos == null);
+    try std.testing.expect(!ctx.mouse_down_left);
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(7, 8) } });
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(7, 8) },
+    });
+    ctx.endFrame();
+
+    // Fila limpou, estado reteve.
+    ctx.beginFrame();
+    try std.testing.expectEqual(@as(usize, 0), ctx.pendingEvents().len);
+    try std.testing.expectEqual(types.Vec2.init(7, 8), ctx.mouse_pos.?);
+    try std.testing.expect(ctx.mouse_down_left);
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(7, 8) },
+    });
+    try std.testing.expect(!ctx.mouse_down_left);
+    ctx.endFrame();
+
+    ctx.press_owner = @import("id.zig").Id.fromString("x");
+    ctx.clearPressCapture();
+    try std.testing.expect(ctx.press_owner == null);
 }

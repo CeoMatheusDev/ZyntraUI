@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    name: build + test (Zig ${{ matrix.zig }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        zig: ["0.17.0"]
+        optimize: ["Debug", "ReleaseFast"]
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # mlugg/setup-zig v2.2.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: ${{ matrix.zig }}
+      - run: zig version
+      - run: zig fmt --check src/ examples/ build.zig
+      - run: zig build test --summary all -Doptimize=${{ matrix.optimize }}
+      - run: zig build -Doptimize=${{ matrix.optimize }}
+      - run: zig build run-example -Doptimize=${{ matrix.optimize }}
+      - name: C ABI integration test
+        run: |
+          zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a -Isrc/c-abi -o /tmp/zyntra-c-test
+          /tmp/zyntra-c-test
+      - name: Benchmark smoke test
+        run: zig build run-bench -Doptimize=${{ matrix.optimize }} | grep checksum=

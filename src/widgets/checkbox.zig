@@ -1,9 +1,9 @@
 //! ZyntraUI — checkbox (widgets/checkbox).
 //!
-//! Estado (`checked: *bool`) pertence ao chamador (padrão ImGui-like),
-//! o `Context` não retém estado de widgets na M3.
-//! Transição: `pressed-inside` alterna `checked` uma vez por frame
-//! (múltiplos presses no mesmo frame contam como um).
+//! Estado (`checked: *bool`) pertence ao chamador (padrão ImGui-like);
+//! a captura de press vive no `Context` (como no botão, M7).
+//! Transição: alterna no **release dentro** após press capturado;
+//! release fora cancela. Múltiplos presses no mesmo frame contam como um.
 //! Desenho: caixa externa (bg ou bg_checked) + outline + marca interna
 //! insetada quando marcado. Emite 2-3 comandos.
 //! `id` não-nulo obrigatório; `box` deve ter tamanho > 0.
@@ -31,12 +31,19 @@ pub fn checkbox(
     if (!style.isValid()) return error.InvalidArgument;
     if (box.w <= 0 or box.h <= 0) return error.InvalidArgument;
 
-    const scan = input.MouseScan.scan(ctx.pendingEvents(), box);
-    var res = CheckboxResult{ .hovered = scan.hovered, .checked = checked.* };
-    if (scan.pressed) {
-        checked.* = !checked.*;
-        res.toggled = true;
-        res.checked = checked.*;
+    const fm = input.FrameMouse.scan(ctx.pendingEvents());
+    const hovered = if (ctx.mouse_pos) |p| box.contains(p) else false;
+    var res = CheckboxResult{ .hovered = hovered, .checked = checked.* };
+    if (ctx.press_owner == null and fm.pressedInside(box)) {
+        ctx.press_owner = id;
+    }
+    if (ctx.press_owner == id and fm.released_pos != null) {
+        if (hovered) {
+            checked.* = !checked.*;
+            res.toggled = true;
+            res.checked = checked.*;
+        }
+        ctx.press_owner = null;
     }
 
     const bg = if (checked.*) style.bg_checked else style.bg;
@@ -64,7 +71,7 @@ pub fn checkbox(
     return res;
 }
 
-test "checkbox alterna dentro e ignora fora" {
+test "checkbox alterna no release dentro, cancela fora" {
     const stdt = @import("std");
     const gpa = stdt.testing.allocator;
     const style = style_mod.Theme.darkDefault().checkboxStyle();
@@ -74,9 +81,21 @@ test "checkbox alterna dentro e ignora fora" {
     const id = id_mod.Id.fromString("test:chk");
     var checked = false;
 
+    // Press captura mas não alterna ainda.
     ctx.beginFrame();
     try ctx.pushEvent(.{
         .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    const r0 = try checkbox(&ctx, id, box, &checked, style);
+    try stdt.testing.expect(!r0.toggled);
+    try stdt.testing.expect(!checked);
+    try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len);
+    ctx.endFrame();
+
+    // Release dentro: alterna (3 draws com a marca).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(5, 5) },
     });
     const r1 = try checkbox(&ctx, id, box, &checked, style);
     try stdt.testing.expect(r1.toggled);
@@ -84,9 +103,16 @@ test "checkbox alterna dentro e ignora fora" {
     try stdt.testing.expectEqual(@as(usize, 3), ctx.drawCommands().len);
     ctx.endFrame();
 
+    // Press dentro + release fora: cancela, mantém estado.
     ctx.beginFrame();
     try ctx.pushEvent(.{
-        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(500, 500) },
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try checkbox(&ctx, id, box, &checked, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(500, 500) },
     });
     const r2 = try checkbox(&ctx, id, box, &checked, style);
     try stdt.testing.expect(!r2.toggled);

@@ -1,12 +1,14 @@
 //! ZyntraUI — botão (widgets/button).
 //!
-//! Modelo M3 (press-to-activate, documentado):
-//! - `hovered`: última posição conhecida dentro de `bounds`.
-//! - `pressed/clicked`: houve `mouse_button left pressed` dentro.
-//!   `clicked == pressed` nesta milestone (sem tracking de
-//!   press/release entre frames; M4 adicionará release-to-activate).
-//! Ownership: sem estado retido; chamador detém `bounds`/`style`.
-//! O `id` deve ser não-nulo (identidade estável para M4+ e C-ABI).
+//! Modelo M7 (release-to-activate):
+//! - `hovered`: `Context.mouse_pos` (retido) dentro de `bounds`.
+//! - Press dentro captura (`Context.press_owner = id`, exclusivo).
+//! - `pressed`: sou o dono da captura e o botão segue pressionado.
+//! - `clicked`: release esquerdo neste frame com o mouse dentro.
+//!   Release fora cancela (sem click). Captura órfã: ver
+//!   `Context.clearPressCapture`.
+//! Ownership: estado de captura vive no `Context`; chamador detém
+//! `bounds`/`style`. `id` não-nulo obrigatório.
 //! Emite 2 comandos (fill + outline). Erros: OOM ou estilo inválido.
 
 const types = @import("../core/types.zig");
@@ -31,12 +33,21 @@ pub fn button(
     if (!style.isValid()) return error.InvalidArgument;
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
 
-    const scan = input.MouseScan.scan(ctx.pendingEvents(), bounds);
-    const res = ButtonResult{
-        .hovered = scan.hovered,
-        .pressed = scan.pressed,
-        .clicked = scan.pressed,
-    };
+    const fm = input.FrameMouse.scan(ctx.pendingEvents());
+    const hovered = if (ctx.mouse_pos) |p| bounds.contains(p) else false;
+    var res = ButtonResult{ .hovered = hovered };
+
+    if (ctx.press_owner == null and fm.pressedInside(bounds)) {
+        ctx.press_owner = id;
+    }
+    if (ctx.press_owner == id) {
+        res.pressed = ctx.mouse_down_left;
+        if (fm.released_pos != null) {
+            if (hovered) res.clicked = true;
+            ctx.press_owner = null;
+        }
+    }
+
     const bg = if (res.pressed)
         style.bg_pressed
     else if (res.hovered)
@@ -55,40 +66,72 @@ pub fn button(
     return res;
 }
 
-test "button hover/click + 2 draws" {
+test "button hover/press/release-to-activate + captura" {
     const stdt = @import("std");
     const gpa = stdt.testing.allocator;
-    const theme = style_mod.Theme.darkDefault();
-    const style = theme.buttonStyle();
+    const style = style_mod.Theme.darkDefault().buttonStyle();
 
     var ctx = try context_mod.Context.init(gpa, .{});
     defer ctx.deinit();
     const bounds = types.Rect.init(10, 10, 120, 40);
     const id = id_mod.Id.fromString("test:btn");
+    const id2 = id_mod.Id.fromString("test:btn2");
 
+    // Hover sem press: nada ativa.
     ctx.beginFrame();
     try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(20, 20) } });
     const hover = try button(&ctx, id, bounds, style);
     try stdt.testing.expect(hover.hovered);
-    try stdt.testing.expect(!hover.clicked);
+    try stdt.testing.expect(!hover.pressed and !hover.clicked);
     try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len);
     ctx.endFrame();
 
+    // Press dentro: captura, pressed, ainda sem click.
     ctx.beginFrame();
     try ctx.pushEvent(.{
         .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(20, 20) },
     });
-    const click = try button(&ctx, id, bounds, style);
-    try stdt.testing.expect(click.clicked);
+    const down = try button(&ctx, id, bounds, style);
+    try stdt.testing.expect(down.pressed);
+    try stdt.testing.expect(!down.clicked);
+    try stdt.testing.expect(ctx.press_owner == id);
     ctx.endFrame();
 
+    // Release dentro no frame seguinte: click. Mouse retido dispensa move.
     ctx.beginFrame();
     try ctx.pushEvent(.{
-        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(500, 500) },
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(20, 20) },
     });
-    const outside = try button(&ctx, id, bounds, style);
-    try stdt.testing.expect(!outside.clicked);
-    try stdt.testing.expect(!outside.hovered);
+    const click = try button(&ctx, id, bounds, style);
+    try stdt.testing.expect(click.clicked);
+    try stdt.testing.expect(!click.pressed);
+    try stdt.testing.expect(ctx.press_owner == null);
+    ctx.endFrame();
+
+    // Press dentro + release fora: cancela, sem click.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(20, 20) },
+    });
+    _ = try button(&ctx, id, bounds, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(700, 700) },
+    });
+    const cancelled = try button(&ctx, id, bounds, style);
+    try stdt.testing.expect(!cancelled.clicked and !cancelled.pressed);
+    try stdt.testing.expect(ctx.press_owner == null);
+    ctx.endFrame();
+
+    // Captura é exclusiva: press em btn1 bloqueia btn2 sobreposto.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(20, 20) },
+    });
+    _ = try button(&ctx, id, bounds, style);
+    const blocked = try button(&ctx, id2, bounds, style);
+    try stdt.testing.expect(!blocked.pressed and !blocked.clicked);
     ctx.endFrame();
 
     ctx.beginFrame();

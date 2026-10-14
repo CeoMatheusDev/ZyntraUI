@@ -70,7 +70,7 @@ Ideas, technical discussions, and feedback are welcome. Open an [issue](https://
 
 ## License
 
-A license has not yet been specified. Until one is added, no open-source license is granted by this repository.
+MIT — see [LICENSE](LICENSE).
 
 ---
 

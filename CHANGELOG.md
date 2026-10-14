@@ -5,6 +5,21 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Alterado — Milestone 7 (beta prep: ativação por release + CI)
+- `core/context`: estado de mouse retido (`mouse_pos`, `mouse_down_left`,
+  atualizados em `pushEvent`, nunca limpos por `beginFrame`), captura
+  exclusiva de press (`press_owner` + `clearPressCapture`).
+- `widgets/button`, `widgets/checkbox`: release-to-activate (press captura,
+  click/toggle só em release dentro; release fora cancela).
+- `widgets/input`: `FrameMouse` (press/release do frame, sem âncora).
+- Exemplo em 2 frames (press → release) provando captura entre frames.
+- CI (`.github/workflows/ci.yml`, actions pinadas por SHA): fmt, testes
+  Debug+ReleaseFast, build, exemplo, integração C e smoke do bench.
+- Docs: licença MIT no README (antes negava existência); branch `master`
+  residual removido; logo mantido fora do git (binário não referenciado).
+- Compatibilidade: `Context` ganha 3 campos + 1 método (aditivo);
+  **mudança de comportamento**: botão/checkbox ativam no release, não no press.
+
 ## [1.0.0-alpha.1] - 2026-10-14
 
 Primeiro pré-lançamento: núcleo validado de ponta a ponta em Zig 0.17.0,
