@@ -20,3 +20,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `core/context`: integra `events` + `draw` (init sem alloc, `deinit` libera, `beginFrame` limpa, `pushEvent`/`pendingEvents`/`drawCommands`).
 - `examples/minimal.zig`: simula hover/click via eventos e emite 2 comandos; valida limpeza no frame 2.
 - Compatibilidade: API M1 preservada (só adições; `Context` ganha 2 campos + 3 métodos).
+
+### Adicionado — Milestone 3 (layout + estilo + widgets)
+- `layout/layout`: `Constraints.constrain`, `EdgeInsets.apply` (nunca negativo), `StackPlacer` vertical/horizontal sem alocação + `centered`.
+- `style/style`: `Theme.darkDefault/lightDefault`, `ButtonStyle`/`CheckboxStyle` derivados com `isValid`.
+- `widgets/input`: `MouseScan` interno (última posição + press-inside esquerdo).
+- `widgets/button`: `button(ctx,id,bounds,style)` press-to-activate (limitação documentada; release-to-activate em M4), 2 draws, exige `id` não-nulo.
+- `widgets/checkbox`: estado `*bool` do chamador, toggle por press-inside, 2-3 draws.
+- Exemplo M3: `EdgeInsets` + `StackPlacer` + botão/checkbox interativos em 2 frames.
+- Compatibilidade: só adições sobre M1/M2, sem breaking.

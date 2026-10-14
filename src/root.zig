@@ -23,7 +23,20 @@ pub const draw = struct {
     pub const commands = @import("draw/commands.zig");
 };
 
-// Re-exportações ergonômicas (M1+M2; compatível com M1).
+pub const layout = struct {
+    pub const layout_mod = @import("layout/layout.zig");
+};
+
+pub const style = struct {
+    pub const style_mod = @import("style/style.zig");
+};
+
+pub const widgets = struct {
+    pub const button = @import("widgets/button.zig");
+    pub const checkbox = @import("widgets/checkbox.zig");
+};
+
+// Re-exportações ergonômicas (M1+M2+M3; compatível com M1/M2).
 pub const Vec2 = core.types.Vec2;
 pub const Size = core.types.Size;
 pub const Rect = core.types.Rect;
@@ -42,6 +55,18 @@ pub const Modifiers = event.event_mod.Modifiers;
 pub const DrawCommand = draw.commands.DrawCommand;
 pub const DrawList = draw.commands.DrawList;
 
+pub const Constraints = layout.layout_mod.Constraints;
+pub const EdgeInsets = layout.layout_mod.EdgeInsets;
+pub const StackPlacer = layout.layout_mod.StackPlacer;
+pub const StackDirection = layout.layout_mod.StackDirection;
+
+pub const Theme = style.style_mod.Theme;
+pub const ButtonStyle = style.style_mod.ButtonStyle;
+pub const CheckboxStyle = style.style_mod.CheckboxStyle;
+
+pub const ButtonResult = widgets.button.ButtonResult;
+pub const CheckboxResult = widgets.checkbox.CheckboxResult;
+
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
 pub const version_patch = core.types.version_patch;
@@ -53,4 +78,9 @@ test {
     _ = @import("core/id.zig");
     _ = @import("event/event.zig");
     _ = @import("draw/commands.zig");
+    _ = @import("layout/layout.zig");
+    _ = @import("style/style.zig");
+    _ = @import("widgets/input.zig");
+    _ = @import("widgets/button.zig");
+    _ = @import("widgets/checkbox.zig");
 }

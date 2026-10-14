@@ -1,5 +1,7 @@
 const std = @import("std");
 const zyntra_ui = @import("zyntra_ui");
+const button_mod = @import("zyntra_ui").widgets.button;
+const checkbox_mod = @import("zyntra_ui").widgets.checkbox;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -11,60 +13,41 @@ pub fn main() !void {
     });
     defer ctx.deinit();
 
-    // Frame 1: simula entrada do adaptador + emissão de desenho.
+    const theme = zyntra_ui.Theme.darkDefault();
+    const btn_style = theme.buttonStyle();
+    const chk_style = theme.checkboxStyle();
+    var checked = false;
+
+    // Frame 1: layout vertical + botão com click + checkbox com toggle.
     ctx.beginFrame();
     try ctx.pushEvent(.{ .mouse_move = .{ .pos = zyntra_ui.Vec2.init(30, 25) } });
     try ctx.pushEvent(.{
-        .mouse_button = .{
-            .button = .left,
-            .pressed = true,
-            .pos = zyntra_ui.Vec2.init(30, 25),
-        },
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(30, 25) },
     });
 
-    const click_area = zyntra_ui.Rect.init(10, 10, 120, 40);
-    var hovered = false;
-    var clicked = false;
-    for (ctx.pendingEvents()) |ev| {
-        switch (ev) {
-            .mouse_move => |m| hovered = click_area.contains(m.pos),
-            .mouse_button => |b| {
-                if (b.pressed and b.button == .left and click_area.contains(b.pos)) {
-                    clicked = true;
-                    hovered = true;
-                }
-            },
-            else => {},
-        }
-    }
+    const content = zyntra_ui.EdgeInsets.all(16).apply(ctx.viewport);
+    var placer = zyntra_ui.StackPlacer.init(content, .vertical, 12);
+    const btn_rect = placer.next(.{ .w = 200, .h = 40 });
+    const chk_rect = placer.next(.{ .w = chk_style.box_size, .h = chk_style.box_size });
 
-    const id = zyntra_ui.Id.fromString("examples/minimal:button-ok");
-    _ = id;
-
-    const bg = if (clicked)
-        zyntra_ui.Color.rgb(60, 140, 70)
-    else if (hovered)
-        zyntra_ui.Color.rgb(70, 110, 180)
-    else
-        zyntra_ui.Color.rgb(50, 50, 55);
-    try ctx.draw.rectFilled(ctx.allocator, click_area, bg);
-    try ctx.draw.rectOutline(ctx.allocator, click_area, zyntra_ui.Color.rgb(255, 255, 255), 1.0);
+    const btn = try button_mod.button(&ctx, zyntra_ui.Id.fromString("examples/m3:btn"), btn_rect, btn_style);
+    const chk = try checkbox_mod.checkbox(&ctx, zyntra_ui.Id.fromString("examples/m3:chk"), chk_rect, &checked, chk_style);
     ctx.endFrame();
 
-    std.debug.print("zyntra_ui {d}.{d}.{d} ok (frame={d} events={d} draw={d} hovered={} clicked={})\n", .{
-        zyntra_ui.version_major,
-        zyntra_ui.version_minor,
-        zyntra_ui.version_patch,
+    std.debug.print("m3 frame={d} btn{{hovered={} clicked={}}} chk{{toggled={} checked={}}} draw={d}\n", .{
         ctx.frame_index,
-        ctx.pendingEvents().len,
+        btn.hovered,
+        btn.clicked,
+        chk.toggled,
+        chk.checked,
         ctx.drawCommands().len,
-        hovered,
-        clicked,
     });
 
-    // Frame 2: comprova limpeza por frame (sem vazamento lógico).
+    // Frame 2: sem eventos — widgets idle, listas limpas e reutilizadas.
     ctx.beginFrame();
     std.debug.assert(ctx.pendingEvents().len == 0);
-    std.debug.assert(ctx.drawCommands().len == 0);
+    const btn2 = try button_mod.button(&ctx, zyntra_ui.Id.fromString("examples/m3:btn"), btn_rect, btn_style);
+    std.debug.assert(!btn2.clicked);
     ctx.endFrame();
+    std.debug.print("m3 frame2 ok draw={d}\n", .{ctx.drawCommands().len});
 }
