@@ -32,4 +32,5 @@ jobs:
           zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a -Isrc/c-abi -o /tmp/zyntra-c-test
           /tmp/zyntra-c-test
       - name: Benchmark smoke test
-        run: zig build run-bench -Doptimize=${{ matrix.optimize }} | grep checksum=
+        # std.debug.print escreve em stderr: fundir para o grep validar.
+        run: zig build run-bench -Doptimize=${{ matrix.optimize }} 2>&1 | grep checksum=
