@@ -1,0 +1,121 @@
+//! ZyntraUI — tipos fundamentais (core/types).
+//!
+//! Ownership: tipos por valor, sem alocação.
+//! Lifetime: `'static` (sem referências internas).
+//! ABI C: todos os tipos abaixo têm representação definida
+//! (`extern struct`), prontos para reuso na futura camada C-ABI.
+//! Erros: nenhuma função aqui falha.
+
+/// Vetor 2D em pixels lógicos.
+pub const Vec2 = extern struct {
+    x: f32 = 0,
+    y: f32 = 0,
+
+    pub fn init(x: f32, y: f32) Vec2 {
+        return .{ .x = x, .y = y };
+    }
+
+    pub fn eql(a: Vec2, b: Vec2) bool {
+        return a.x == b.x and a.y == b.y;
+    }
+};
+
+/// Tamanho 2D em pixels lógicos.
+pub const Size = extern struct {
+    w: f32 = 0,
+    h: f32 = 0,
+
+    pub fn init(w: f32, h: f32) Size {
+        return .{ .w = w, .h = h };
+    }
+};
+
+/// Retângulo em pixels lógicos (origem no canto superior-esquerdo).
+pub const Rect = extern struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    w: f32 = 0,
+    h: f32 = 0,
+
+    pub fn init(x: f32, y: f32, w: f32, h: f32) Rect {
+        return .{ .x = x, .y = y, .w = w, .h = h };
+    }
+
+    /// Retorna true se o ponto está dentro (borda superior/esquerda
+    /// inclusiva, inferior/direita exclusiva). Largura/altura <= 0
+    /// nunca contém pontos.
+    pub fn contains(self: Rect, p: Vec2) bool {
+        if (self.w <= 0 or self.h <= 0) return false;
+        return p.x >= self.x and p.x < self.x + self.w and
+            p.y >= self.y and p.y < self.y + self.h;
+    }
+
+    pub fn size(self: Rect) Size {
+        return .{ .w = self.w, .h = self.h };
+    }
+};
+
+/// Cor RGBA não-premultiplicada, 8 bits por canal.
+pub const Color = extern struct {
+    r: u8 = 0,
+    g: u8 = 0,
+    b: u8 = 0,
+    a: u8 = 255,
+
+    pub fn init(r: u8, g: u8, b: u8, a: u8) Color {
+        return .{ .r = r, .g = g, .b = b, .a = a };
+    }
+
+    pub fn rgb(r: u8, g: u8, b: u8) Color {
+        return .{ .r = r, .g = g, .b = b, .a = 255 };
+    }
+
+    /// Empacota como 0xRRGGBBAA (big-endian lógico).
+    pub fn packRgba(self: Color) u32 {
+        return (@as(u32, self.r) << 24) |
+            (@as(u32, self.g) << 16) |
+            (@as(u32, self.b) << 8) |
+            @as(u32, self.a);
+    }
+
+    pub fn unpackRgba(v: u32) Color {
+        return .{
+            .r = @intCast((v >> 24) & 0xff),
+            .g = @intCast((v >> 16) & 0xff),
+            .b = @intCast((v >> 8) & 0xff),
+            .a = @intCast(v & 0xff),
+        };
+    }
+};
+
+/// Versão semântica da biblioteca (espelha build.zig.zon).
+pub const version_major: u32 = 0;
+pub const version_minor: u32 = 0;
+pub const version_patch: u32 = 0;
+
+test "Vec2 init/eql" {
+    const std = @import("std");
+    const a = Vec2.init(1.5, -2.0);
+    try std.testing.expect(a.eql(Vec2.init(1.5, -2.0)));
+    try std.testing.expect(!a.eql(Vec2.init(0, 0)));
+}
+
+test "Rect.contains bordas" {
+    const std = @import("std");
+    const r = Rect.init(10, 20, 100, 50);
+    try std.testing.expect(r.contains(Vec2.init(10, 20)));
+    try std.testing.expect(r.contains(Vec2.init(109.9, 69.9)));
+    try std.testing.expect(!r.contains(Vec2.init(110, 20))); // borda direita exclusiva
+    try std.testing.expect(!r.contains(Vec2.init(10, 70))); // borda inferior exclusiva
+    try std.testing.expect(!r.contains(Vec2.init(0, 0)));
+    try std.testing.expect(!Rect.init(0, 0, 0, 10).contains(Vec2.init(0, 0)));
+    try std.testing.expect(!Rect.init(0, 0, 10, 0).contains(Vec2.init(0, 0)));
+}
+
+test "Color pack/unpack roundtrip" {
+    const std = @import("std");
+    const c = Color.init(0x12, 0x34, 0x56, 0x78);
+    try std.testing.expectEqual(@as(u32, 0x12345678), c.packRgba());
+    try std.testing.expectEqual(c, Color.unpackRgba(c.packRgba()));
+    try std.testing.expectEqual(Color.rgb(255, 0, 0), Color.init(255, 0, 0, 255));
+}
