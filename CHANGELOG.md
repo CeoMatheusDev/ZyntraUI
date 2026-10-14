@@ -30,6 +30,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `style/style`: `SliderStyle` + `Theme.sliderStyle()` validados.
 - Exemplo com drag em 2 frames; resto aditivo.
 
+## [1.0.0-beta.2] - 2026-10-14
+
+Terceira pré-release: caret navegável no text-input (`Key` com
+delete/home/end; quebra de assinatura da M10 documentada). CI verde.
+
 ## [1.0.0-beta.1] - 2026-10-14
 
 Segunda pré-release: API estabilizando, 5 widgets interativos, CI verde em

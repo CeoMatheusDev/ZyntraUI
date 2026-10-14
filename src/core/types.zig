@@ -93,7 +93,7 @@ pub const version_major: u32 = 1;
 pub const version_minor: u32 = 0;
 pub const version_patch: u32 = 0;
 /// Sufixo de pré-lançamento (vazio quando estável).
-pub const version_prerelease: []const u8 = "beta.1";
+pub const version_prerelease: []const u8 = "beta.2";
 
 test "Vec2 init/eql" {
     const std = @import("std");
