@@ -13,3 +13,10 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `core/context`: `Context` com `init/deinit/beginFrame/endFrame/setViewport`, validação sem alocação.
 - Exemplo `examples/minimal.zig` + step `run-example`.
 - Testes unitários para tipos, ids e contexto.
+
+### Adicionado — Milestone 2 (eventos + draw)
+- `event/event`: `Event` normalizado (`mouse_move/button/wheel`, `key`, `text` validado, `resize`, `focus`, `quit`), `MouseButton`/`Key`/`Modifiers` com tags explícitas, `EventQueue` com `push` validante + `clearRetainingCapacity`.
+- `draw/commands`: `DrawCommand` (`clear`, `rect_filled/outline`, `line`, `circle_filled`, `clip`) com `isValid` anti-NaN/anti-negativo, `DrawList` com helpers + retenção de capacidade, renderer-independente.
+- `core/context`: integra `events` + `draw` (init sem alloc, `deinit` libera, `beginFrame` limpa, `pushEvent`/`pendingEvents`/`drawCommands`).
+- `examples/minimal.zig`: simula hover/click via eventos e emite 2 comandos; valida limpeza no frame 2.
+- Compatibilidade: API M1 preservada (só adições; `Context` ganha 2 campos + 3 métodos).
