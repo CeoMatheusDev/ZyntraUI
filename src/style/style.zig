@@ -56,6 +56,21 @@ pub const SliderStyle = extern struct {
     }
 };
 
+/// Estilo de campo de texto.
+pub const TextInputStyle = extern struct {
+    bg: types.Color,
+    bg_focus: types.Color,
+    border: types.Color,
+    border_focus: types.Color,
+    text: types.Color,
+    caret: types.Color,
+    border_width: f32 = 1.0,
+
+    pub fn isValid(self: TextInputStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0;
+    }
+};
+
 /// Paleta mínima do tema.
 pub const Theme = extern struct {
     bg: types.Color,
@@ -118,6 +133,18 @@ pub const Theme = extern struct {
             .border_width = 1.0,
         };
     }
+
+    pub fn textInputStyle(self: Theme) TextInputStyle {
+        return .{
+            .bg = types.Color.rgb(18, 18, 22),
+            .bg_focus = types.Color.rgb(28, 28, 34),
+            .border = self.border,
+            .border_focus = self.accent,
+            .text = self.text,
+            .caret = self.accent,
+            .border_width = 1.0,
+        };
+    }
 };
 
 test "Theme defaults + derivados válidos" {
@@ -129,6 +156,7 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(dark.checkboxStyle().isValid());
     try stdt.testing.expect(dark.sliderStyle().isValid());
     try stdt.testing.expect(light.sliderStyle().isValid());
+    try stdt.testing.expect(dark.textInputStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,

@@ -65,6 +65,10 @@ pub const Context = struct {
     /// em `clearPressCapture` ou `deinit`. Widgets inativos devem ser
     /// sondados todo frame — captura órfã bloqueia outros widgets.
     press_owner: ?id_mod.Id = null,
+    /// Id com foco de teclado (M9, ex.: text-input). `null` = ninguém.
+    /// Click em widget focável assume o foco; `Escape` ou
+    /// `clearFocus` liberam. Retido entre frames como o mouse.
+    focus_owner: ?id_mod.Id = null,
 
     const Self = @This();
 
@@ -100,6 +104,7 @@ pub const Context = struct {
         self.mouse_pos = null;
         self.mouse_down_left = false;
         self.press_owner = null;
+        self.focus_owner = null;
     }
 
     /// Inicia um novo frame: limpa eventos/draw do frame anterior
@@ -148,6 +153,15 @@ pub const Context = struct {
     /// Libera captura de press órfã (ex.: widget sumiu, foco perdido).
     pub fn clearPressCapture(self: *Self) void {
         self.press_owner = null;
+    }
+
+    /// Libera o foco de teclado (ex.: click fora, troca de tela).
+    pub fn clearFocus(self: *Self) void {
+        self.focus_owner = null;
+    }
+
+    pub fn hasFocus(self: *const Self, id: id_mod.Id) bool {
+        return self.focus_owner == id;
     }
 
     pub fn pendingEvents(self: *const Self) []const event_mod.Event {
@@ -269,4 +283,9 @@ test "Context M7: mouse retido entre frames + captura" {
     ctx.press_owner = @import("id.zig").Id.fromString("x");
     ctx.clearPressCapture();
     try std.testing.expect(ctx.press_owner == null);
+    ctx.focus_owner = @import("id.zig").Id.fromString("y");
+    try std.testing.expect(ctx.hasFocus(@import("id.zig").Id.fromString("y")));
+    try std.testing.expect(!ctx.hasFocus(@import("id.zig").Id.fromString("z")));
+    ctx.clearFocus();
+    try std.testing.expect(ctx.focus_owner == null);
 }

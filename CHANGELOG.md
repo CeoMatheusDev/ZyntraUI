@@ -90,3 +90,14 @@ Pré-release instável: API pode mudar até a beta.
 - `c-abi`: `ZYNTRA_INVALID_TEXT=6`, `zyntra_draw_text` (cópia imediata, NULL válido com len 0).
 - Testes C (Zig + consumidor real) cobrindo cópia, UTF-8 inválido e nulos.
 - Compatibilidade: variante nova em `DrawCommand` (switches exaustivos externos precisam de braço `.text`); resto aditivo.
+
+### Adicionado — Milestone 9 (text-input com foco)
+- `core/context`: foco de teclado (`focus_owner`, `hasFocus`, `clearFocus`,
+  retido entre frames como o mouse).
+- `widgets/text_input`: buffer `[]u8` + `len` do chamador (zero alloc),
+  click foca, `.text` anexa (encode próprio), backspace multibyte-safe,
+  `Enter` submete, `Escape` desfoca, overflow sinalizado sem corromper.
+  Caret no fim; sem caret navegável/seleção/Tab (documentado, M10+).
+- `style/style`: `TextInputStyle` + `Theme.textInputStyle()`.
+- Desenho: caixa com destaque de foco + texto + caret.
+- Compatibilidade: `Context` +1 campo e +2 métodos (aditivo).

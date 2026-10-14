@@ -46,6 +46,7 @@ pub const widgets = struct {
     pub const checkbox = @import("widgets/checkbox.zig");
     pub const label = @import("widgets/label.zig");
     pub const slider = @import("widgets/slider.zig");
+    pub const text_input = @import("widgets/text_input.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -85,11 +86,13 @@ pub const Theme = style.style_mod.Theme;
 pub const ButtonStyle = style.style_mod.ButtonStyle;
 pub const CheckboxStyle = style.style_mod.CheckboxStyle;
 pub const SliderStyle = style.style_mod.SliderStyle;
+pub const TextInputStyle = style.style_mod.TextInputStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
 pub const LabelResult = widgets.label.LabelResult;
 pub const SliderResult = widgets.slider.SliderResult;
+pub const TextInputResult = widgets.text_input.TextInputResult;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -122,4 +125,5 @@ test {
     _ = @import("widgets/checkbox.zig");
     _ = @import("widgets/label.zig");
     _ = @import("widgets/slider.zig");
+    _ = @import("widgets/text_input.zig");
 }

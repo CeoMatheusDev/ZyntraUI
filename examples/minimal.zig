@@ -4,6 +4,7 @@ const button_mod = @import("zyntra_ui").widgets.button;
 const checkbox_mod = @import("zyntra_ui").widgets.checkbox;
 const label_mod = @import("zyntra_ui").widgets.label;
 const slider_mod = @import("zyntra_ui").widgets.slider;
+const text_input_mod = @import("zyntra_ui").widgets.text_input;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -19,6 +20,7 @@ pub fn main() !void {
     const btn_style = theme.buttonStyle();
     const chk_style = theme.checkboxStyle();
     const sld_style = theme.sliderStyle();
+    const ti_style = theme.textInputStyle();
     const font = zyntra_ui.FontMetrics.withSize(16);
     var checked = false;
     var volume: f32 = 30;
@@ -29,7 +31,10 @@ pub fn main() !void {
     const btn_rect = placer.next(.{ .w = 200, .h = 40 });
     const chk_rect = placer.next(.{ .w = chk_style.box_size, .h = chk_style.box_size });
     const sld_rect = placer.next(.{ .w = 240, .h = 30 });
+    const ti_rect = placer.next(.{ .w = 240, .h = 30 });
     const lbl_rect = placer.next(.{ .w = 300, .h = font.lineHeight() });
+    var name_buf: [32]u8 = undefined;
+    var name_len: usize = 0;
 
     // Frame 1: move + press no botão (captura, sem click ainda).
     ctx.beginFrame();
@@ -81,4 +86,16 @@ pub fn main() !void {
     const sld = try slider_mod.slider(&ctx, zyntra_ui.Id.fromString("examples/m8:sld"), sld_rect, &volume, 0, 100, sld_style);
     ctx.endFrame();
     std.debug.print("m8 slider value={d} dragging={}\n", .{ volume, sld.dragging });
+
+    // Frame 4: click no input + digita "Oi" + Enter.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(ti_rect.x + 5, ti_rect.y + 5) },
+    });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'O' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'i' } });
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    const ti = try text_input_mod.textInput(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, font, ti_style);
+    ctx.endFrame();
+    std.debug.print("m9 input text={s} submitted={}\n", .{ name_buf[0..name_len], ti.submitted });
 }
