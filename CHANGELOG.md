@@ -30,6 +30,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `style/style`: `SliderStyle` + `Theme.sliderStyle()` validados.
 - Exemplo com drag em 2 frames; resto aditivo.
 
+## [1.0.0-beta.1] - 2026-10-14
+
+Segunda pré-release: API estabilizando, 5 widgets interativos, CI verde em
+Debug+ReleaseFast. Ainda instável até a rc.
+
+### Removido
+- `widgets/input.MouseScan` (código morto desde a M7; `FrameMouse` cobre
+  todos os widgets; nunca foi re-exportado publicamente).
+
+### Compatibilidade
+- Remoção interna apenas; API pública intacta fora os acréscimos das M7–M9.
+
 ## [1.0.0-alpha.1] - 2026-10-14
 
 Primeiro pré-lançamento: núcleo validado de ponta a ponta em Zig 0.17.0,
