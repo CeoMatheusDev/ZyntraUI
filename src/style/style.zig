@@ -37,6 +37,25 @@ pub const CheckboxStyle = extern struct {
     }
 };
 
+/// Estilo de slider horizontal.
+pub const SliderStyle = extern struct {
+    track_height: f32 = 4,
+    track_bg: types.Color,
+    fill: types.Color,
+    handle_w: f32 = 12,
+    handle_h: f32 = 20,
+    handle_bg: types.Color,
+    border: types.Color,
+    border_width: f32 = 1.0,
+
+    pub fn isValid(self: SliderStyle) bool {
+        return std.math.isFinite(self.track_height) and self.track_height > 0 and
+            std.math.isFinite(self.handle_w) and self.handle_w > 0 and
+            std.math.isFinite(self.handle_h) and self.handle_h > 0 and
+            std.math.isFinite(self.border_width) and self.border_width >= 0;
+    }
+};
+
 /// Paleta mínima do tema.
 pub const Theme = extern struct {
     bg: types.Color,
@@ -86,6 +105,19 @@ pub const Theme = extern struct {
             .border_width = 1.0,
         };
     }
+
+    pub fn sliderStyle(self: Theme) SliderStyle {
+        return .{
+            .track_height = 4,
+            .track_bg = self.surface,
+            .fill = self.accent,
+            .handle_w = 12,
+            .handle_h = 20,
+            .handle_bg = types.Color.rgb(235, 235, 240),
+            .border = self.border,
+            .border_width = 1.0,
+        };
+    }
 };
 
 test "Theme defaults + derivados válidos" {
@@ -95,6 +127,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(dark.buttonStyle().isValid());
     try stdt.testing.expect(light.buttonStyle().isValid());
     try stdt.testing.expect(dark.checkboxStyle().isValid());
+    try stdt.testing.expect(dark.sliderStyle().isValid());
+    try stdt.testing.expect(light.sliderStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,

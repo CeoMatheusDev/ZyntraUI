@@ -3,6 +3,7 @@ const zyntra_ui = @import("zyntra_ui");
 const button_mod = @import("zyntra_ui").widgets.button;
 const checkbox_mod = @import("zyntra_ui").widgets.checkbox;
 const label_mod = @import("zyntra_ui").widgets.label;
+const slider_mod = @import("zyntra_ui").widgets.slider;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -17,14 +18,17 @@ pub fn main() !void {
     const theme = zyntra_ui.Theme.darkDefault();
     const btn_style = theme.buttonStyle();
     const chk_style = theme.checkboxStyle();
+    const sld_style = theme.sliderStyle();
     const font = zyntra_ui.FontMetrics.withSize(16);
     var checked = false;
+    var volume: f32 = 30;
     var null_backend = zyntra_ui.NullRenderer{};
 
     const content = zyntra_ui.EdgeInsets.all(16).apply(ctx.viewport);
     var placer = zyntra_ui.StackPlacer.init(content, .vertical, 12);
     const btn_rect = placer.next(.{ .w = 200, .h = 40 });
     const chk_rect = placer.next(.{ .w = chk_style.box_size, .h = chk_style.box_size });
+    const sld_rect = placer.next(.{ .w = 240, .h = 30 });
     const lbl_rect = placer.next(.{ .w = 300, .h = font.lineHeight() });
 
     // Frame 1: move + press no botão (captura, sem click ainda).
@@ -37,7 +41,7 @@ pub fn main() !void {
     std.debug.assert(btn1.pressed and !btn1.clicked);
     ctx.endFrame();
 
-    // Frame 2: release dentro (click) + label + submit ao backend.
+    // Frame 2: release dentro (click) + slider + label + submit.
     ctx.beginFrame();
     try ctx.pushEvent(.{
         .mouse_button = .{ .button = .left, .pressed = false, .pos = zyntra_ui.Vec2.init(30, 25) },
@@ -64,4 +68,17 @@ pub fn main() !void {
         stats.visible,
         stats.culled,
     });
+
+    // Frame 3: drag no slider (press + move com botão pressionado).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(sld_rect.x + 60, sld_rect.y + 15) },
+    });
+    _ = try slider_mod.slider(&ctx, zyntra_ui.Id.fromString("examples/m8:sld"), sld_rect, &volume, 0, 100, sld_style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = zyntra_ui.Vec2.init(sld_rect.x + 180, sld_rect.y + 15) } });
+    const sld = try slider_mod.slider(&ctx, zyntra_ui.Id.fromString("examples/m8:sld"), sld_rect, &volume, 0, 100, sld_style);
+    ctx.endFrame();
+    std.debug.print("m8 slider value={d} dragging={}\n", .{ volume, sld.dragging });
 }

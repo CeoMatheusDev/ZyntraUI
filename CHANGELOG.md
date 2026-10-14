@@ -22,6 +22,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - Compatibilidade: `Context` ganha 3 campos + 1 método (aditivo);
   **mudança de comportamento**: botão/checkbox ativam no release, não no press.
 
+### Adicionado — Milestone 8 (slider com drag)
+- `widgets/slider`: `slider(ctx,id,bounds,value,min,max,style)` — estado
+  `*f32` do chamador, press captura, valor segue o mouse X clampado
+  (drag continua fora da trilha), release encerra, `changed`/`dragging`.
+  Desenho em 4 comandos (trilha, preenchimento, handle, outline).
+- `style/style`: `SliderStyle` + `Theme.sliderStyle()` validados.
+- Exemplo com drag em 2 frames; resto aditivo.
+
 ## [1.0.0-alpha.1] - 2026-10-14
 
 Primeiro pré-lançamento: núcleo validado de ponta a ponta em Zig 0.17.0,
