@@ -55,6 +55,10 @@ pub fn commandBounds(cmd: commands.DrawCommand) ?types.Rect {
             if (c.null_rect) return null;
             return c.rect;
         },
+        .text => |c| {
+            // Bounds fallback (largura medida no push, altura ~= size).
+            return .{ .x = c.pos.x, .y = c.pos.y, .w = c.width, .h = c.size };
+        },
     }
 }
 
@@ -151,4 +155,33 @@ test "NullRenderer valida e acumula" {
         .{ .rect_filled = .{ .rect = types.Rect.init(0, 0, -5, 5), .color = types.Color.rgb(0, 0, 0) } },
     };
     try stdt.testing.expectError(error.InvalidCommand, r.submit(&bad, vp));
+}
+
+test "cull usa bounds de texto" {
+    const stdt = @import("std");
+    const vp = types.Rect.init(0, 0, 100, 100);
+    const inside = [_]commands.DrawCommand{
+        .{ .text = .{
+            .pos = types.Vec2.init(10, 10),
+            .color = types.Color.rgb(255, 255, 255),
+            .size = 16,
+            .width = 50,
+            .start = 0,
+            .len = 0,
+        } },
+    };
+    try stdt.testing.expectEqual(@as(u32, 1), cull(&inside, vp).visible);
+    const outside = [_]commands.DrawCommand{
+        .{ .text = .{
+            .pos = types.Vec2.init(500, 500),
+            .color = types.Color.rgb(255, 255, 255),
+            .size = 16,
+            .width = 50,
+            .start = 0,
+            .len = 0,
+        } },
+    };
+    const s = cull(&outside, vp);
+    try stdt.testing.expectEqual(@as(u32, 0), s.visible);
+    try stdt.testing.expectEqual(@as(u32, 1), s.culled);
 }

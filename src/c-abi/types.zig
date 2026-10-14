@@ -17,6 +17,8 @@ pub const ZyntraResult = enum(c_int) {
     invalid_event = 3,
     invalid_command = 4,
     invalid_state = 5,
+    /// Texto malformado (UTF-8 inválido em text-runs).
+    invalid_text = 6,
 };
 
 pub const ZyntraVec2 = extern struct {

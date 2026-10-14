@@ -1,12 +1,14 @@
 //! ZyntraUI — rótulo de texto (widgets/label).
 //!
-//! Modelo M4 (honesto sobre a fronteira de rasterização):
-//! - Mede o texto com `text/metrics` (fallback monospace) e valida
-//!   UTF-8; a rasterização real de glifos pertence ao backend externo.
-//! - Em modo normal emite **zero** comandos (apenas mede). Com
-//!   `debug_draw=true` emite 1 outline dos `bounds` para depurar layout.
-//! Ownership: `text` é emprestado do chamador, válido só na chamada;
-//! nada é retido. `id` não-nulo obrigatório (futura resolução de runs).
+//! Modelo M6:
+//! - Mede o texto (fallback monospace) e emite 1 comando `.text` com os
+//!   bytes copiados para a arena da `DrawList` (sem dangling — ver
+//!   `draw/commands.pushText`). A rasterização de glifos pertence ao
+//!   backend externo, que resolve os bytes via `DrawList.textOf`.
+//! - Com `debug_draw=true` emite ainda 1 outline dos `bounds`.
+//! Ownership: `text` é emprestado só durante a chamada; a lista retém
+//! uma cópia até o próximo `beginFrame`/`deinit`.
+//! `id` não-nulo obrigatório.
 
 const std = @import("std");
 const types = @import("../core/types.zig");
@@ -46,6 +48,18 @@ pub fn label(
         .metrics = m,
         .truncated = bounds.w > 0 and m.width > bounds.w,
     };
+    ctx.draw.pushText(
+        ctx.allocator,
+        .{ .x = bounds.x, .y = bounds.y },
+        color,
+        font,
+        text,
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidCommand => return error.InvalidCommand,
+        error.InvalidUtf8 => return error.InvalidUtf8,
+        error.InvalidMetrics => return error.InvalidArgument,
+    };
     if (debug_draw) {
         ctx.draw.rectOutline(ctx.allocator, bounds, color, 1.0) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
@@ -55,7 +69,7 @@ pub fn label(
     return res;
 }
 
-test "label mede, detecta truncate e debug desenha" {
+test "label emite texto, detecta truncate e debug desenha" {
     const stdt = @import("std");
     const gpa = stdt.testing.allocator;
     var ctx = try context_mod.Context.init(gpa, .{});
@@ -67,13 +81,14 @@ test "label mede, detecta truncate e debug desenha" {
     const r = try label(&ctx, id, types.Rect.init(0, 0, 100, 20), "AB", types.Color.rgb(255, 255, 255), font, false);
     try stdt.testing.expectEqual(@as(f32, 12), r.metrics.width);
     try stdt.testing.expect(!r.truncated);
-    try stdt.testing.expectEqual(@as(usize, 0), ctx.drawCommands().len);
+    try stdt.testing.expectEqual(@as(usize, 1), ctx.drawCommands().len);
+    try stdt.testing.expectEqualStrings("AB", ctx.draw.textOf(ctx.drawCommands()[0]));
     ctx.endFrame();
 
     ctx.beginFrame();
     const r2 = try label(&ctx, id, types.Rect.init(0, 0, 5, 20), "AB", types.Color.rgb(255, 255, 255), font, true);
     try stdt.testing.expect(r2.truncated);
-    try stdt.testing.expectEqual(@as(usize, 1), ctx.drawCommands().len);
+    try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len);
     ctx.endFrame();
 
     ctx.beginFrame();

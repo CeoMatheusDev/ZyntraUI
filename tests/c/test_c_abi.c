@@ -1,9 +1,10 @@
-/* Consumidor C real da ZyntraUI via C-ABI (teste de integração M5).
+/* Consumidor C real da ZyntraUI via C-ABI (teste de integração M5/M6).
  * Compilar: zig cc tests/c/test_c_abi.c -Lzig-out/lib -lzyntra_ui -o /tmp/zyntra-c-test
  * (ou contra a lib estática direta). Retorna 0 em sucesso.
  */
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 #include "zyntra.h"
 
 #define CHECK(expr) do { \
@@ -58,6 +59,25 @@ int main(void) {
     CHECK(zyntra_draw_count(ctx, &draws));
     assert(events == 2);
     assert(draws == 1);
+
+    /* Text-run: cópia imediata (buffer local pode morrer após o retorno). */
+    {
+        char buf[8];
+        memcpy(buf, "Hi", 3);
+        ZyntraVec2 tp = {1, 2};
+        ZyntraColor white = {255, 255, 255, 255};
+        CHECK(zyntra_draw_text(ctx, tp, white, 16.0f, buf, 2));
+        memset(buf, 'X', sizeof buf); /* prova que houve cópia */
+        CHECK(zyntra_draw_count(ctx, &draws));
+        assert(draws == 2);
+        /* UTF-8 malformado, size inválido, ptr nulo com len. */
+        assert(zyntra_draw_text(ctx, tp, white, 16.0f, "\xff", 1) == ZYNTRA_INVALID_TEXT);
+        assert(zyntra_draw_text(ctx, tp, white, 0.0f, "Hi", 2) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_draw_text(ctx, tp, white, 16.0f, NULL, 3) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_draw_text(ctx, tp, white, 16.0f, NULL, 0) == ZYNTRA_OK);
+        CHECK(zyntra_draw_count(ctx, &draws));
+        assert(draws == 3);
+    }
 
     CHECK(zyntra_context_end_frame(ctx));
     assert(zyntra_context_end_frame(ctx) == ZYNTRA_INVALID_STATE);

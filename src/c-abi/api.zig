@@ -19,6 +19,7 @@ const std = @import("std");
 const context_mod = @import("../core/context.zig");
 const types_mod = @import("../core/types.zig");
 const event_mod = @import("../event/event.zig");
+const metrics_mod = @import("../text/metrics.zig");
 const ct = @import("types.zig");
 
 /// Handle opaco. O layout real (`Context`) nunca é exposto.
@@ -179,6 +180,39 @@ pub export fn zyntra_draw_count(handle: ?*ZyntraContext, out_len: ?*usize) callc
     return .ok;
 }
 
+/// Enfileira texto UTF-8 com CÓPIA para a arena da DrawList: o chamador
+/// pode liberar/reutilizar `utf8` logo após o retorno. `utf8_len == 0`
+/// emite um run vazio válido (requer ponteiro qualquer, inclusive NULL).
+/// `size` usa métricas fallback (`withSize`); backends com shaping
+/// próprio medem de novo.
+pub export fn zyntra_draw_text(
+    handle: ?*ZyntraContext,
+    pos: ct.ZyntraVec2,
+    color: ct.ZyntraColor,
+    size: f32,
+    utf8: ?[*]const u8,
+    utf8_len: usize,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    if (utf8_len > 0 and utf8 == null) return .invalid_argument;
+    const bytes: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
+    const ctx = toCtx(h);
+    ctx.draw.pushText(
+        ctx.allocator,
+        .{ .x = pos.x, .y = pos.y },
+        .{ .r = color.r, .g = color.g, .b = color.b, .a = color.a },
+        metrics_mod.FontMetrics.withSize(size),
+        bytes,
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return .out_of_memory,
+        error.InvalidCommand => return .invalid_command,
+        error.InvalidUtf8 => return .invalid_text,
+        error.InvalidMetrics => return .invalid_argument,
+    };
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -225,4 +259,47 @@ test "C-ABI ciclo completo via símbolos exportados" {
     try stdt.testing.expectEqual(ct.ZyntraResult.invalid_argument, zyntra_context_create(.{}, null));
     try stdt.testing.expectEqual(ct.ZyntraResult.invalid_argument, zyntra_context_frame_index(handle, null));
     zyntra_context_destroy(null); // null-safe
+}
+
+test "C-ABI draw_text copia, valida e conta" {
+    const stdt = @import("std");
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_context_create(.{ .x = 0, .y = 0, .w = 800, .h = 600 }, &handle),
+    );
+    defer zyntra_context_destroy(handle);
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_begin_frame(handle));
+
+    const hello = "Hi";
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_draw_text(handle, .{ .x = 1, .y = 2 }, .{ .r = 255 }, 16, hello.ptr, hello.len),
+    );
+    // Run vazio com NULL é válido:
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_draw_text(handle, .{ .x = 0, .y = 0 }, .{}, 16, null, 0),
+    );
+    // UTF-8 malformado, size inválido e ptr nulo com len:
+    const bad = "\xff";
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_text,
+        zyntra_draw_text(handle, .{ .x = 0, .y = 0 }, .{}, 16, bad.ptr, bad.len),
+    );
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_argument,
+        zyntra_draw_text(handle, .{ .x = 0, .y = 0 }, .{}, 0, hello.ptr, hello.len),
+    );
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_argument,
+        zyntra_draw_text(handle, .{ .x = 0, .y = 0 }, .{}, 16, null, 3),
+    );
+    var n_draw: usize = 99;
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expectEqual(@as(usize, 2), n_draw);
+    // Bytes copiados: sobrevivem ao buffer original.
+    const cmds = toCtx(handle.?).drawCommands();
+    try stdt.testing.expectEqualStrings("Hi", toCtx(handle.?).draw.textOf(cmds[0]));
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_end_frame(handle));
 }

@@ -40,11 +40,15 @@ Toda função retorna `ZyntraResult` (`0 == ZYNTRA_OK`):
 | `ZYNTRA_INVALID_EVENT` | evento rejeitado na validação |
 | `ZYNTRA_INVALID_COMMAND` | comando de desenho inválido (ex.: largura negativa) |
 | `ZYNTRA_INVALID_STATE` | `begin` com frame ativo / `end` sem frame ativo |
+| `ZYNTRA_INVALID_TEXT` | UTF-8 malformado em `zyntra_draw_text` |
 
 ## Strings, buffers, callbacks
 
-* M5: não há strings/buffers/callbacks na fronteira (text-runs em M6).
-* Botões de mouse: `0=left`, `1=right`, `2=middle`; outros → `INVALID_ARGUMENT`.
+* M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
+  bytes para a arena da `DrawList` — o chamador pode liberar o buffer logo
+  após o retorno. UTF-8 malformado retorna `ZYNTRA_INVALID_TEXT`.
+  `utf8_len == 0` aceita ponteiro NULL (run vazio válido).
+* Sem callbacks na fronteira. Demais strings/buffers: fora de escopo.
 
 ## Compatibilidade ABI
 

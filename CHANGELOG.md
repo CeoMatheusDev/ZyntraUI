@@ -47,3 +47,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   isso o Zig 0.17.0 nem analisa `api.zig` na lib estática e os símbolos C
   somem do `.a` (comportamento verificado por experimento).
 - Compatibilidade Zig: só adições (`c_abi` + 3 re-exportações).
+
+### Adicionado — Milestone 6 (text-runs + texto na fronteira C)
+- `draw/commands`: variante `.text` (`pos/color/size/width/start/len` em `extern struct`), arena `text_bytes` com offsets `u32` (estáveis sob realocação), `pushText` (copia + valida UTF-8 no push), `textOf` defensivo. `DrawList` continua sem expor layout (handle opaco no C).
+- `draw/renderer`: `commandBounds` para texto (largura medida + altura ~= size).
+- `widgets/label`: agora emite 1 comando `.text` (era 0 draws; +1 outline com debug).
+- `c-abi`: `ZYNTRA_INVALID_TEXT=6`, `zyntra_draw_text` (cópia imediata, NULL válido com len 0).
+- Testes C (Zig + consumidor real) cobrindo cópia, UTF-8 inválido e nulos.
+- Compatibilidade: variante nova em `DrawCommand` (switches exaustivos externos precisam de braço `.text`); resto aditivo.

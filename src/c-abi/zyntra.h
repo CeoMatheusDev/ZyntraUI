@@ -21,7 +21,8 @@ typedef enum ZyntraResult {
     ZYNTRA_OUT_OF_MEMORY = 2,
     ZYNTRA_INVALID_EVENT = 3,
     ZYNTRA_INVALID_COMMAND = 4,
-    ZYNTRA_INVALID_STATE = 5
+    ZYNTRA_INVALID_STATE = 5,
+    ZYNTRA_INVALID_TEXT = 6
 } ZyntraResult;
 
 typedef struct ZyntraVec2 {
@@ -66,6 +67,8 @@ ZyntraResult zyntra_context_push_quit(ZyntraContext *handle);
 ZyntraResult zyntra_context_pending_events(ZyntraContext *handle, size_t *out_len);
 ZyntraResult zyntra_draw_rect_filled(ZyntraContext *handle, ZyntraRect rect, ZyntraColor color);
 ZyntraResult zyntra_draw_count(ZyntraContext *handle, size_t *out_len);
+ZyntraResult zyntra_draw_text(ZyntraContext *handle, ZyntraVec2 pos, ZyntraColor color,
+    float size, const char *utf8, size_t utf8_len);
 
 #ifdef __cplusplus
 }
