@@ -36,3 +36,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `widgets/label`: mede sem emitir draws (rasterização é do backend); `debug_draw` emite 1 outline; detecta `truncated` vs `bounds`.
 - Exemplo M4: label medido + `NullRenderer.submit` com stats + frame de culling.
 - Compatibilidade: só adições; `DrawCommand` inalterado (sem nova variante).
+
+### Adicionado — Milestone 5 (C-ABI + consumidor C)
+- `c-abi/types`: `ZyntraResult` (`c_int`, 0=ok), `ZyntraVec2/Size/Rect/Color` (`extern`, tamanhos travados por `@compileError`).
+- `c-abi/api`: handle opaco `ZyntraContext*` (ownership: `create` aloca no `page_allocator` interno, `destroy` exatamente uma vez, null-safe), `export ... callconv(.c)` para versão, ciclo de frame, viewport, eventos (mouse_move/button/quit), draws e contagens. Nulos nunca crasham; sem slices/strings na fronteira.
+- `c-abi/zyntra.h`: header C espelhado com `_Static_assert` de ABI.
+- `tests/c/test_c_abi.c`: consumidor C real (integração validada via `zig cc` + lib estática).
+- `docs/C_ABI.md`: ownership, erros, handles, compatibilidade e comando de teste.
+- Build: `src/root.zig` referencia `c_abi.api` em bloco `comptime` — sem
+  isso o Zig 0.17.0 nem analisa `api.zig` na lib estática e os símbolos C
+  somem do `.a` (comportamento verificado por experimento).
+- Compatibilidade Zig: só adições (`c_abi` + 3 re-exportações).

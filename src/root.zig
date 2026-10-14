@@ -28,6 +28,11 @@ pub const text = struct {
     pub const metrics = @import("text/metrics.zig");
 };
 
+pub const c_abi = struct {
+    pub const types = @import("c-abi/types.zig");
+    pub const api = @import("c-abi/api.zig");
+};
+
 pub const layout = struct {
     pub const layout_mod = @import("layout/layout.zig");
 };
@@ -67,6 +72,9 @@ pub const Backend = draw.renderer.Backend;
 pub const FontMetrics = text.metrics.FontMetrics;
 pub const TextMetrics = text.metrics.TextMetrics;
 
+pub const ZyntraResult = c_abi.types.ZyntraResult;
+pub const ZyntraRect = c_abi.types.ZyntraRect;
+pub const ZyntraColor = c_abi.types.ZyntraColor;
 pub const Constraints = layout.layout_mod.Constraints;
 pub const EdgeInsets = layout.layout_mod.EdgeInsets;
 pub const StackPlacer = layout.layout_mod.StackPlacer;
@@ -84,6 +92,14 @@ pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
 pub const version_patch = core.types.version_patch;
 
+// NOTA (verificado em Zig 0.17.0): arquivos importados mas não
+// referenciados sequer são analisados no build da lib, e `export fn`
+// deles não é emitido. Esta referência força a análise de
+// c-abi/api.zig para que seus símbolos C entrem na lib estática.
+comptime {
+    _ = c_abi.api;
+}
+
 test {
     // Garante que os blocos `test` dos submódulos executem via `zig build test`.
     _ = @import("core/types.zig");
@@ -95,6 +111,8 @@ test {
     _ = @import("style/style.zig");
     _ = @import("text/metrics.zig");
     _ = @import("draw/renderer.zig");
+    _ = @import("c-abi/types.zig");
+    _ = @import("c-abi/api.zig");
     _ = @import("widgets/input.zig");
     _ = @import("widgets/button.zig");
     _ = @import("widgets/checkbox.zig");
