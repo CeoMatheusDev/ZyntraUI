@@ -1,16 +1,16 @@
 //! ZyntraUI — campo de texto (widgets/text_input).
 //!
-//! Modelo M9 (foco + buffer do chamador, caret no fim):
-//! - `buffer`/`len`: buffer UTF-8 de tamanho fixo do CHAMADOR (zero
-//!   alocação na lib); `len.*` = bytes usados (0..buffer.len).
+//! Modelo M10 (foco + buffer do chamador, caret navegável):
+//! - `buffer`/`len`/`cursor`: buffer UTF-8 de tamanho fixo do CHAMADOR
+//!   (zero alocação na lib); `len.*` = bytes usados, `cursor.*` = offset
+//!   de byte do caret (sempre fronteira UTF-8, 0..len).
 //! - Click dentro assume o foco (`focus_owner`); `Escape` ou
 //!   `clearFocus` liberam. Só o focado consome `.text`/teclas.
-//! - `.text` anexa o codepoint (codificado aqui); backspace (`.key`,
-//!   só `pressed`) remove o último codepoint (multibyte-safe).
-//! - Buffer cheio: descarta o excedente com `overflowed=true` (sem
-//!   truncar no meio de codepoint). `Enter` → `submitted=true`.
-//! - Limitações documentadas: sem caret navegável (sempre no fim),
-//!   sem seleção, sem Tab-navigation (M10+).
+//! - `.text` insere no cursor (memmove do sufixo); setas movem por
+//!   codepoint; `Home`/`End` saltam; backspace apaga antes, `Delete`
+//!   apaga no cursor. Buffer cheio: descarta com `overflowed=true`.
+//!   `Enter` → `submitted=true`.
+//! - Limitações documentadas: sem seleção, sem Tab-navigation (M11+).
 //! Desenho: caixa (destaque quando focado) + texto + caret fina no fim
 //! quando focado. `id` não-nulo obrigatório.
 
@@ -72,13 +72,14 @@ pub fn textInput(
     bounds: types.Rect,
     buffer: []u8,
     len: *usize,
+    cursor: *usize,
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextInputResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
-    if (len.* > buffer.len) return error.InvalidArgument;
+    if (len.* > buffer.len or cursor.* > len.*) return error.InvalidArgument;
 
     var res = TextInputResult{ .len = len.* };
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
@@ -97,7 +98,10 @@ pub fn textInput(
                     var enc: [4]u8 = undefined;
                     const n = encodeUtf8(t.codepoint, &enc) catch continue; // defensivo; fila já valida
                     if (len.* + n <= buffer.len) {
-                        @memcpy(buffer[len.*..][0..n], enc[0..n]);
+                        // Insere no cursor (desloca o sufixo para a direita).
+                        std.mem.copyBackwards(u8, buffer[cursor.* + n .. len.* + n], buffer[cursor.*..len.*]);
+                        @memcpy(buffer[cursor.*..][0..n], enc[0..n]);
+                        cursor.* += n;
                         len.* += n;
                         res.changed = true;
                     } else {
@@ -108,10 +112,38 @@ pub fn textInput(
                     if (!k.pressed) continue;
                     switch (k.key) {
                         .backspace => {
-                            const before = len.*;
-                            len.* = popCodepoint(buffer, len.*);
-                            if (len.* != before) res.changed = true;
+                            if (cursor.* > 0) {
+                                const at = popCodepoint(buffer, cursor.*);
+                                const n = cursor.* - at;
+                                std.mem.copyForwards(u8, buffer[at .. len.* - n], buffer[cursor.*..len.*]);
+                                cursor.* = at;
+                                len.* -= n;
+                                res.changed = true;
+                            }
                         },
+                        .delete => {
+                            if (cursor.* < len.*) {
+                                const d = metrics_mod.decodeOne(buffer[cursor.*..len.*]) catch {
+                                    return error.InvalidArgument; // buffer do chamador corrompido
+                                };
+                                std.mem.copyForwards(u8, buffer[cursor.* .. len.* - d.len], buffer[cursor.* + d.len .. len.*]);
+                                len.* -= d.len;
+                                res.changed = true;
+                            }
+                        },
+                        .left => {
+                            if (cursor.* > 0) cursor.* = popCodepoint(buffer, cursor.*);
+                        },
+                        .right => {
+                            if (cursor.* < len.*) {
+                                const d = metrics_mod.decodeOne(buffer[cursor.*..len.*]) catch {
+                                    return error.InvalidArgument;
+                                };
+                                cursor.* += d.len;
+                            }
+                        },
+                        .home => cursor.* = 0,
+                        .end => cursor.* = len.*,
                         .enter => res.submitted = true,
                         .escape => {
                             ctx.focus_owner = null;
@@ -152,8 +184,8 @@ pub fn textInput(
         };
     }
     if (res.focused) {
-        // Caret no fim (largura medida + padding).
-        const m = metrics_mod.measure(buffer[0..len.*], font) catch {
+        // Caret na posição do cursor (mede o prefixo + padding).
+        const m = metrics_mod.measure(buffer[0..cursor.*], font) catch {
             return error.InvalidArgument;
         };
         const cx = bounds.x + 4 + m.width;
@@ -186,11 +218,12 @@ test "text_input foco, digita, backspace multibyte, submit, escape" {
     const id = id_mod.Id.fromString("test:ti");
     var buf: [16]u8 = undefined;
     var len: usize = 0;
+    var cursor: usize = 0;
 
     // Sem foco: teclas ignoradas, 2 draws (caixa).
     ctx.beginFrame();
     try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
-    const r0 = try textInput(&ctx, id, bounds, &buf, &len, font, style);
+    const r0 = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
     try stdt.testing.expect(!r0.focused and !r0.changed);
     try stdt.testing.expectEqual(@as(usize, 0), len);
     try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len);
@@ -203,7 +236,7 @@ test "text_input foco, digita, backspace multibyte, submit, escape" {
     });
     try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
     try ctx.pushEvent(.{ .text = .{ .codepoint = 0x20AC } });
-    const r1 = try textInput(&ctx, id, bounds, &buf, &len, font, style);
+    const r1 = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
     try stdt.testing.expect(r1.focused and r1.changed);
     try stdt.testing.expectEqual(@as(usize, 4), len);
     try stdt.testing.expectEqualStrings("A€", buf[0..len]);
@@ -212,14 +245,14 @@ test "text_input foco, digita, backspace multibyte, submit, escape" {
     // Backspace remove o codepoint inteiro (€ = 3 bytes).
     ctx.beginFrame();
     try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{} } });
-    const r2 = try textInput(&ctx, id, bounds, &buf, &len, font, style);
+    const r2 = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
     try stdt.testing.expect(r2.changed);
     try stdt.testing.expectEqualStrings("A", buf[0..len]);
     // Backspace solto (pressed=false) não repete.
     ctx.endFrame();
     ctx.beginFrame();
     try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = false, .modifiers = .{} } });
-    const r2b = try textInput(&ctx, id, bounds, &buf, &len, font, style);
+    const r2b = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
     try stdt.testing.expect(!r2b.changed);
     try stdt.testing.expectEqualStrings("A", buf[0..len]);
     ctx.endFrame();
@@ -227,12 +260,12 @@ test "text_input foco, digita, backspace multibyte, submit, escape" {
     // Enter submete; Escape desfoca.
     ctx.beginFrame();
     try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
-    const r3 = try textInput(&ctx, id, bounds, &buf, &len, font, style);
+    const r3 = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
     try stdt.testing.expect(r3.submitted and r3.focused);
     ctx.endFrame();
     ctx.beginFrame();
     try ctx.pushEvent(.{ .key = .{ .key = .escape, .pressed = true, .modifiers = .{} } });
-    const r4 = try textInput(&ctx, id, bounds, &buf, &len, font, style);
+    const r4 = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
     try stdt.testing.expect(!r4.focused);
     try stdt.testing.expect(ctx.focus_owner == null);
     ctx.endFrame();
@@ -240,20 +273,96 @@ test "text_input foco, digita, backspace multibyte, submit, escape" {
     // Buffer cheio: descarta sem corromper, sinaliza overflow.
     var tiny: [1]u8 = undefined;
     var tlen: usize = 0;
+    var tcursor: usize = 0;
     ctx.beginFrame();
     try ctx.pushEvent(.{
         .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
     });
     try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
     try ctx.pushEvent(.{ .text = .{ .codepoint = 'B' } });
-    const r5 = try textInput(&ctx, id, bounds, &tiny, &tlen, font, style);
+    const r5 = try textInput(&ctx, id, bounds, &tiny, &tlen, &tcursor, font, style);
     try stdt.testing.expect(r5.overflowed);
     try stdt.testing.expectEqualStrings("A", tiny[0..tlen]);
     ctx.endFrame();
 
     ctx.beginFrame();
-    try stdt.testing.expectError(error.InvalidArgument, textInput(&ctx, .null, bounds, &buf, &len, font, style));
+    try stdt.testing.expectError(error.InvalidArgument, textInput(&ctx, .null, bounds, &buf, &len, &cursor, font, style));
     var badlen: usize = 99;
-    try stdt.testing.expectError(error.InvalidArgument, textInput(&ctx, id, bounds, &buf, &badlen, font, style));
+    try stdt.testing.expectError(error.InvalidArgument, textInput(&ctx, id, bounds, &buf, &badlen, &cursor, font, style));
+    var badcur: usize = 50;
+    var oklen: usize = 1;
+    try stdt.testing.expectError(error.InvalidArgument, textInput(&ctx, id, bounds, &buf, &oklen, &badcur, font, style));
+    ctx.endFrame();
+}
+
+test "text_input caret navega, insere no meio e deleta" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-nav");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+
+    // Foca e digita "AC" (cursor acompanha o fim).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'C' } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expectEqualStrings("AC", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    ctx.endFrame();
+
+    // Left + "B" insere no meio: "ABC".
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'B' } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expectEqualStrings("ABC", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    ctx.endFrame();
+
+    // Left no início não sai de 0; right avança por codepoint.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expectEqual(@as(usize, 0), cursor);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expectEqual(@as(usize, 3), cursor);
+    ctx.endFrame();
+
+    // Delete no meio remove "B": "AC". Backspace no início é no-op.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expectEqual(@as(usize, 1), cursor);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .delete, .pressed = true, .modifiers = .{} } });
+    const rd = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expect(rd.changed);
+    try stdt.testing.expectEqualStrings("AC", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 1), cursor);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{} } });
+    const rb = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expect(!rb.changed);
+    try stdt.testing.expectEqualStrings("AC", buf[0..len]);
     ctx.endFrame();
 }

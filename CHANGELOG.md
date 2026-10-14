@@ -113,3 +113,12 @@ Pré-release instável: API pode mudar até a beta.
 - `style/style`: `TextInputStyle` + `Theme.textInputStyle()`.
 - Desenho: caixa com destaque de foco + texto + caret.
 - Compatibilidade: `Context` +1 campo e +2 métodos (aditivo).
+
+### Alterado — Milestone 10 (caret navegável; quebra em beta)
+- `widgets/text_input`: novo parâmetro `cursor: *usize` (offset de byte,
+  sempre fronteira UTF-8); setas movem por codepoint, `Home`/`End` saltam,
+  digitação insere no cursor (memmove), backspace/`Delete` apagam ao redor
+  do cursor. Caret desenhada na posição do cursor.
+- `event/event`: `Key` ganha `delete`, `home`, `end` (enum já tinha `_`).
+- Quebra intencional de pré-release: assinatura de `textInput` mudou
+  (chamadas antigas não compilam — migração: adicionar `&cursor`).

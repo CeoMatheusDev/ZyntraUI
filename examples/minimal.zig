@@ -88,6 +88,7 @@ pub fn main() !void {
     std.debug.print("m8 slider value={d} dragging={}\n", .{ volume, sld.dragging });
 
     // Frame 4: click no input + digita "Oi" + Enter.
+    var name_cursor: usize = 0;
     ctx.beginFrame();
     try ctx.pushEvent(.{
         .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(ti_rect.x + 5, ti_rect.y + 5) },
@@ -95,7 +96,15 @@ pub fn main() !void {
     try ctx.pushEvent(.{ .text = .{ .codepoint = 'O' } });
     try ctx.pushEvent(.{ .text = .{ .codepoint = 'i' } });
     try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
-    const ti = try text_input_mod.textInput(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, font, ti_style);
+    const ti = try text_input_mod.textInput(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, font, ti_style);
     ctx.endFrame();
     std.debug.print("m9 input text={s} submitted={}\n", .{ name_buf[0..name_len], ti.submitted });
+
+    // Frame 5: seta esquerda + "!" insere no meio: "O!i".
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = '!' } });
+    _ = try text_input_mod.textInput(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, font, ti_style);
+    ctx.endFrame();
+    std.debug.print("m10 input text={s} cursor={d}\n", .{ name_buf[0..name_len], name_cursor });
 }

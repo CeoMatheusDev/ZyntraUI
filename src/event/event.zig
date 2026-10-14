@@ -37,6 +37,9 @@ pub const Key = enum(u32) {
     v = 12,
     x = 13,
     z = 14,
+    delete = 15,
+    home = 16,
+    end = 17,
     _,
 };
 
