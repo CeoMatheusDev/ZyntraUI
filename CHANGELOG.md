@@ -501,3 +501,9 @@ Pré-release instável: API pode mudar até a beta.
   (`mouse_move`, `mouse_button`, `pos` do wheel); NaN envenenaria
   `mouse_pos` retido e cálculos (ex.: drag). Lixo externo vira
   `InvalidEvent`, nunca estado.
+
+### Adicionado — Milestone 50 (fuzz nos eventos, compatível)
+- `event/event`: fuzz com bits arbitrários (contrato da M49 sob
+  ataque: sem crash nunca, `push` aceita sse `isValid`, finito
+  <=> válido nos 3 eventos de mouse).
+- Sem mudança de comportamento; resto aditivo (acumula p/ MINOR).

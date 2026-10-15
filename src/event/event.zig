@@ -184,3 +184,47 @@ test "EventQueue push/clear retém capacidade" {
         .text = .{ .codepoint = 0x110000 },
     }));
 }
+
+test "fuzz event: isValid sem crash, push coerente" {
+    try std.testing.fuzz({}, fuzzEvent, .{});
+}
+
+fn fuzzEvent(_: void, smith: *std.testing.Smith) !void {
+    var fb: [24]u8 = undefined;
+    smith.bytes(&fb);
+    const bits: [6]f32 = @bitCast(fb);
+    const gpa = std.testing.allocator;
+
+    // Candidatos com bits arbitrários (podem ser NaN/Inf).
+    const move: Event = .{ .mouse_move = .{ .pos = types.Vec2.init(bits[0], bits[1]) } };
+    const button: Event = .{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(bits[2], bits[3]) },
+    };
+    const wheel: Event = .{
+        .mouse_wheel = .{ .dx = bits[0], .dy = bits[1], .pos = types.Vec2.init(bits[4], bits[5]) },
+    };
+    const text: Event = .{ .text = .{ .codepoint = std.mem.readInt(u32, fb[4..8], .little) } };
+
+    // Sem crash nunca; push só aceita o válido (lixo vira InvalidEvent,
+    // nunca estado — contrato da M49).
+    var q = EventQueue.initEmpty();
+    defer q.deinit(gpa);
+    const cands = [_]Event{ move, button, wheel, text, .quit };
+    const ev = cands[fb[0] % cands.len];
+    if (ev.isValid()) {
+        try q.push(gpa, ev);
+        try std.testing.expectEqual(@as(usize, 1), q.len());
+    } else {
+        try std.testing.expectError(error.InvalidEvent, q.push(gpa, ev));
+        try std.testing.expectEqual(@as(usize, 0), q.len());
+    }
+
+    // Coerência direta: finito <=> válido nos eventos de mouse.
+    try std.testing.expect(move.isValid() ==
+        (std.math.isFinite(bits[0]) and std.math.isFinite(bits[1])));
+    try std.testing.expect(button.isValid() ==
+        (std.math.isFinite(bits[2]) and std.math.isFinite(bits[3])));
+    try std.testing.expect(wheel.isValid() ==
+        (std.math.isFinite(bits[0]) and std.math.isFinite(bits[1]) and
+            std.math.isFinite(bits[4]) and std.math.isFinite(bits[5])));
+}
