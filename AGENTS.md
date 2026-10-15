@@ -30,7 +30,15 @@ reescrever histórico. Preservar tags e releases publicadas.
 
 ## Versionamento (SemVer 2.0.0)
 
-- Commit + push NÃO é release. Sem bump por commit; sem release automática.
+- Commit + push NÃO é release. Sem bump por commit.
 - Registrar impacto em `## [Não lançado]` do CHANGELOG.md.
-- Release só com batch pronto e aprovado: prep commit → tag `vX.Y.Z` →
-  push da tag → `gh release create` (`--prerelease` para alpha/beta/rc).
+- Releases PATCH/MINOR automáticas quando TODOS os critérios atendidos:
+  batch coerente com valor real, contratos maduros, validação completa
+  (testes, integração C, exemplos, fmt, CI verde no commit atual),
+  changelog correto, sem bloqueio conhecido, motivo concreto para
+  publicar agora (nunca por contagem de commits ou CI verde isolado).
+- Procedimento: prep commit (versão+changelog+README) → push → CI verde
+  → tag `vX.Y.Z` → push tag → `gh release create` (`--prerelease` só
+  para alpha/beta/rc). Interromper se qualquer etapa falhar.
+- MAJOR/incompatibilidades: SOMENTE com aprovação explícita. Nunca
+  publicar MAJOR automaticamente nem para justificá-la.
