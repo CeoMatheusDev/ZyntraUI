@@ -346,3 +346,9 @@ Pré-release instável: API pode mudar até a beta.
   sondado com modal aberto; sem flag global, sem invasão).
 - `style/style`: `ModalStyle` + `Theme.modalStyle()`.
 - Exemplo bloqueia botão e dispensa com Escape; resto aditivo (1.9.0).
+
+### Adicionado — Milestone 29 (teclado em button/checkbox, compatível)
+- `widgets/button`: focável (click foca, Tab circula); Espaço/Enter com
+  foco clicam (sem visual de segurado); `Ctrl`+tecla ignorado.
+- `widgets/checkbox`: idem; Espaço alterna, Enter ignorado.
+- Exemplo com Espaço; resto aditivo (acumula p/ 1.10.0).

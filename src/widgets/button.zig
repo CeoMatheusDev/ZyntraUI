@@ -7,6 +7,8 @@
 //! - `clicked`: release esquerdo neste frame com o mouse dentro.
 //!   Release fora cancela (sem click). Captura órfã: ver
 //!   `Context.clearPressCapture`.
+//! - Teclado (M29): focável (click foca, Tab circula); Espaço/Enter
+//!   com foco clicam (sem visual de segurado).
 //! Ownership: estado de captura vive no `Context`; chamador detém
 //! `bounds`/`style`. `id` não-nulo obrigatório.
 //! Emite 2 comandos (fill + outline). Erros: OOM ou estilo inválido.
@@ -37,6 +39,12 @@ pub fn button(
     const hovered = if (ctx.mouse_pos) |p| bounds.contains(p) else false;
     var res = ButtonResult{ .hovered = hovered };
 
+    // Focável (Tab circula entre botões e inputs registrados).
+    try ctx.registerFocusable(id);
+    if (fm.pressedInside(bounds)) {
+        ctx.focus_owner = id;
+    }
+
     if (ctx.press_owner == null and fm.pressedInside(bounds)) {
         ctx.press_owner = id;
     }
@@ -45,6 +53,22 @@ pub fn button(
         if (fm.released_pos != null) {
             if (hovered) res.clicked = true;
             ctx.press_owner = null;
+        }
+    }
+
+    // Ativação por teclado (M29): Espaço/Enter com foco clicam;
+    // Tab circula (registro completo no próximo beginFrame).
+    // Sem visual de "segurado" (evento de press, sem estado retido).
+    if (ctx.hasFocus(id)) {
+        for (ctx.pendingEvents()) |ev| {
+            if (ev != .key) continue;
+            const k = ev.key;
+            if (!k.pressed or k.modifiers.ctrl) continue;
+            switch (k.key) {
+                .space, .enter => res.clicked = true,
+                .tab => ctx.requestFocusAdvance(if (k.modifiers.shift) .prev else .next),
+                else => {},
+            }
         }
     }
 
@@ -136,5 +160,52 @@ test "button hover/press/release-to-activate + captura" {
 
     ctx.beginFrame();
     try stdt.testing.expectError(error.InvalidArgument, button(&ctx, .null, bounds, style));
+    ctx.endFrame();
+}
+
+test "button teclado: Espaço/Enter clicam com foco" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().buttonStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(10, 10, 120, 40);
+    const id = id_mod.Id.fromString("test:btn-kb");
+
+    // Click foca (e solta); Espaço clica sem mouse.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(20, 20) },
+    });
+    _ = try button(&ctx, id, bounds, style);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(20, 20) },
+    });
+    _ = try button(&ctx, id, bounds, style);
+    try stdt.testing.expect(!ctx.mouse_down_left);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .space, .pressed = true, .modifiers = .{} } });
+    const r1 = try button(&ctx, id, bounds, style);
+    try stdt.testing.expect(r1.clicked and !r1.pressed);
+    ctx.endFrame();
+
+    // Enter também; Ctrl+Espaço não; sem foco nada.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    const r2 = try button(&ctx, id, bounds, style);
+    try stdt.testing.expect(r2.clicked);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .space, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const r3 = try button(&ctx, id, bounds, style);
+    try stdt.testing.expect(!r3.clicked);
+    ctx.endFrame();
+    ctx.clearFocus();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .space, .pressed = true, .modifiers = .{} } });
+    const r4 = try button(&ctx, id, bounds, style);
+    try stdt.testing.expect(!r4.clicked);
     ctx.endFrame();
 }

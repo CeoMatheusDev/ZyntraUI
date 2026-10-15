@@ -4,6 +4,7 @@
 //! a captura de press vive no `Context` (como no botão, M7).
 //! Transição: alterna no **release dentro** após press capturado;
 //! release fora cancela. Múltiplos presses no mesmo frame contam como um.
+//! Teclado (M29): focável (click foca, Tab circula); Espaço alterna.
 //! Desenho: caixa externa (bg ou bg_checked) + outline + marca interna
 //! insetada quando marcado. Emite 2-3 comandos.
 //! `id` não-nulo obrigatório; `box` deve ter tamanho > 0.
@@ -34,6 +35,12 @@ pub fn checkbox(
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
     const hovered = if (ctx.mouse_pos) |p| box.contains(p) else false;
     var res = CheckboxResult{ .hovered = hovered, .checked = checked.* };
+
+    // Focável (Tab circula); click foca.
+    try ctx.registerFocusable(id);
+    if (fm.pressedInside(box)) {
+        ctx.focus_owner = id;
+    }
     if (ctx.press_owner == null and fm.pressedInside(box)) {
         ctx.press_owner = id;
     }
@@ -44,6 +51,24 @@ pub fn checkbox(
             res.checked = checked.*;
         }
         ctx.press_owner = null;
+    }
+
+    // Teclado com foco (M29): Espaço alterna; Tab circula; Enter ignora.
+    if (ctx.hasFocus(id)) {
+        for (ctx.pendingEvents()) |ev| {
+            if (ev != .key) continue;
+            const k = ev.key;
+            if (!k.pressed or k.modifiers.ctrl) continue;
+            switch (k.key) {
+                .space => {
+                    checked.* = !checked.*;
+                    res.toggled = true;
+                    res.checked = checked.*;
+                },
+                .tab => ctx.requestFocusAdvance(if (k.modifiers.shift) .prev else .next),
+                else => {},
+            }
+        }
     }
 
     const bg = if (checked.*) style.bg_checked else style.bg;
@@ -121,5 +146,34 @@ test "checkbox alterna no release dentro, cancela fora" {
 
     ctx.beginFrame();
     try stdt.testing.expectError(error.InvalidArgument, checkbox(&ctx, .null, box, &checked, style));
+    ctx.endFrame();
+}
+
+test "checkbox teclado: Espaço alterna, Enter ignora" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().checkboxStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const box = types.Rect.init(0, 0, 18, 18);
+    const id = id_mod.Id.fromString("test:chk-kb");
+    var checked = false;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try checkbox(&ctx, id, box, &checked, style);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .space, .pressed = true, .modifiers = .{} } });
+    const r1 = try checkbox(&ctx, id, box, &checked, style);
+    try stdt.testing.expect(r1.toggled and checked);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    const r2 = try checkbox(&ctx, id, box, &checked, style);
+    try stdt.testing.expect(!r2.toggled and checked);
     ctx.endFrame();
 }

@@ -81,6 +81,13 @@ pub fn main() !void {
         stats.culled,
     });
 
+    // Teclado: botão segue focado desde o click (frame 1); Espaço clica.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .space, .pressed = true, .modifiers = .{} } });
+    const btk = try button_mod.button(&ctx, zyntra_ui.Id.fromString("examples/m7:btn"), btn_rect, btn_style);
+    ctx.endFrame();
+    std.debug.print("m29 kb clicked={}\n", .{btk.clicked});
+
     // Rasteriza os comandos do frame 2 num framebuffer 800×600 de prova.
     // (Requer reter os comandos: aqui reexecutamos os widgets; draws são
     // determinísticos para os mesmos eventos.)
