@@ -168,3 +168,48 @@ test "centered centraliza e clampa" {
         centered(types.Rect.init(0, 0, 100, 100), .{ .w = 20, .h = 10 }),
     );
 }
+
+test "fuzz layout: sem crash, invariantes em entradas finitas" {
+    try std.testing.fuzz({}, fuzzLayout, .{});
+}
+
+fn fuzzLayout(_: void, smith: *std.testing.Smith) !void {
+    var fb: [32]u8 = undefined;
+    smith.bytes(&fb);
+    const bits: [8]f32 = @bitCast(fb);
+    // bits[0..2] = área, bits[2..4] = filho, bits[4..6] = constraints, bits[6..8] = insets
+    const area = types.Rect.init(bits[0], bits[1], @abs(bits[2]), @abs(bits[3]));
+    const child = types.Size{ .w = @abs(bits[2]), .h = @abs(bits[3]) };
+    const insets = EdgeInsets{
+        .left = @abs(bits[6]),
+        .top = @abs(bits[7]),
+        .right = @abs(bits[6]),
+        .bottom = @abs(bits[7]),
+    };
+
+    // Sem crash nunca (só matemática f32, sem conversão p/ int).
+    const applied = insets.apply(area);
+    var placer = StackPlacer.init(area, .vertical, @abs(bits[4]));
+    const r0 = placer.next(child);
+    const r1 = placer.next(child);
+    const cc = centered(area, child);
+    const cons = Constraints{
+        .min = .{ .w = 0, .h = 0 },
+        .max = .{ .w = @abs(bits[4]) + 1, .h = @abs(bits[5]) + 1 },
+    };
+    const cs = cons.constrain(child);
+
+    // Invariantes quando tudo é finito.
+    const all_finite = std.math.isFinite(bits[0]) and std.math.isFinite(bits[1]) and
+        std.math.isFinite(bits[2]) and std.math.isFinite(bits[3]) and
+        std.math.isFinite(bits[4]) and std.math.isFinite(bits[5]) and
+        std.math.isFinite(bits[6]) and std.math.isFinite(bits[7]);
+    if (!all_finite) return;
+    try std.testing.expect(applied.w >= 0 and applied.h >= 0);
+    try std.testing.expect(r0.x == area.x and r1.x == area.x);
+    try std.testing.expect(r1.y >= r0.y); // cursor avança
+    try std.testing.expect(r0.w <= @max(0, area.w) + 0.001);
+    try std.testing.expect(cc.x >= @min(area.x, area.x + area.w));
+    try std.testing.expect(cs.w >= 0 and cs.w <= cons.max.w);
+    try std.testing.expect(cs.h >= 0 and cs.h <= cons.max.h);
+}

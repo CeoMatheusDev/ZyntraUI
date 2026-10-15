@@ -375,3 +375,9 @@ Pré-release instável: API pode mudar até a beta.
 - `widgets/text_input`: `Ctrl+A` seleciona tudo (só com âncora; sem
   âncora não há onde representar). Sem mutação, fora do histórico.
 - Exemplo + teste; resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 33 (fuzz no layout, compatível)
+- `layout/layout`: fuzz com bits arbitrários (invariantes em entradas
+  finitas: inset nunca negativo, cursor avança, clamp respeitado;
+  sem crash com NaN/Inf — só matemática f32, sem conversão p/ int).
+- Resto aditivo (acumula p/ próxima MINOR).
