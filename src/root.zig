@@ -73,6 +73,7 @@ pub const widgets = struct {
     /// escapado. Acesse via `widgets.@"switch"`.
     pub const @"switch" = @import("widgets/switch.zig");
     pub const spinner = @import("widgets/spinner.zig");
+    pub const textarea = @import("widgets/textarea.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -162,6 +163,7 @@ pub const TableResult = widgets.table.TableResult;
 pub const TableColumn = widgets.table.TableColumn;
 pub const TableRow = widgets.table.TableRow;
 pub const SwitchResult = widgets.@"switch".SwitchResult;
+pub const TextAreaResult = widgets.textarea.TextAreaResult;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -213,4 +215,5 @@ test {
     _ = @import("widgets/table.zig");
     _ = @import("widgets/switch.zig");
     _ = @import("widgets/spinner.zig");
+    _ = @import("widgets/textarea.zig");
 }

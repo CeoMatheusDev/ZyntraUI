@@ -15,6 +15,7 @@ const modal_mod = @import("zyntra_ui").widgets.modal;
 const combo_mod = @import("zyntra_ui").widgets.combo;
 const switch_mod = @import("zyntra_ui").widgets.@"switch";
 const spinner_mod = @import("zyntra_ui").widgets.spinner;
+const textarea_mod = @import("zyntra_ui").widgets.textarea;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -595,4 +596,24 @@ pub fn main() !void {
     const sp_draws = ctx.drawCommands().len;
     ctx.endFrame();
     std.debug.print("m64 spinner head={d} draws={d}\n", .{ sp_head, sp_draws });
+
+    // Textarea (M65): multilinha — digita, Enter cria linha, setas navegam.
+    const ta_style = theme.textInputStyle();
+    const ta_bounds = zyntra_ui.Rect.init(16, 620, 240, 60);
+    var ta_buf: [64]u8 = undefined;
+    var ta_len: usize = 0;
+    var ta_cursor: usize = 0;
+    var ta_anchor: usize = 0;
+    var ta_scroll: f32 = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(20, 624) },
+    });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'h' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'i' } });
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'Z' } });
+    const tares = try textarea_mod.textArea(&ctx, zyntra_ui.Id.fromString("examples/m65:ta"), ta_bounds, &ta_buf, &ta_len, &ta_cursor, &ta_anchor, &ta_scroll, font, ta_style);
+    ctx.endFrame();
+    std.debug.print("m65 textarea text=\"{s}\" lines={d} focused={}\n", .{ ta_buf[0..ta_len], textarea_mod.textAreaLineCount(&ta_buf, ta_len), tares.focused });
 }

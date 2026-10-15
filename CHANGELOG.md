@@ -11,6 +11,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   complementar a `progress`. Display puro (sem interação/estado) guiado
   por tempo do chamador (`t` em segundos) — determinístico; anel de dots
   com cabeça rotativa, `SpinnerStyle` + `Theme.spinnerStyle()`.
+- `widgets/textarea` (M65): edição multilinha (separador `'\n'`), estado
+  no chamador (buffer/len/cursor/anchor/scroll_y, zero alocação); edição,
+  seleção (`Shift`/`Ctrl+A`/click/arrasto), navegação vertical preservando
+  coluna, rolagem vertical e horizontal derivada; reusa `TextInputStyle`
+  (sem alterar `text_input`). Escopo v1: sem quebra suave.
 
 ## [1.18.0] - 2026-10-15
 
