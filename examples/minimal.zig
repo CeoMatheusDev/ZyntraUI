@@ -8,6 +8,7 @@ const text_input_mod = @import("zyntra_ui").widgets.text_input;
 const scroll_mod = @import("zyntra_ui").widgets.scroll;
 const popup_mod = @import("zyntra_ui").widgets.popup;
 const progress_mod = @import("zyntra_ui").widgets.progress;
+const menu_mod = @import("zyntra_ui").widgets.menu;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -278,4 +279,27 @@ pub fn main() !void {
     try progress_mod.progress(&ctx, zyntra_ui.Rect.init(16, 560, 200, 16), 0.75, theme.progressStyle());
     ctx.endFrame();
     std.debug.print("m18 popup open={} draws={d}\n", .{ open, ctx.drawCommands().len });
+
+    // Frame 15: menu com 3 itens, click no item 1 ("Save").
+    const mitems = [_]zyntra_ui.widgets.menu.MenuItem{
+        .{ .label = "Open" },
+        .{ .label = "Save" },
+        .{ .label = "Quit", .enabled = false },
+    };
+    var mactive: usize = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(400, 230) },
+    });
+    const mm = try menu_mod.menu(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m22:menu"),
+        zyntra_ui.Rect.init(350, 200, 160, 100),
+        &mitems,
+        &mactive,
+        font,
+        theme.menuStyle(),
+    );
+    ctx.endFrame();
+    std.debug.print("m22 menu chosen={?d} active={d}\n", .{ mm.chosen, mactive });
 }

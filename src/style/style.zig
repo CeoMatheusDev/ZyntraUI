@@ -95,6 +95,20 @@ pub const PopupStyle = extern struct {
     }
 };
 
+/// Estilo de menu dropdown.
+pub const MenuStyle = extern struct {
+    bg: types.Color,
+    border: types.Color,
+    item_hover: types.Color,
+    text: types.Color,
+    text_disabled: types.Color,
+    border_width: f32 = 1.0,
+
+    pub fn isValid(self: MenuStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0;
+    }
+};
+
 /// Estilo de barra de progresso.
 pub const ProgressStyle = extern struct {
     bg: types.Color,
@@ -199,6 +213,17 @@ pub const Theme = extern struct {
         };
     }
 
+    pub fn menuStyle(self: Theme) MenuStyle {
+        return .{
+            .bg = self.surface,
+            .border = self.border,
+            .item_hover = self.accent,
+            .text = self.text,
+            .text_disabled = types.Color.rgb(120, 120, 130),
+            .border_width = 1.0,
+        };
+    }
+
     pub fn progressStyle(self: Theme) ProgressStyle {
         return .{
             .bg = self.surface,
@@ -221,6 +246,7 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(dark.textInputStyle().isValid());
     try stdt.testing.expect(dark.scrollStyle().isValid());
     try stdt.testing.expect(dark.popupStyle().isValid());
+    try stdt.testing.expect(dark.menuStyle().isValid());
     try stdt.testing.expect(dark.progressStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,

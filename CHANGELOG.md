@@ -5,6 +5,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.6.0] - 2026-10-15
+
+Sexta MINOR estável, 100% compatível: endurecimento + menu.
+
+- Fuzz em decode/wrap + guarda u32 (M21).
+- `widgets/menu` flat com teclado (M22).
+- 59/59 testes, integração C, CI verde.
+
 ## [1.5.0] - 2026-10-15
 
 Quinta MINOR estável, 100% compatível: edição de texto completa.
@@ -261,3 +269,11 @@ Pré-release instável: API pode mudar até a beta.
 - Guarda `text.len > u32` em `layout` (offsets `LineRange`/`DrawCommand`
   não endereçam além de 4 GiB; por inspeção, sem alloc de 4 GiB).
 - Resto aditivo.
+
+### Adicionado — Milestone 22 (menu dropdown, compatível)
+- `widgets/menu`: painel + clip, `active: *usize` unificando hover e
+  teclado (setas pulam desabilitados com wrap, `Home`/`End`), click ou
+  `Enter` escolhe (one-shot), press fora/`Escape` dispensa. Flat, sem
+  cascata (documentado). Itens UTF-8 validados no push.
+- `style/style`: `MenuStyle` + `Theme.menuStyle()`.
+- Exemplo escolhe item 1; resto aditivo (rumo à 1.6.0).
