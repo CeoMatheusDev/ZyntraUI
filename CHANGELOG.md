@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.12.0] - 2026-10-15
+
+Décima segunda MINOR estável, 100% compatível: widgets polidos e verificação.
+
+- Modal arrastável, combo pelo teclado, separadores, rolagem no input,
+  popupPlace, seleção por mouse (M39–M45).
+- Cobertura, culling unificado, fillRect ~1,5×, C-ABI com versão (M44–M48).
+- 87/87 testes, integração C, CI verde.
+
 ## [1.11.0] - 2026-10-15
 
 Décima primeira MINOR estável, 100% compatível: entrada e verificação.
