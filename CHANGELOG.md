@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.1.0] - 2026-10-15
+
+Primeira MINOR estável: história de teclado completa no text-input, 100%
+compatível com a 1.0.0 (só adições + campo com default).
+
+- Travessia de foco por Tab/Shift+Tab (M12).
+- Seleção de texto com âncora do chamador (M13); 1.0.0 intacta.
+- 43/43 testes, integração C, CI verde, benchmarks mantidos.
+
 ### Alterado — Milestone 7 (beta prep: ativação por release + CI)
 - `core/context`: estado de mouse retido (`mouse_pos`, `mouse_down_left`,
   atualizados em `pushEvent`, nunca limpos por `beginFrame`), captura
