@@ -124,7 +124,27 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m12 tab focus1={} focus2={}\n", .{ t1.focused, t2.focused });
 
-    // Frame 7: easing dirige um fade (0→1 em 1s, amostrado).
+    // Frame 7: volta o foco ao campo 1, seleciona tudo (+highlight).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(ti_rect.x + 5, ti_rect.y + 5) },
+    });
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{ .shift = true } } });
+    var sel_anchor: usize = 0;
+    name_cursor = name_len; // caret no fim antes de selecionar
+    const ts = try text_input_mod.textInputSelected(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, &sel_anchor, font, ti_style);
+    ctx.endFrame();
+    std.debug.print("m13 select selected={} draws={d}\n", .{ ts.selected, ctx.drawCommands().len });
+
+    // Frame 8: digitar substitui a faixa ("O!i" → "Z").
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'Z' } });
+    _ = try text_input_mod.textInputSelected(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, &sel_anchor, font, ti_style);
+    ctx.endFrame();
+    std.debug.print("m13 replace text={s}\n", .{name_buf[0..name_len]});
+
+    // Frame 9: easing dirige um fade (0→1 em 1s, amostrado).
     const tw = try zyntra_ui.Tween.init(0, 1, 1.0, .quad_out);
     var timer = try zyntra_ui.AnimTimer.init(1.0, false);
     var step: u32 = 0;

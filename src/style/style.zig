@@ -64,6 +64,8 @@ pub const TextInputStyle = extern struct {
     border_focus: types.Color,
     text: types.Color,
     caret: types.Color,
+    /// Destaque de seleção (M13; default preserva literais antigos).
+    selection: types.Color = .{ .r = 70, .g = 110, .b = 180, .a = 90 },
     border_width: f32 = 1.0,
 
     pub fn isValid(self: TextInputStyle) bool {
@@ -142,6 +144,7 @@ pub const Theme = extern struct {
             .border_focus = self.accent,
             .text = self.text,
             .caret = self.accent,
+            .selection = .{ .r = 70, .g = 110, .b = 180, .a = 90 },
             .border_width = 1.0,
         };
     }

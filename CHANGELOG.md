@@ -155,3 +155,11 @@ Pré-release instável: API pode mudar até a beta.
 - `widgets/text_input`: registra-se todo frame; `Tab`/`Shift+Tab` circulam
   sem virar texto. Fecha o gap documentado desde a M9.
 - Exemplo com 2 campos + Tab; resto aditivo (rumo à 1.1.0).
+
+### Adicionado — Milestone 13 (seleção de texto, compatível)
+- `widgets/text_input`: `textInputSelected` (novo, 1.0.0 intacto por
+  delegação) com `anchor: *usize` do chamador; `Shift`+navegação estende,
+  digitar/backspace/`Delete` substituem a faixa, highlight sob o texto.
+- `style/style`: `TextInputStyle.selection` COM default (literais antigos
+  compilam); `TextInputResult.selected` (só leitura, aditivo).
+- Exemplo seleciona tudo + substitui; resto aditivo (rumo à 1.1.0).

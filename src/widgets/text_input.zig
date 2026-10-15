@@ -1,18 +1,17 @@
 //! ZyntraUI — campo de texto (widgets/text_input).
 //!
-//! Modelo M10 (foco + buffer do chamador, caret navegável)://! - `buffer`/`len`/`cursor`: buffer UTF-8 de tamanho fixo do CHAMADOR
-//!   (zero alocação na lib); `len.*` = bytes usados, `cursor.*` = offset
-//!   de byte do caret (sempre fronteira UTF-8, 0..len).
-//! - Click dentro assume o foco (`focus_owner`); `Escape` ou
-//!   `clearFocus` liberam. Só o focado consome `.text`/teclas.
-//! - `.text` insere no cursor (memmove do sufixo); setas movem por
-//!   codepoint; `Home`/`End` saltam; backspace apaga antes, `Delete`
-//!   apaga no cursor. Buffer cheio: descarta com `overflowed=true`.
-//!   `Enter` → `submitted=true`; `Tab`/`Shift+Tab` circulam o foco
-//!   entre focáveis registrados (aplicado no próximo `beginFrame`).
-//! - Limitações documentadas: sem seleção (M12+).
-//! Desenho: caixa (destaque quando focado) + texto + caret fina no fim
-//! quando focado. `id` não-nulo obrigatório.
+//! Modelo M13 (foco + buffer do chamador + seleção):
+//! - `buffer`/`len`/`cursor` (+ `anchor` em `textInputSelected`):
+//!   buffer UTF-8 de tamanho fixo do CHAMADOR (zero alocação na lib);
+//!   `len.*` = bytes usados, `cursor.*`/`anchor.*` = offsets de byte
+//!   (sempre fronteira UTF-8, 0..len). Seleção = [min,max); iguais = nada.
+//! - `textInput` (1.0.0, preservado): sem seleção; setas colapsam.
+//! - `textInputSelected` (1.1.0, aditivo): `Shift`+navegação estende a
+//!   seleção; digitar/backspace/`Delete` substituem a faixa; `Tab`,
+//!   `Enter`, `Escape` como antes.
+//! - Click dentro assume o foco; `Escape`/`clearFocus` liberam.
+//! Desenho: caixa com destaque + highlight da seleção + texto + caret.
+//! `id` não-nulo obrigatório.
 
 const std = @import("std");
 const types = @import("../core/types.zig");
@@ -27,6 +26,8 @@ pub const TextInputResult = struct {
     changed: bool = false,
     submitted: bool = false,
     overflowed: bool = false,
+    /// True quando há faixa selecionada (só em `textInputSelected`).
+    selected: bool = false,
     len: usize = 0,
 };
 
@@ -66,6 +67,8 @@ fn popCodepoint(buf: []u8, len: usize) usize {
     return i;
 }
 
+/// Campo de texto clássico (1.0.0, preservado): sem seleção; setas
+/// colapsam. Para seleção, ver `textInputSelected` (aditivo, 1.1.0).
 pub fn textInput(
     ctx: *context_mod.Context,
     id: id_mod.Id,
@@ -76,10 +79,45 @@ pub fn textInput(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextInputResult {
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, null, font, style);
+}
+
+/// Campo de texto com seleção (1.1.0): `anchor` persiste entre frames
+/// (chamador detém). `Shift`+navegação estende a faixa [min,max);
+/// digitar/backspace/`Delete` a substituem; setas simples colapsam.
+pub fn textInputSelected(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextInputResult {
+    if (anchor.* > len.*) return error.InvalidArgument;
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style);
+}
+
+fn textInputInner(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: ?*usize,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextInputResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (len.* > buffer.len or cursor.* > len.*) return error.InvalidArgument;
+    if (anchor) |a| {
+        if (a.* > len.*) return error.InvalidArgument;
+    }
 
     var res = TextInputResult{ .len = len.* };
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
@@ -94,10 +132,28 @@ pub fn textInput(
     const focused = ctx.hasFocus(id);
     res.focused = focused;
 
+    // Apaga a faixa [lo,hi), colapsa cursor e âncora em lo.
+    const deleteSelection = struct {
+        fn f(buf: []u8, l: *usize, c: *usize, a: *usize) void {
+            const lo = @min(a.*, c.*);
+            const hi = @max(a.*, c.*);
+            std.mem.copyForwards(u8, buf[lo .. l.* - (hi - lo)], buf[hi..l.*]);
+            l.* -= hi - lo;
+            c.* = lo;
+            a.* = lo;
+        }
+    }.f;
+
     if (focused) {
         for (ctx.pendingEvents()) |ev| {
             switch (ev) {
                 .text => |t| {
+                    if (anchor) |a| {
+                        if (a.* != cursor.*) {
+                            deleteSelection(buffer, len, cursor, a);
+                            res.changed = true;
+                        }
+                    }
                     var enc: [4]u8 = undefined;
                     const n = encodeUtf8(t.codepoint, &enc) catch continue; // defensivo; fila já valida
                     if (len.* + n <= buffer.len) {
@@ -106,6 +162,7 @@ pub fn textInput(
                         @memcpy(buffer[cursor.*..][0..n], enc[0..n]);
                         cursor.* += n;
                         len.* += n;
+                        if (anchor) |a| a.* = cursor.*;
                         res.changed = true;
                     } else {
                         res.overflowed = true;
@@ -113,18 +170,34 @@ pub fn textInput(
                 },
                 .key => |k| {
                     if (!k.pressed) continue;
+                    const extend = anchor != null and k.modifiers.shift;
                     switch (k.key) {
                         .backspace => {
+                            if (anchor) |a| {
+                                if (a.* != cursor.*) {
+                                    deleteSelection(buffer, len, cursor, a);
+                                    res.changed = true;
+                                    continue;
+                                }
+                            }
                             if (cursor.* > 0) {
                                 const at = popCodepoint(buffer, cursor.*);
                                 const n = cursor.* - at;
                                 std.mem.copyForwards(u8, buffer[at .. len.* - n], buffer[cursor.*..len.*]);
                                 cursor.* = at;
                                 len.* -= n;
+                                if (anchor) |a| a.* = cursor.*;
                                 res.changed = true;
                             }
                         },
                         .delete => {
+                            if (anchor) |a| {
+                                if (a.* != cursor.*) {
+                                    deleteSelection(buffer, len, cursor, a);
+                                    res.changed = true;
+                                    continue;
+                                }
+                            }
                             if (cursor.* < len.*) {
                                 const d = metrics_mod.decodeOne(buffer[cursor.*..len.*]) catch {
                                     return error.InvalidArgument; // buffer do chamador corrompido
@@ -136,6 +209,9 @@ pub fn textInput(
                         },
                         .left => {
                             if (cursor.* > 0) cursor.* = popCodepoint(buffer, cursor.*);
+                            if (!extend) {
+                                if (anchor) |a| a.* = cursor.*;
+                            }
                         },
                         .right => {
                             if (cursor.* < len.*) {
@@ -144,9 +220,22 @@ pub fn textInput(
                                 };
                                 cursor.* += d.len;
                             }
+                            if (!extend) {
+                                if (anchor) |a| a.* = cursor.*;
+                            }
                         },
-                        .home => cursor.* = 0,
-                        .end => cursor.* = len.*,
+                        .home => {
+                            cursor.* = 0;
+                            if (!extend) {
+                                if (anchor) |a| a.* = cursor.*;
+                            }
+                        },
+                        .end => {
+                            cursor.* = len.*;
+                            if (!extend) {
+                                if (anchor) |a| a.* = cursor.*;
+                            }
+                        },
                         .enter => res.submitted = true,
                         .tab => {
                             // Tab nunca vira texto: agenda avanço sobre o
@@ -155,6 +244,7 @@ pub fn textInput(
                         },
                         .escape => {
                             ctx.focus_owner = null;
+                            if (anchor) |a| a.* = cursor.*;
                             res.focused = false;
                         },
                         else => {},
@@ -166,6 +256,9 @@ pub fn textInput(
     }
     res.len = len.*;
     if (!ctx.hasFocus(id)) res.focused = false;
+    // Seleção só existe com foco; sem foco, widgets veem `selected=false`
+    // e nenhum highlight (evita faixa fantasma com estado retido).
+    if (anchor) |a| res.selected = res.focused and a.* != cursor.*;
 
     const bg = if (res.focused) style.bg_focus else style.bg;
     const border = if (res.focused) style.border_focus else style.border;
@@ -177,6 +270,31 @@ pub fn textInput(
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
+    if (res.selected) {
+        // Highlight sob o texto, entre os offsets ordenados.
+        const a = anchor.?;
+        const lo = @min(a.*, cursor.*);
+        const hi = @max(a.*, cursor.*);
+        const m0 = metrics_mod.measure(buffer[0..lo], font) catch {
+            return error.InvalidArgument;
+        };
+        const m1 = metrics_mod.measure(buffer[0..hi], font) catch {
+            return error.InvalidArgument;
+        };
+        const hy = bounds.y + 2;
+        const hh = bounds.h - 4;
+        if (hh > 0) {
+            ctx.draw.rectFilled(ctx.allocator, .{
+                .x = bounds.x + 4 + m0.width,
+                .y = hy,
+                .w = @max(0, m1.width - m0.width),
+                .h = hh,
+            }, style.selection) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidCommand => return error.InvalidCommand,
+            };
+        }
+    }
     if (len.* > 0) {
         ctx.draw.pushText(
             ctx.allocator,
@@ -358,6 +476,101 @@ test "text_input Tab circula foco entre campos" {
     const f5a = try textInput(&ctx, id1, b1, &buf1, &len1, &cur1, font, style);
     const f5b = try textInput(&ctx, id2, b2, &buf2, &len2, &cur2, font, style);
     try stdt.testing.expect(f5a.focused and !f5b.focused);
+    ctx.endFrame();
+}
+
+test "textInputSelected Shift+setas, substitui e destaca" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10); // advance=6
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-sel");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+
+    // Foca e digita "ABC" (sem seleção; 4 draws: caixa×2+texto+caret).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'B' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'C' } });
+    const r0 = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(!r0.selected);
+    try stdt.testing.expectEqual(@as(usize, 4), ctx.drawCommands().len);
+    ctx.endFrame();
+
+    // Shift+Left ×2 seleciona "BC" (+1 draw de highlight).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{ .shift = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    // ^ segundo Left é simples: colapsa em 1, sem seleção.
+    const r1 = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(!r1.selected);
+    try stdt.testing.expectEqual(@as(usize, 1), cursor);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{ .shift = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{ .shift = true } } });
+    const r2 = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(r2.selected);
+    try stdt.testing.expectEqual(@as(usize, 1), cursor);
+    try stdt.testing.expectEqual(@as(usize, 3), anchor);
+    try stdt.testing.expectEqual(@as(usize, 5), ctx.drawCommands().len); // caixa×2+highlight+texto+caret
+    ctx.endFrame();
+
+    // Digitar substitui a faixa: "AX".
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'X' } });
+    const r3 = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(r3.changed and !r3.selected);
+    try stdt.testing.expectEqualStrings("AX", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    ctx.endFrame();
+
+    // Seleciona tudo (Home + Shift+End: cursor vai ao fim, âncora no 0).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{ .shift = true } } });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    try stdt.testing.expectEqual(@as(usize, 0), anchor);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{} } });
+    const r4 = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(r4.changed and !r4.selected);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    ctx.endFrame();
+
+    // Âncora inválida rejeitada; legado preservado (sem selected).
+    ctx.beginFrame();
+    var badanchor: usize = 99;
+    try stdt.testing.expectError(error.InvalidArgument, textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &badanchor, font, style));
+    const rl = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expect(!rl.selected);
+    ctx.endFrame();
+
+    // Sem foco: âncora/cursor divergentes não geram faixa fantasma.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'B' } });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expectEqualStrings("AB", buf[0..len]);
+    ctx.endFrame();
+    ctx.clearFocus();
+    cursor = 0; // âncora retida em 2: faixa [0,2) só vale com foco
+    ctx.beginFrame();
+    const ru = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(!ru.focused and !ru.selected);
+    try stdt.testing.expectEqual(@as(usize, 3), ctx.drawCommands().len); // caixa×2+texto, sem highlight/caret
     ctx.endFrame();
 }
 
