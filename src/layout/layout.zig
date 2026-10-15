@@ -213,3 +213,17 @@ fn fuzzLayout(_: void, smith: *std.testing.Smith) !void {
     try std.testing.expect(cs.w >= 0 and cs.w <= cons.max.w);
     try std.testing.expect(cs.h >= 0 and cs.h <= cons.max.h);
 }
+
+test "StackPlacer horizontal avança pela largura" {
+    const stdt = @import("std");
+    var p = StackPlacer.init(types.Rect.init(0, 0, 200, 200), .horizontal, 8);
+    const a = p.next(.{ .w = 60, .h = 40 });
+    const b = p.next(.{ .w = 30, .h = 20 });
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 60, 40), a);
+    try stdt.testing.expectEqual(types.Rect.init(68, 0, 30, 20), b);
+    try stdt.testing.expectEqual(@as(f32, 200 - 106), p.remaining());
+    // Largura além do restante prende na área.
+    const c = p.next(.{ .w = 300, .h = 10 });
+    try stdt.testing.expectEqual(@as(f32, 94), c.w);
+    try stdt.testing.expectEqual(@as(f32, 106), c.x);
+}

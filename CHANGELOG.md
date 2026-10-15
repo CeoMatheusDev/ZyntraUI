@@ -467,3 +467,9 @@ Pré-release instável: API pode mudar até a beta.
   fresca no frame (posição retida sozinha não move); vale nas 3 variantes.
 - Helpers `offsetAt`/`visibleOffset` (o segundo reutilizado no desenho).
 - Resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 46 (cobertura de caminhos, compatível)
+- Testes p/ 3 caminhos sem cobertura: deslocamento do anel de undo
+  (`TextHistory(2)` + 4 rajadas), menu todo-desabilitado (nunca escolhe)
+  e `StackPlacer` horizontal (avanço + clamp).
+- Sem mudança de comportamento; resto aditivo (acumula p/ MINOR).

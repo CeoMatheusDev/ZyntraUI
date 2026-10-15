@@ -1488,3 +1488,58 @@ test "textInput click posiciona, arrasto seleciona, release solta" {
     try stdt.testing.expectEqualStrings("ABCD", buf[0..len]);
     ctx.endFrame();
 }
+
+test "TextHistory descarta o mais antigo ao lotar" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-shift");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var hist = TextHistory(2, 16){};
+
+    // Foca uma vez; 4 rajadas separadas por setas (4 checkpoints, S=2).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try textInputHistory(2, 16, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    ctx.endFrame();
+    for ("abcd") |ch| {
+        ctx.beginFrame();
+        try ctx.pushEvent(.{ .text = .{ .codepoint = ch } });
+        _ = try textInputHistory(2, 16, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+        ctx.endFrame();
+        ctx.beginFrame();
+        try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+        try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+        _ = try textInputHistory(2, 16, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+        ctx.endFrame();
+    }
+    try stdt.testing.expectEqualStrings("abcd", buf[0..len]);
+    // Só os 2 passos mais novos sobrevivem: desfaz "d" e "c", depois vazio.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const r1 = try textInputHistory(2, 16, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(r1.undone);
+    try stdt.testing.expectEqualStrings("abc", buf[0..len]);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const r2 = try textInputHistory(2, 16, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(r2.undone);
+    try stdt.testing.expectEqualStrings("ab", buf[0..len]);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const r3 = try textInputHistory(2, 16, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(!r3.undone);
+    try stdt.testing.expectEqualStrings("ab", buf[0..len]);
+    ctx.endFrame();
+}

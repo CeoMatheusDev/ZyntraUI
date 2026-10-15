@@ -565,3 +565,33 @@ test "menu separador: sem hover/escolha, teclado pula" {
     try stdt.testing.expectEqual(@as(usize, 8), ctx.drawCommands().len);
     ctx.endFrame();
 }
+
+test "menu todo-desabilitado nunca escolhe" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().menuStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 160, 60);
+    const id = id_mod.Id.fromString("test:menu-off");
+    const items = [_]MenuItem{
+        .{ .label = "A", .enabled = false },
+        .{ .label = "", .separator = true },
+    };
+    var active: usize = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(10, 10) },
+    });
+    const r0 = try menu(&ctx, id, bounds, &items, &active, font, style);
+    try stdt.testing.expect(r0.chosen == null and !r0.dismissed);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    const r1 = try menu(&ctx, id, bounds, &items, &active, font, style);
+    try stdt.testing.expect(r1.chosen == null);
+    ctx.endFrame();
+}
