@@ -5,7 +5,9 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
-### Adicionado
+## [1.19.0] - 2026-10-15
+
+MINOR estável, 100% compatível: widgets de entrada e feedback.
 
 - `widgets/spinner` (M64): indicador de carregamento **indeterminado**,
   complementar a `progress`. Display puro (sem interação/estado) guiado
@@ -16,6 +18,9 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   seleção (`Shift`/`Ctrl+A`/click/arrasto), navegação vertical preservando
   coluna, rolagem vertical e horizontal derivada; reusa `TextInputStyle`
   (sem alterar `text_input`). Escopo v1: sem quebra suave.
+- Correção (nunca publicada): `spinnerHeadIndex` com `t` extremo deixava
+  de estourar para `NaN`/índice inválido (módulo em f64).
+- 108/108 testes, integração C, CI verde.
 
 ## [1.18.0] - 2026-10-15
 
