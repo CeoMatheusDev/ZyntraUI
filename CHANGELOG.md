@@ -539,3 +539,15 @@ Pré-release instável: API pode mudar até a beta.
 - `style/style.ModalStyle.title_text` com default (literais antigos
   compilam; `Theme.modalStyle()` usa `text` do tema).
 - `beginModal`/`beginModalDraggable` intactos; resto aditivo.
+
+### Corrigido — Milestone 54 (versão pública sincronizada, compatível)
+- Causa: `version_*` em `core/types` congelado em 1.0.0 desde a M1
+  (comentário dizia espelhar o zon, mas nenhum prep atualizava);
+  `zyntra_version_minor()` retornava 0 em vez de 13.
+- Solução manual (sem geração): `build.zig.zon` é a fonte única;
+  `types.zig` espelha (agora 1.13.0) e o teste `version_* espelham
+  build.zig.zon` quebra o CI em divergência (leitura runtime +
+  `build.zig.zon` como entrada de cache do `run test`); teste C
+  valida MAJOR/MINOR/PATCH completos. Sem contrato que definisse
+  1.0.0 como versão independente (só assinaturas, preservadas).
+- Resto aditivo (só valores; acumula p/ MINOR).

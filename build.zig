@@ -65,6 +65,9 @@ pub fn build(b: *std.Build) void {
         .root_module = mod,
     });
     const run_mod_tests = b.addRunArtifact(mod_tests);
+    // O teste de sincronia de versão lê build.zig.zon em runtime:
+    // declará-lo como entrada invalida o cache quando só o zon muda.
+    run_mod_tests.addFileInput(b.path("build.zig.zon"));
 
     const test_step = b.step("test", "Executa os testes unitários");
     test_step.dependOn(&run_mod_tests.step);

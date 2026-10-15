@@ -24,7 +24,12 @@ int main(void) {
 
     printf("zyntra %u.%u.%u\n",
         zyntra_version_major(), zyntra_version_minor(), zyntra_version_patch());
+    /* Versão completa espelha build.zig.zon (atualizar no prep de
+     * release; o CI detecta divergência). major==1 também trava
+     * MAJOR acidental (ver M44). */
     assert(zyntra_version_major() == 1);
+    assert(zyntra_version_minor() == 13);
+    assert(zyntra_version_patch() == 0);
     assert(strcmp(zyntra_version_prerelease(), "") == 0);
 
     ZyntraContext *ctx = NULL;

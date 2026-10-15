@@ -88,12 +88,65 @@ pub const Color = extern struct {
     }
 };
 
-/// Versão semântica da biblioteca (espelha build.zig.zon).
+/// Versão pública da biblioteca (MAJOR.MINOR.PATCH + pré-lançamento).
+/// Espelho MANUAL de `build.zig.zon` (fonte única de verdade): o prep de
+/// release atualiza os dois juntos; o teste `version_* espelham
+/// build.zig.zon` abaixo quebra o CI em qualquer divergência.
+/// Servida sem alteração pela API Zig (`root`) e pela ABI C
+/// (`zyntra_version_*`); assinaturas e layouts inalterados.
 pub const version_major: u32 = 1;
-pub const version_minor: u32 = 0;
+pub const version_minor: u32 = 13;
 pub const version_patch: u32 = 0;
 /// Sufixo de pré-lançamento (vazio quando estável).
 pub const version_prerelease: [:0]const u8 = "";
+
+/// Versão `MAJOR.MINOR.PATCH[-pre]` extraída de `build.zig.zon`.
+const ZonVersion = struct {
+    major: u32,
+    minor: u32,
+    patch: u32,
+    prerelease: []const u8,
+};
+
+/// Lê `.version = "x.y.z[-pre]"` de `build.zig.zon` (caminho relativo ao
+/// fonte: funciona em `zig build test` e em `zig test src/root.zig`).
+/// Falha ruidosamente se o campo sumir ou mudar de formato (fail-closed:
+/// nunca aprova valores errados em silêncio).
+fn parseZonVersion(zon: []const u8) error{MissingVersion}!ZonVersion {
+    const std = @import("std");
+    const key = std.mem.indexOf(u8, zon, ".version") orelse return error.MissingVersion;
+    const open = std.mem.indexOfScalarPos(u8, zon, key, '"') orelse return error.MissingVersion;
+    const close = std.mem.indexOfScalarPos(u8, zon, open + 1, '"') orelse return error.MissingVersion;
+    var it = std.mem.splitScalar(u8, zon[open + 1 .. close], '.');
+    const major_s = it.next() orelse return error.MissingVersion;
+    const minor_s = it.next() orelse return error.MissingVersion;
+    const patch_pre = it.next() orelse return error.MissingVersion;
+    if (it.next() != null) return error.MissingVersion;
+    var pit = std.mem.splitScalar(u8, patch_pre, '-');
+    const patch_s = pit.next() orelse return error.MissingVersion;
+    return .{
+        .major = std.fmt.parseInt(u32, major_s, 10) catch return error.MissingVersion,
+        .minor = std.fmt.parseInt(u32, minor_s, 10) catch return error.MissingVersion,
+        .patch = std.fmt.parseInt(u32, patch_s, 10) catch return error.MissingVersion,
+        .prerelease = pit.rest(),
+    };
+}
+
+test "version_* espelham build.zig.zon (fonte de verdade)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    // O runner executa com CWD na raiz do repo (fluxo e CI); fora dela
+    // a leitura falha ruidosamente (nunca aprova em silêncio).
+    const io = stdt.testing.io;
+    const data = stdt.Io.Dir.cwd().readFileAlloc(io, "build.zig.zon", gpa, .limited(4096)) catch
+        return error.MissingVersion;
+    defer gpa.free(data);
+    const v = try parseZonVersion(data);
+    try stdt.testing.expectEqual(v.major, version_major);
+    try stdt.testing.expectEqual(v.minor, version_minor);
+    try stdt.testing.expectEqual(v.patch, version_patch);
+    try stdt.testing.expectEqualStrings(v.prerelease, version_prerelease);
+}
 
 test "Vec2 init/eql" {
     const std = @import("std");

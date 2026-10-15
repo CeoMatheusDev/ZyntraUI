@@ -58,6 +58,15 @@ Toda função retorna `ZyntraResult` (`0 == ZYNTRA_OK`):
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
+## Versão
+
+Fonte única de verdade: `build.zig.zon` (`.version`). Espelhos manuais
+atualizados juntos no prep de release: `version_*` em
+`src/core/types.zig` (API Zig + `zyntra_version_*`) e as asserções de
+versão completa em `tests/c/test_c_abi.c`. Divergência quebra o CI:
+teste `version_* espelham build.zig.zon` (+ `build.zig.zon` como
+entrada de cache do `run test`) e o próprio teste C.
+
 ## Teste de integração
 
 Consumidor C real em `tests/c/test_c_abi.c`:
