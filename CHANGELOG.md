@@ -7,13 +7,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [1.11.0] - 2026-10-15
 
-Décima primeira MINOR estável, 100% compatível: entrada e verificação.
+Décima primeira MINOR estável, 100% compatível: entrada, widgets e verificação.
 
-- Teclado: scroll (M31), `Ctrl+A` (M32), apagar por palavra (M34).
-- `widgets/combo` por composição e `labelWrapped` multilinha (M36+M37).
-- Verificação: fuzz no layout (M33), bench do raster + blending (M35+M38).
-- 76/76 testes, integração C, CI verde.
-
+- Entrada: teclado no scroll (M31), `Ctrl+A` (M32), apagar por palavra (M34),
+  seleção por mouse (M45), rolagem no input (M42).
+- Widgets: combobox (M36), label multilinha (M37), separadores (M41),
+  modal arrastável (M39), combo pelo teclado (M40).
+- Verificação: fuzz no layout (M33), bench do raster (M35), blending (M38),
+  culling unificado (M47), cobertura (M46), fillRect ~1,5× (M48).
+- C-ABI: string de pré-release + consistência (M44); popupPlace (M43).
+- 87/87 testes, integração C, CI verde.
 
 ## [1.10.0] - 2026-10-15
 
