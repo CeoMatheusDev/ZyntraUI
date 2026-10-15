@@ -13,8 +13,10 @@ impedir eliminação por otimização.
 
 ## Resultados
 
-Máquina: Intel Xeon E5-2680 v3 (24 threads), Linux x86_64, commit `97f9f2f`,
-alocador `page_allocator`, 2026-10-14.
+Máquina: Intel Xeon E5-2680 v3 (24 threads), Linux x86_64,
+alocador `page_allocator`.
+
+Pipeline (commit `97f9f2f`, 2026-10-14):
 
 | Modo | Tempo total | Por comando | Por frame (5500 cmds) |
 |---|---|---|---|
@@ -22,6 +24,23 @@ alocador `page_allocator`, 2026-10-14.
 | `Debug` | 282,5 ms | ~257 ns | ~1,4 ms |
 
 Medianas de (19.04, 18.80, 21.33) ms e (287.6, 281.6, 282.5) ms.
+
+Raster de referência, fase 2 do bench (50 renders de 5500 cmds, ~1006
+desenhados em fb 800×600; commit `d84351f`, 2026-10-15):
+
+| Modo | Total (fases 1+2) | Fase 2 (50 renders) | Por render |
+|---|---|---|---|
+| `ReleaseFast` | 471,9 ms | ~453 ms | ~9,1 ms |
+| `Debug` | 6755 ms | ~6473 ms | ~129 ms |
+
+Medianas de (466.6, 471.9, 483.1) ms e (6751, 6755, 6800) ms; fase 2 por
+subtração das baselines acima, mesma sessão. Referência sem otimização:
+~1,9 ns/pixel preenchido em ReleaseFast. Não usar em produção.
+
+Lição registrada: sem `clear()`, o pxsum DIVERGIA entre modos (lixo do
+alocador — Debug preenche com `0xAA`). Com `clear`, pxsum idêntico
+(`293316480`, 6/6 execuções, ambos os modos). Framebuffer sem limpar tem
+conteúdo indefinido — documentado em `SoftwareFramebuffer`.
 
 ## Leitura
 

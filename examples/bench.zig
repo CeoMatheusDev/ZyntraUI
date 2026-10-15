@@ -61,4 +61,22 @@ pub fn main() !void {
 
     const total_cmds: u64 = FRAMES * (RECTS_PER_FRAME + TEXTS_PER_FRAME);
     std.debug.print("bench frames={d} cmds={d} checksum={d}\n", .{ FRAMES, total_cmds, checksum });
+
+    // Fase 2 (M35): rasteriza os comandos do último frame num fb 800×600.
+    // Reaproveita a draw list retida (sem reconstrução) para isolar o
+    // custo do rasterizador.
+    var fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 800, 600);
+    defer fb.deinit(allocator);
+    fb.clear(zyntra_ui.Color.rgb(0, 0, 0)); // fundo definido (alloc é lixo)
+    const vp = zyntra_ui.Rect.init(0, 0, 800, 600);
+    const RFRAMES = 50;
+    var rdrawn: u64 = 0;
+    var r: u32 = 0;
+    while (r < RFRAMES) : (r += 1) {
+        const st = try zyntra_ui.software.raster.render(&fb, ctx.drawCommands(), vp);
+        rdrawn += st.drawn;
+    }
+    var pxsum: u64 = 0;
+    for (fb.pixels) |b| pxsum +%= b;
+    std.debug.print("raster frames={d} drawn={d} pxsum={d}\n", .{ RFRAMES, rdrawn, pxsum });
 }

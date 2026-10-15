@@ -387,3 +387,12 @@ Pré-release instável: API pode mudar até a beta.
   `Ctrl+Delete` a próxima (só `' '` separa; multibyte-safe); com seleção,
   vale a faixa; passos isolados no undo; no-op seguro nos limites.
 - Exemplo + teste; resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 35 (bench do raster, compatível)
+- `examples/bench`: fase 2 rasteriza 50× a draw list retida em fb
+  800×600 (checksum anti-DCE); `docs/BENCHMARKS.md` com números medidos
+  (~9,1 ms/render ReleaseFast, ~129 ms Debug).
+- Correção metodológica real: sem `clear()`, pxsum divergia entre modos
+  (lixo do alocador, `0xAA` em Debug); com `clear`, idêntico (6/6).
+  Framebuffer sem limpar = conteúdo indefinido (documentado).
+- Fuzz permanente nos primitivos do raster; resto aditivo.

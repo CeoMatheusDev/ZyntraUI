@@ -17,7 +17,9 @@ const commands = @import("../draw/commands.zig");
 
 pub const max_dimension: u32 = 8192;
 
-/// RGBA8 row-major.
+/// RGBA8 row-major. Conteúdo inicial INDEFINIDO (lixo do alocador —
+/// Debug preenche com 0xAA, Release zera): limpe com `clear` ou cubra
+/// tudo antes de ler pixels.
 pub const SoftwareFramebuffer = struct {
     w: u32,
     h: u32,
