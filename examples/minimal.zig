@@ -186,7 +186,20 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m19 undo={} redo={} text={s}\n", .{ hu.undone, hr.redone, name_buf[0..name_len] });
 
-    // Frame 10: scroll com wheel sobre a vista (conteúdo 300px em 100px).
+    // Frame 10: seleciona tudo, Ctrl+C, apaga, Ctrl+V restaura.
+    var clipmem: [32]u8 = undefined;
+    var clip = zyntra_ui.Clipboard{ .buf = &clipmem };
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{ .shift = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .c, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .v, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try text_input_mod.textInputClipboard(8, 32, &ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, &sel_anchor, &hist, &clip, font, ti_style);
+    ctx.endFrame();
+    std.debug.print("m20 clip={s} text={s}\n", .{ clip.buf[0..clip.len], name_buf[0..name_len] });
+
+    // Frame 11: scroll com wheel sobre a vista (conteúdo 300px em 100px).
     var scrolled: f32 = 0;
     const sc_style = theme.scrollStyle();
     const sc_bounds = zyntra_ui.Rect.init(300, 400, 200, 100);
@@ -206,7 +219,7 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m16 scroll offset={d} max={d} draws={d}\n", .{ scrolled, sc.max_offset, ctx.drawCommands().len });
 
-    // Frame 11: press no thumb + arrasto (thumb em y≈432..465).
+    // Frame 12: press no thumb + arrasto (thumb em y≈432..465).
     ctx.beginFrame();
     try ctx.pushEvent(.{
         .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(496, 440) },
@@ -237,7 +250,7 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m17 drag offset={d} dragging={}\n", .{ scrolled, scd.dragging });
 
-    // Frame 12: easing dirige um fade (0→1 em 1s, amostrado).
+    // Frame 13: easing dirige um fade (0→1 em 1s, amostrado).
     const tw = try zyntra_ui.Tween.init(0, 1, 1.0, .quad_out);
     var timer = try zyntra_ui.AnimTimer.init(1.0, false);
     var step: u32 = 0;
@@ -246,7 +259,7 @@ pub fn main() !void {
         std.debug.print("m11 t={d:.2} v={d:.3}\n", .{ timer.progress(), tw.valueAt(timer.elapsed) });
     }
 
-    // Frame 13: popup aberto + press fora dispensa; progresso a 75%.
+    // Frame 14: popup aberto + press fora dispensa; progresso a 75%.
     var open = true;
     ctx.beginFrame();
     try ctx.pushEvent(.{

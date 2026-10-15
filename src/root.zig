@@ -117,6 +117,7 @@ pub const LabelResult = widgets.label.LabelResult;
 pub const SliderResult = widgets.slider.SliderResult;
 pub const TextInputResult = widgets.text_input.TextInputResult;
 pub const TextHistory = widgets.text_input.TextHistory;
+pub const Clipboard = widgets.text_input.Clipboard;
 pub const ScrollResult = widgets.scroll.ScrollResult;
 pub const PopupResult = widgets.popup.PopupResult;
 

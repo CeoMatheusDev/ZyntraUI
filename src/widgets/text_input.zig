@@ -35,6 +35,14 @@ pub const TextInputResult = struct {
     len: usize = 0,
 };
 
+/// Área de transferência INTERNA (sem OS): o chamador detém `buf` e
+/// `len` (bytes válidos). Copiar/colar nunca alocam; conteúdo maior
+/// que `buf` não é copiado (tudo-ou-nada, sem truncar).
+pub const Clipboard = struct {
+    buf: []u8,
+    len: usize = 0,
+};
+
 /// Histórico de undo/redo com pilhas de snapshots em buffers do
 /// CHAMADOR (zero alocação na lib). `S` = passos guardados, `B` = bytes
 /// por snapshot (deve cobrir `buffer.len` do campo, senão
@@ -94,6 +102,12 @@ pub fn TextHistory(comptime S: usize, comptime B: usize) type {
 
         pub fn closeGroup(self: *Self) void {
             self.group_open = false;
+        }
+
+        /// Reabre a rajada sem novo snapshot (substituição por faixa +
+        /// digitação contam como um passo).
+        pub fn markGrouped(self: *Self) void {
+            self.group_open = true;
         }
 
         pub fn undo(self: *Self, buf: []u8, len: *usize, cursor: *usize, anchor: ?*usize) bool {
@@ -173,7 +187,7 @@ pub fn textInput(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextInputResult {
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, null, font, style, void, {});
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, null, font, style, void, {}, null);
 }
 
 /// Campo de texto com seleção (1.1.0): `anchor` persiste entre frames
@@ -191,7 +205,32 @@ pub fn textInputSelected(
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextInputResult {
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, void, {});
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, void, {}, null);
+}
+
+/// Campo de texto completo (1.5.0, aditivo): seleção + undo/redo +
+/// área de transferência interna (`Ctrl+C/X/V`, tudo-ou-nada, sem OS).
+/// `clip` é `*Clipboard` do chamador (pode ser menor que o texto; nesse
+/// caso copiar/colar além da capacidade são ignorados com `overflowed`).
+pub fn textInputClipboard(
+    comptime S: usize,
+    comptime B: usize,
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    hist: *TextHistory(S, B),
+    clip: *Clipboard,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextInputResult {
+    if (buffer.len > B) return error.InvalidArgument;
+    if (anchor.* > len.*) return error.InvalidArgument;
+    if (clip.len > clip.buf.len) return error.InvalidArgument;
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, *TextHistory(S, B), hist, clip);
 }
 
 /// Campo de texto com undo/redo (1.5.0, aditivo): `Ctrl+Z` desfaz,
@@ -214,7 +253,7 @@ pub fn textInputHistory(
 ) context_mod.ContextError!TextInputResult {
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, *TextHistory(S, B), hist);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, *TextHistory(S, B), hist, null);
 }
 
 fn textInputInner(
@@ -229,6 +268,7 @@ fn textInputInner(
     style: style_mod.TextInputStyle,
     Hist: type,
     hist: Hist,
+    clip: ?*Clipboard,
 ) context_mod.ContextError!TextInputResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
@@ -271,17 +311,27 @@ fn textInputInner(
         for (ctx.pendingEvents()) |ev| {
             switch (ev) {
                 .text => |t| {
+                    var snapped = false;
                     if (anchor) |a| {
                         if (a.* != cursor.*) {
                             if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
                             deleteSelection(buffer, len, cursor, a);
                             res.changed = true;
+                            snapped = true;
                         }
                     }
                     var enc: [4]u8 = undefined;
                     const n = encodeUtf8(t.codepoint, &enc) catch continue; // defensivo; fila já valida
                     if (len.* + n <= buffer.len) {
-                        if (use_hist) hist.checkpoint(buffer[0..len.*], len.*, cursor.*);
+                        // Rajada de digitação agrupa (sem checkpoint se a
+                        // exclusão acima já abriu o passo; reabre a rajada).
+                        if (use_hist) {
+                            if (snapped) {
+                                hist.markGrouped();
+                            } else {
+                                hist.checkpoint(buffer[0..len.*], len.*, cursor.*);
+                            }
+                        }
                         // Insere no cursor (desloca o sufixo para a direita).
                         std.mem.copyBackwards(u8, buffer[cursor.* + n .. len.* + n], buffer[cursor.*..len.*]);
                         @memcpy(buffer[cursor.*..][0..n], enc[0..n]);
@@ -311,6 +361,70 @@ fn textInputInner(
                             res.changed = true;
                         }
                         continue;
+                    }
+                    // Área de transferência interna (só com clip + âncora).
+                    if (clip) |cp| {
+                        if (k.key == .c and k.modifiers.ctrl and !k.modifiers.shift) {
+                            if (anchor) |a| {
+                                const lo = @min(a.*, cursor.*);
+                                const hi = @max(a.*, cursor.*);
+                                if (hi > lo) {
+                                    if (hi - lo <= cp.buf.len) {
+                                        @memcpy(cp.buf[0 .. hi - lo], buffer[lo..hi]);
+                                        cp.len = hi - lo;
+                                    } else {
+                                        res.overflowed = true;
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                        if (k.key == .x and k.modifiers.ctrl and !k.modifiers.shift) {
+                            if (anchor) |a| {
+                                const lo = @min(a.*, cursor.*);
+                                const hi = @max(a.*, cursor.*);
+                                if (hi > lo) {
+                                    if (hi - lo <= cp.buf.len) {
+                                        @memcpy(cp.buf[0 .. hi - lo], buffer[lo..hi]);
+                                        cp.len = hi - lo;
+                                    } else {
+                                        res.overflowed = true;
+                                    }
+                                    if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
+                                    deleteSelection(buffer, len, cursor, a);
+                                    res.changed = true;
+                                }
+                            }
+                            continue;
+                        }
+                        if (k.key == .v and k.modifiers.ctrl and !k.modifiers.shift) {
+                            var snapped = false;
+                            if (anchor) |a| {
+                                if (a.* != cursor.*) {
+                                    if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
+                                    deleteSelection(buffer, len, cursor, a);
+                                    res.changed = true;
+                                    snapped = true;
+                                }
+                            }
+                            const n = cp.len;
+                            if (n > 0) {
+                                if (len.* + n <= buffer.len) {
+                                    // Um passo de undo por colagem: se já
+                                    // houve exclusão acima, sem novo checkpoint.
+                                    if (use_hist and !snapped) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
+                                    std.mem.copyBackwards(u8, buffer[cursor.* + n .. len.* + n], buffer[cursor.*..len.*]);
+                                    @memcpy(buffer[cursor.*..][0..n], cp.buf[0..n]);
+                                    cursor.* += n;
+                                    len.* += n;
+                                    if (anchor) |a| a.* = cursor.*;
+                                    res.changed = true;
+                                } else {
+                                    res.overflowed = true;
+                                }
+                            }
+                            continue;
+                        }
                     }
                     const extend = anchor != null and k.modifiers.shift;
                     switch (k.key) {
@@ -838,6 +952,102 @@ test "textInputHistory undo agrupa, redo refaz, mutação limpa redo" {
         error.InvalidArgument,
         textInputHistory(8, 16, &ctx, id, bounds, &big, &biglen, &bigcur, &biganc, &hist, font, style),
     );
+    ctx.endFrame();
+}
+
+test "textInputClipboard copia, recorta, cola e desfaz" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-clip");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var hist = TextHistory(8, 16){};
+    var clipmem: [16]u8 = undefined;
+    var clip = Clipboard{ .buf = &clipmem };
+
+    const H = struct {
+        fn call(
+            c: *context_mod.Context,
+            i: id_mod.Id,
+            b: types.Rect,
+            bf: []u8,
+            l: *usize,
+            cu: *usize,
+            a: *usize,
+            h: *@TypeOf(hist),
+            cp: *Clipboard,
+            f: metrics_mod.FontMetrics,
+            s: style_mod.TextInputStyle,
+        ) !TextInputResult {
+            return textInputClipboard(8, 16, c, i, b, bf, l, cu, a, h, cp, f, s);
+        }
+    }.call;
+
+    // Foca e digita "ABCD".
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    for ("ABCD") |ch| try ctx.pushEvent(.{ .text = .{ .codepoint = ch } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, &clip, font, style);
+    try stdt.testing.expectEqualStrings("ABCD", buf[0..len]);
+    ctx.endFrame();
+
+    // Sem seleção: Ctrl+C não faz nada.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .c, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, &clip, font, style);
+    try stdt.testing.expectEqual(@as(usize, 0), clip.len);
+    ctx.endFrame();
+
+    // Shift+Home seleciona tudo; Ctrl+C copia; Ctrl+X recorta.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{ .shift = true } } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, &clip, font, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .c, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, &clip, font, style);
+    try stdt.testing.expectEqualStrings("ABCD", clip.buf[0..clip.len]);
+    try stdt.testing.expectEqualStrings("ABCD", buf[0..len]); // copiar não altera
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .x, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const rx = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, &clip, font, style);
+    try stdt.testing.expect(rx.changed);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    ctx.endFrame();
+
+    // Ctrl+V cola; Ctrl+Z desfaz a colagem (um passo).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .v, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, &clip, font, style);
+    try stdt.testing.expectEqualStrings("ABCD", buf[0..len]);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, &clip, font, style);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    ctx.endFrame();
+
+    // Colar além da capacidade: tudo-ou-nada + overflowed.
+    var small: [2]u8 = undefined;
+    var slen: usize = 0;
+    var scur: usize = 0;
+    var sanc: usize = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .v, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const ro = try textInputClipboard(8, 16, &ctx, id, bounds, &small, &slen, &scur, &sanc, &hist, &clip, font, style);
+    try stdt.testing.expect(ro.overflowed);
+    try stdt.testing.expectEqual(@as(usize, 0), slen);
     ctx.endFrame();
 }
 

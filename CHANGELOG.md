@@ -239,3 +239,9 @@ Pré-release instável: API pode mudar até a beta.
   `Ctrl+Shift+Z`, flags `undone`/`redone`); `textInput*` antigos intactos.
 - `event/event`: `Key` ganha `y` (enum já tinha `_`, aditivo).
 - Exemplo desfaz/refaz; resto aditivo (rumo à 1.5.0).
+
+### Adicionado — Milestone 20 (copiar/colar interno, compatível)
+- `widgets/text_input`: `Clipboard` (buf+len do chamador, tudo-ou-nada)
+  + `textInputClipboard(S,B,...)` — `Ctrl+C/X/V` com undo integrado
+  (recortar/colar = passos desfazíveis); legados intactos.
+- Exemplo copia/recorta/cola; resto aditivo (rumo à 1.5.0).
