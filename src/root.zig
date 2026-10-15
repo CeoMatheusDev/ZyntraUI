@@ -64,6 +64,7 @@ pub const widgets = struct {
     pub const tooltip = @import("widgets/tooltip.zig");
     pub const modal = @import("widgets/modal.zig");
     pub const combo = @import("widgets/combo.zig");
+    pub const tab_bar = @import("widgets/tab_bar.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -181,4 +182,5 @@ test {
     _ = @import("widgets/tooltip.zig");
     _ = @import("widgets/modal.zig");
     _ = @import("widgets/combo.zig");
+    _ = @import("widgets/tab_bar.zig");
 }

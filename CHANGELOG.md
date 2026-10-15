@@ -568,3 +568,12 @@ Pré-release instável: API pode mudar até a beta.
   modal; fecha o "futuro" documentado desde a M18). Botão direito
   segue sem dispensar; press fora inalterado.
 - Resto aditivo (acumula p/ MINOR).
+
+### Adicionado — Milestone 56 (TabBar, compatível)
+- `widgets/tab_bar.beginTabBar`/`endTabBar`: barra de abas com
+  estado no chamador (`active: *usize`); click seleciona, teclado
+  (`Left`/`Right`/`Home`/`End`/`Tab`) navega; clamp de índice;
+  3*N+2 draws; `TabBarStyle` + `Theme.tabBarStyle()` validados.
+- `style/style.TabBarStyle` e derivação do tema; `root` exporta
+  `tab_bar`; `endTabBar` existe para simetria (sem estado retido).
+- Resto aditivo (acumula p/ MINOR).
