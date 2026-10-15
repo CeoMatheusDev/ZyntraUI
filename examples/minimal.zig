@@ -74,6 +74,27 @@ pub fn main() !void {
         stats.culled,
     });
 
+    // Rasteriza os comandos do frame 2 num framebuffer 800×600 de prova.
+    // (Requer reter os comandos: aqui reexecutamos os widgets; draws são
+    // determinísticos para os mesmos eventos.)
+    var swfb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 800, 600);
+    defer swfb.deinit(allocator);
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = zyntra_ui.Vec2.init(30, 25) },
+    });
+    _ = try button_mod.button(&ctx, zyntra_ui.Id.fromString("examples/m7:btn"), btn_rect, btn_style);
+    const swstats = try zyntra_ui.software.raster.render(&swfb, ctx.drawCommands(), ctx.viewport);
+    ctx.endFrame();
+    var pxsum: u64 = 0;
+    for (swfb.pixels) |b| pxsum += b;
+    std.debug.print("m14 software drawn={d} culled={d} skipped_text={d} pxsum={d}\n", .{
+        swstats.drawn,
+        swstats.culled,
+        swstats.skipped_text,
+        pxsum,
+    });
+
     // Frame 3: drag no slider (press + move com botão pressionado).
     ctx.beginFrame();
     try ctx.pushEvent(.{

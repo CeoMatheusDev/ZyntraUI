@@ -1,0 +1,380 @@
+//! ZyntraUI — backend de referência em software (software/raster).
+//!
+//! Rasterizador CPU puro para VERIFICAÇÃO do contrato de desenho
+//! (pixels reais, asserts exatos) e saída sem GPU. NÃO é um renderer
+//! de produção: sem blending (último comando vence, alfa ignorado),
+//! sem rasterização de glifos (runs de texto são pulados E contados).
+//! - `SoftwareFramebuffer`: RGBA8 row-major, 1px = 1px lógico, origem
+//!   no canto superior-esquerdo, amostra no centro do pixel.
+//! - `render`: aplica `clip`, viewport e culling; retorna estatísticas.
+//! - `encodePpm`: PPM binário (P6, RGB) em buffer do chamador, sem deps.
+//! Ownership: fb detém `pixels` (alocador do chamador); comandos são
+//! apenas lidos. Tudo determinístico e sem estado global.
+
+const std = @import("std");
+const types = @import("../core/types.zig");
+const commands = @import("../draw/commands.zig");
+
+pub const max_dimension: u32 = 8192;
+
+/// RGBA8 row-major.
+pub const SoftwareFramebuffer = struct {
+    w: u32,
+    h: u32,
+    pixels: []u8, // len == w*h*4, RGBA por pixel
+
+    const Self = @This();
+
+    pub fn init(gpa: std.mem.Allocator, w: u32, h: u32) !Self {
+        if (w == 0 or h == 0 or w > max_dimension or h > max_dimension) {
+            return error.InvalidArgument;
+        }
+        const n: u64 = @as(u64, w) * h * 4;
+        const pixels = try gpa.alloc(u8, @intCast(n));
+        return .{ .w = w, .h = h, .pixels = pixels };
+    }
+
+    pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+        gpa.free(self.pixels);
+        self.pixels = &.{};
+        self.w = 0;
+        self.h = 0;
+    }
+
+    pub fn get(self: *const Self, x: u32, y: u32) [4]u8 {
+        std.debug.assert(x < self.w and y < self.h);
+        const i = (@as(usize, y) * self.w + x) * 4;
+        return self.pixels[i..][0..4].*;
+    }
+
+    fn set(self: *Self, x: u32, y: u32, c: types.Color) void {
+        const i = (@as(usize, y) * self.w + x) * 4;
+        self.pixels[i] = c.r;
+        self.pixels[i + 1] = c.g;
+        self.pixels[i + 2] = c.b;
+        self.pixels[i + 3] = c.a;
+    }
+
+    pub fn clear(self: *Self, c: types.Color) void {
+        var i: usize = 0;
+        while (i < self.pixels.len) : (i += 4) {
+            self.pixels[i] = c.r;
+            self.pixels[i + 1] = c.g;
+            self.pixels[i + 2] = c.b;
+            self.pixels[i + 3] = c.a;
+        }
+    }
+
+    /// Preenche a interseção de `r` com `clip` (quando presente).
+    /// Coordenadas: pixel (i,j) cobre [i,i+1)×[j,j+1).
+    pub fn fillRect(self: *Self, r: types.Rect, clip: ?types.Rect, c: types.Color) void {
+        var x0 = @as(i64, @intFromFloat(@floor(r.x)));
+        var y0 = @as(i64, @intFromFloat(@floor(r.y)));
+        var x1 = @as(i64, @intFromFloat(@ceil(r.x + r.w)));
+        var y1 = @as(i64, @intFromFloat(@ceil(r.y + r.h)));
+        x0 = @max(x0, 0);
+        y0 = @max(y0, 0);
+        x1 = @min(x1, self.w);
+        y1 = @min(y1, self.h);
+        if (clip) |cp| {
+            x0 = @max(x0, @as(i64, @intFromFloat(@floor(cp.x))));
+            y0 = @max(y0, @as(i64, @intFromFloat(@floor(cp.y))));
+            x1 = @min(x1, @as(i64, @intFromFloat(@ceil(cp.x + cp.w))));
+            y1 = @min(y1, @as(i64, @intFromFloat(@ceil(cp.y + cp.h))));
+        }
+        var y = y0;
+        while (y < y1) : (y += 1) {
+            var x = x0;
+            while (x < x1) : (x += 1) {
+                self.set(@intCast(x), @intCast(y), c);
+            }
+        }
+    }
+
+    fn distPointSeg(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) f32 {
+        const dx = bx - ax;
+        const dy = by - ay;
+        const l2 = dx * dx + dy * dy;
+        if (l2 == 0) {
+            const ex = px - ax;
+            const ey = py - ay;
+            return @sqrt(ex * ex + ey * ey);
+        }
+        var t = ((px - ax) * dx + (py - ay) * dy) / l2;
+        t = std.math.clamp(t, 0, 1);
+        const ex = px - (ax + t * dx);
+        const ey = py - (ay + t * dy);
+        return @sqrt(ex * ex + ey * ey);
+    }
+
+    fn inClip(x: i64, y: i64, clip: ?types.Rect) bool {
+        const cp = clip orelse return true;
+        const fx: f32 = @floatFromInt(x);
+        const fy: f32 = @floatFromInt(y);
+        return fx + 1 > cp.x and fx < cp.x + cp.w and fy + 1 > cp.y and fy < cp.y + cp.h;
+    }
+
+    pub fn strokeLine(self: *Self, p0: types.Vec2, p1: types.Vec2, thickness: f32, clip: ?types.Rect, c: types.Color) void {
+        const r = thickness / 2;
+        const x0f = @min(p0.x, p1.x) - r - 1;
+        const y0f = @min(p0.y, p1.y) - r - 1;
+        const x1f = @max(p0.x, p1.x) + r + 1;
+        const y1f = @max(p0.y, p1.y) + r + 1;
+        var y = @max(0, @as(i64, @intFromFloat(@floor(y0f))));
+        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(y1f))));
+        while (y < y_end) : (y += 1) {
+            var x = @max(0, @as(i64, @intFromFloat(@floor(x0f))));
+            const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(x1f))));
+            while (x < x_end) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                const cx: f32 = @floatFromInt(x);
+                const cy: f32 = @floatFromInt(y);
+                if (distPointSeg(cx + 0.5, cy + 0.5, p0.x, p0.y, p1.x, p1.y) <= r) {
+                    self.set(@intCast(x), @intCast(y), c);
+                }
+            }
+        }
+    }
+
+    pub fn fillCircle(self: *Self, center: types.Vec2, radius: f32, clip: ?types.Rect, c: types.Color) void {
+        var y = @max(0, @as(i64, @intFromFloat(@floor(center.y - radius))));
+        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(center.y + radius))));
+        while (y < y_end) : (y += 1) {
+            var x = @max(0, @as(i64, @intFromFloat(@floor(center.x - radius))));
+            const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(center.x + radius))));
+            while (x < x_end) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                const cx: f32 = @floatFromInt(x);
+                const cy: f32 = @floatFromInt(y);
+                const dx = (cx + 0.5) - center.x;
+                const dy = (cy + 0.5) - center.y;
+                if (@sqrt(dx * dx + dy * dy) <= radius) {
+                    self.set(@intCast(x), @intCast(y), c);
+                }
+            }
+        }
+    }
+
+    pub fn strokeRect(self: *Self, r: types.Rect, thickness: f32, clip: ?types.Rect, c: types.Color) void {
+        const t = @max(1.0, thickness);
+        // Barras superior/inferior (largura total) + laterais (entre elas).
+        self.fillRect(.{ .x = r.x, .y = r.y, .w = r.w, .h = @min(t, r.h) }, clip, c);
+        self.fillRect(.{ .x = r.x, .y = r.y + r.h - @min(t, r.h), .w = r.w, .h = @min(t, r.h) }, clip, c);
+        const mid_y = r.y + @min(t, r.h);
+        const mid_h = @max(0, r.h - 2 * @min(t, r.h));
+        if (mid_h > 0) {
+            self.fillRect(.{ .x = r.x, .y = mid_y, .w = @min(t, r.w), .h = mid_h }, clip, c);
+            self.fillRect(.{ .x = r.x + r.w - @min(t, r.w), .y = mid_y, .w = @min(t, r.w), .h = mid_h }, clip, c);
+        }
+    }
+};
+
+/// Estatísticas de uma submissão ao rasterizador.
+pub const SoftwareStats = extern struct {
+    submitted: u32 = 0,
+    drawn: u32 = 0,
+    culled: u32 = 0,
+    skipped_text: u32 = 0,
+};
+
+fn boundsVisible(cmd: commands.DrawCommand, viewport: types.Rect) bool {
+    switch (cmd) {
+        .clear => return true,
+        .rect_filled => |c| return overlaps(c.rect, viewport),
+        .rect_outline => |c| return overlaps(c.rect, viewport),
+        .line => |c| {
+            const x = @min(c.p0.x, c.p1.x) - c.thickness;
+            const y = @min(c.p0.y, c.p1.y) - c.thickness;
+            const w = @abs(c.p1.x - c.p0.x) + 2 * c.thickness;
+            const h = @abs(c.p1.y - c.p0.y) + 2 * c.thickness;
+            return overlaps(.{ .x = x, .y = y, .w = w, .h = h }, viewport);
+        },
+        .circle_filled => |c| return overlaps(.{
+            .x = c.center.x - c.radius,
+            .y = c.center.y - c.radius,
+            .w = c.radius * 2,
+            .h = c.radius * 2,
+        }, viewport),
+        .clip => return true, // estado, nunca "culled"
+        .text => |c| return overlaps(.{ .x = c.pos.x, .y = c.pos.y, .w = c.width, .h = c.size }, viewport),
+    }
+}
+
+fn overlaps(a: types.Rect, b: types.Rect) bool {
+    if (a.w <= 0 or a.h <= 0 or b.w <= 0 or b.h <= 0) return false;
+    return a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h;
+}
+
+/// Executa comandos no framebuffer (1px = 1px lógico). Texto é pulado
+/// E contado (sem fonte, sem glifos). Comandos inválidos retornam erro
+/// sem efeito parcial garantido além do já desenhado.
+pub fn render(fb: *SoftwareFramebuffer, cmds: []const commands.DrawCommand, viewport: types.Rect) !SoftwareStats {
+    var out = SoftwareStats{ .submitted = @intCast(cmds.len) };
+    var clip: ?types.Rect = null;
+    const vp = types.Rect{
+        .x = @max(0, viewport.x),
+        .y = @max(0, viewport.y),
+        .w = @max(0, @min(viewport.w, @as(f32, @floatFromInt(fb.w)))),
+        .h = @max(0, @min(viewport.h, @as(f32, @floatFromInt(fb.h)))),
+    };
+    for (cmds) |cmd| {
+        if (!cmd.isValid()) return error.InvalidCommand;
+        switch (cmd) {
+            .clear => |c| {
+                fb.clear(c.color);
+                out.drawn += 1;
+            },
+            .clip => |c| {
+                clip = if (c.null_rect) null else c.rect;
+                out.drawn += 1;
+            },
+            .text => {
+                out.skipped_text += 1;
+            },
+            else => {
+                if (!boundsVisible(cmd, viewport)) {
+                    out.culled += 1;
+                    continue;
+                }
+                switch (cmd) {
+                    .rect_filled => |c| fb.fillRect(intersectClip(c.rect, clip, vp), null, c.color),
+                    .rect_outline => |c| fb.strokeRect(c.rect, c.thickness, mergeClip(clip, vp), c.color),
+                    .line => |c| fb.strokeLine(c.p0, c.p1, c.thickness, mergeClip(clip, vp), c.color),
+                    .circle_filled => |c| fb.fillCircle(c.center, c.radius, mergeClip(clip, vp), c.color),
+                    else => unreachable,
+                }
+                out.drawn += 1;
+            },
+        }
+    }
+    return out;
+}
+
+/// Interseção de dois rects (vazio se disjuntos).
+fn intersect(a: types.Rect, b: types.Rect) types.Rect {
+    const x = @max(a.x, b.x);
+    const y = @max(a.y, b.y);
+    return .{
+        .x = x,
+        .y = y,
+        .w = @max(0, @min(a.x + a.w, b.x + b.w) - x),
+        .h = @max(0, @min(a.y + a.h, b.y + b.h) - y),
+    };
+}
+
+fn intersectClip(r: types.Rect, clip: ?types.Rect, vp: types.Rect) types.Rect {
+    var out = intersect(r, vp);
+    if (clip) |cp| out = intersect(out, cp);
+    return out;
+}
+
+/// Combina clip de usuário + viewport num único rect-ou-nulo.
+fn mergeClip(clip: ?types.Rect, vp: types.Rect) ?types.Rect {
+    const cp = clip orelse return vp;
+    return intersect(cp, vp);
+}
+
+/// PPM binário (P6) em `out`. Retorna bytes usados; `NoSpaceLeft` se
+/// o buffer for curto. Alfa descartado (sem blending — documentado).
+pub fn encodePpm(fb: *const SoftwareFramebuffer, out: []u8) !usize {
+    const head = try std.fmt.bufPrint(out, "P6\n{d} {d}\n255\n", .{ fb.w, fb.h });
+    const need = head.len + @as(usize, fb.w) * fb.h * 3;
+    if (out.len < need) return error.NoSpaceLeft;
+    var o = head.len;
+    var i: usize = 0;
+    while (i < fb.pixels.len) : (i += 4) {
+        out[o] = fb.pixels[i];
+        out[o + 1] = fb.pixels[i + 1];
+        out[o + 2] = fb.pixels[i + 2];
+        o += 3;
+    }
+    return o;
+}
+
+test "raster rect + clear pixel-exato" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 8, 8);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(7, 7));
+
+    fb.fillRect(types.Rect.init(2, 2, 2, 2), null, types.Color.rgb(255, 0, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(2, 2));
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(3, 3));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(1, 1));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(4, 4));
+
+    // Clip restringe; fora da área nada muda.
+    fb.fillRect(types.Rect.init(0, 0, 8, 8), types.Rect.init(0, 0, 1, 1), types.Color.rgb(0, 255, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 255, 0, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(1, 0));
+
+    try stdt.testing.expectError(error.InvalidArgument, SoftwareFramebuffer.init(gpa, 0, 8));
+    try stdt.testing.expectError(error.InvalidArgument, SoftwareFramebuffer.init(gpa, 99999, 8));
+}
+
+test "raster linha diagonal e círculo" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 10, 10);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+
+    fb.strokeLine(.{ .x = 0, .y = 0 }, .{ .x = 3, .y = 3 }, 1.0, null, types.Color.rgb(0, 0, 255));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 255, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 255, 255 }, fb.get(2, 2));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(1, 0)); // vizinho fora do raio 0.5
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 1));
+
+    fb.fillCircle(.{ .x = 7, .y = 7 }, 2.0, null, types.Color.rgb(255, 255, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 0, 255 }, fb.get(7, 7));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 0, 255 }, fb.get(8, 7)); // dist 1.5 <= 2
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(9, 9)); // dist ~3.5 > 2
+}
+
+test "render pipeline: clear, clip, cull, texto pulado" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 100, 100);
+    defer fb.deinit(gpa);
+    const vp = types.Rect.init(0, 0, 100, 100);
+    const cmds = [_]commands.DrawCommand{
+        .{ .clear = .{ .color = types.Color.rgb(10, 10, 10) } },
+        .{ .rect_filled = .{ .rect = types.Rect.init(10, 10, 20, 20), .color = types.Color.rgb(255, 0, 0) } },
+        .{ .rect_filled = .{ .rect = types.Rect.init(500, 500, 20, 20), .color = types.Color.rgb(0, 255, 0) } },
+        .{ .clip = .{ .rect = types.Rect.init(0, 0, 15, 15), .null_rect = false } },
+        .{ .rect_filled = .{ .rect = types.Rect.init(10, 10, 20, 20), .color = types.Color.rgb(0, 0, 255) } },
+        .{ .text = .{ .pos = .{ .x = 0, .y = 0 }, .color = types.Color.rgb(255, 255, 255), .size = 16, .width = 10, .start = 0, .len = 0 } },
+    };
+    const s = try render(&fb, &cmds, vp);
+    try stdt.testing.expectEqual(@as(u32, 6), s.submitted);
+    try stdt.testing.expectEqual(@as(u32, 4), s.drawn); // clear + rect + clip + rect(clippado)
+    try stdt.testing.expectEqual(@as(u32, 1), s.culled);
+    try stdt.testing.expectEqual(@as(u32, 1), s.skipped_text);
+    // Segundo rect (azul) só pintou a interseção com o clip [10,15):
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 255, 255 }, fb.get(12, 12));
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(16, 16));
+    try stdt.testing.expectEqual([4]u8{ 10, 10, 10, 255 }, fb.get(50, 50));
+
+    const bad = [_]commands.DrawCommand{
+        .{ .rect_filled = .{ .rect = types.Rect.init(0, 0, -1, 5), .color = types.Color.rgb(0, 0, 0) } },
+    };
+    try stdt.testing.expectError(error.InvalidCommand, render(&fb, &bad, vp));
+}
+
+test "encodePpm cabeçalho e bytes exatos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 2, 1);
+    defer fb.deinit(gpa);
+    fb.set(0, 0, types.Color.rgb(255, 0, 0));
+    fb.set(1, 0, types.Color.rgb(0, 255, 0));
+    var out: [32]u8 = undefined;
+    const n = try encodePpm(&fb, &out);
+    try stdt.testing.expectEqualStrings("P6\n2 1\n255\n", out[0..11]);
+    try stdt.testing.expectEqual(@as(usize, 17), n);
+    try stdt.testing.expectEqualSlices(u8, &.{ 255, 0, 0, 0, 255, 0 }, out[11..17]);
+    var tiny: [5]u8 = undefined;
+    try stdt.testing.expectError(error.NoSpaceLeft, encodePpm(&fb, &tiny));
+}

@@ -172,3 +172,10 @@ Pré-release instável: API pode mudar até a beta.
 - `style/style`: `TextInputStyle.selection` COM default (literais antigos
   compilam); `TextInputResult.selected` (só leitura, aditivo).
 - Exemplo seleciona tudo + substitui; resto aditivo (rumo à 1.1.0).
+
+### Adicionado — Milestone 14 (rasterizador de referência, compatível)
+- `software/raster`: framebuffer RGBA8 + `render` (fill/stroke/clip/cull,
+  texto pulado E contado), `encodePpm` (P6 sem deps), sem blending e sem
+  glifos — documentado como ferramenta de verificação, não produção.
+- Asserts pixel-exatos (rect/clip/linha/círculo/PPM); exemplo rasteriza e
+  imprime checksum; resto aditivo (rumo à 1.2.0).
