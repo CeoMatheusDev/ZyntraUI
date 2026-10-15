@@ -20,11 +20,13 @@ const style_mod = @import("../style/style.zig");
 pub const spinner_speed: f32 = 8.0;
 
 /// Índice da cabeça para `dots` posições no tempo `t` (segundos).
-/// Aceita `t` finito (inclusive negativo); sempre retorna `[0, dots)`.
+/// Aceita `t` finito (inclusive negativo) e extremos; sempre retorna
+/// `[0, dots)`. Usa precisão f64 no módulo para não estourar `f32`
+/// (t grande × velocidade → `inf`, e `inf - inf` seria `NaN`).
 pub fn spinnerHeadIndex(dots: u8, t: f32) usize {
     if (dots == 0) return 0;
-    const n: f32 = @floatFromInt(dots);
-    const step = @floor(t * spinner_speed);
+    const n: f64 = @floatFromInt(dots);
+    const step = @floor(@as(f64, t) * @as(f64, spinner_speed));
     const wrapped = step - n * @floor(step / n); // [0, n) para qualquer sinal
     return @intFromFloat(wrapped);
 }
@@ -80,6 +82,10 @@ test "spinner desenha dots, gira e valida" {
     try stdt.testing.expectEqual(@as(usize, 0), spinnerHeadIndex(style.dots, 0));
     try stdt.testing.expectEqual(@as(usize, 1), spinnerHeadIndex(style.dots, 1.0 / spinner_speed));
     try stdt.testing.expectEqual(@as(usize, 0), spinnerHeadIndex(style.dots, @as(f32, @floatFromInt(style.dots)) / spinner_speed));
+    // Valores extremos de `t` (finitos) não estouram nem retornam fora da faixa.
+    const big = std.math.floatMax(f32);
+    try stdt.testing.expect(spinnerHeadIndex(style.dots, big) < style.dots);
+    try stdt.testing.expect(spinnerHeadIndex(style.dots, -big) < style.dots);
 
     // Entradas inválidas.
     ctx.beginFrame();
