@@ -40,5 +40,8 @@ reescrever histórico. Preservar tags e releases publicadas.
 - Procedimento: prep commit (versão+changelog+README) → push → CI verde
   → tag `vX.Y.Z` → push tag → `gh release create` (`--prerelease` só
   para alpha/beta/rc). Interromper se qualquer etapa falhar.
+- Prep sincroniza a versão em `build.zig.zon` + `src/core/types.zig` +
+  testes C de versão (+ refs públicas); validar com testes; nunca
+  tag/release com divergência (o teste de sincronia quebra o CI).
 - MAJOR/incompatibilidades: SOMENTE com aprovação explícita. Nunca
   publicar MAJOR automaticamente nem para justificá-la.
