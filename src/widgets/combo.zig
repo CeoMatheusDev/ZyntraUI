@@ -1,8 +1,9 @@
 //! ZyntraUI — combobox (widgets/combo).
 //!
-//! Modelo M36 (composição, estado no chamador):
+//! Modelo M36 (composição, estado no chamador) + M40 (teclado):
 //! - Fechado: campo estilo-botão com rótulo selecionado + chevron;
-//!   click abre (`open.* = true`) e foca o menu.
+//!   click abre (`open.* = true`) e foca o menu. Com foco, Espaço/Enter
+//!   (via button) ou setas abrem direto no menu focado.
 //! - Aberto: menu dropdown abaixo do campo (mesma largura) via
 //!   `menu()` com id derivado (`id.child(1)`); escolha fecha e
 //!   seleciona; press fora/`Escape` fecha sem mudar.
@@ -46,6 +47,19 @@ pub fn combo(
             open.* = true;
             res.open = true;
             ctx.focus_owner = id.child(1); // menu já nasce focado
+        } else if (ctx.hasFocus(id)) {
+            // Setas com foco abrem (Espaço/Enter já vêm do button).
+            for (ctx.pendingEvents()) |ev| {
+                if (ev != .key) continue;
+                const k = ev.key;
+                if (!k.pressed or k.modifiers.ctrl) continue;
+                if (k.key == .down or k.key == .up) {
+                    open.* = true;
+                    res.open = true;
+                    ctx.focus_owner = id.child(1);
+                    break;
+                }
+            }
         }
         // Rótulo + chevron sobre o campo do botão.
         if (options[selected.*].len > 0) {
@@ -169,5 +183,44 @@ test "combo abre, escolhe e fecha; fora dispensa" {
     try stdt.testing.expectError(error.InvalidArgument, combo(&ctx, .null, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle()));
     try stdt.testing.expectError(error.InvalidArgument, combo(&ctx, id, bounds, &empty, &sel, &open, font, theme.buttonStyle(), theme.menuStyle()));
     try stdt.testing.expectError(error.InvalidArgument, combo(&ctx, id, bounds, &opts, &bad, &open, font, theme.buttonStyle(), theme.menuStyle()));
+    ctx.endFrame();
+}
+
+test "combo abre com seta tendo foco" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const theme = style_mod.Theme.darkDefault();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 160, 30);
+    const id = id_mod.Id.fromString("test:combo-kb");
+    const opts = [_][]const u8{ "A", "B" };
+    var sel: usize = 0;
+    var open = false;
+
+    // Foca com click (sem soltar: sem click ainda) e aperta Down.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(10, 10) },
+    });
+    _ = try combo(&ctx, id, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle());
+    try stdt.testing.expect(ctx.hasFocus(id));
+    try stdt.testing.expect(!open);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    const r = try combo(&ctx, id, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle());
+    try stdt.testing.expect(r.open and open);
+    try stdt.testing.expect(ctx.hasFocus(id.child(1)));
+    ctx.endFrame();
+
+    // Sem foco: seta ignorada.
+    ctx.clearFocus();
+    open = false;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    const r2 = try combo(&ctx, id, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle());
+    try stdt.testing.expect(!r2.open and !open);
     ctx.endFrame();
 }

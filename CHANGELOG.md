@@ -431,3 +431,8 @@ Pré-release instável: API pode mudar até a beta.
   grab preservado em `ModalDragState` do chamador, clamp ao viewport,
   release encerra); `beginModal` clássico delega sem mudar; `dragging`.
 - Exemplo arrasta (290,290); resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 40 (combo pelo teclado, compatível)
+- `widgets/combo`: setas com foco abrem direto no menu focado
+  (Espaço/Enter já vinham do button); sem foco, ignoradas.
+- Resto aditivo (acumula p/ próxima MINOR).
