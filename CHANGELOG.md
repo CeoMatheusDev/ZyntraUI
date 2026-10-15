@@ -253,3 +253,11 @@ Pré-release instável: API pode mudar até a beta.
   + `textInputClipboard(S,B,...)` — `Ctrl+C/X/V` com undo integrado
   (recortar/colar = passos desfazíveis); legados intactos.
 - Exemplo copia/recorta/cola; resto aditivo (rumo à 1.5.0).
+
+### Adicionado — Milestone 21 (fuzz + endurecimento, compatível)
+- `text/wrap`: 2 testes fuzz via `std.testing.fuzz` (decode: faixas e
+  coerência de len; wrap/measure: faixas contidas, contagens iguais) —
+  verdes no CI (Debug com safety).
+- Guarda `text.len > u32` em `layout` (offsets `LineRange`/`DrawCommand`
+  não endereçam além de 4 GiB; por inspeção, sem alloc de 4 GiB).
+- Resto aditivo.

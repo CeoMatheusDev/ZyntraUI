@@ -34,6 +34,8 @@ fn isSpace(cp: u21) bool {
 fn layout(text: []const u8, m: metrics.FontMetrics, max_width: f32, out: ?[]LineRange) !usize {
     if (!m.isValid()) return error.InvalidMetrics;
     if (!std.math.isFinite(max_width) or max_width <= 0) return error.InvalidArgument;
+    // Offsets u32 abaixo: texto além de 4 GiB não é endereçável aqui.
+    if (text.len > std.math.maxInt(u32)) return error.OutOfMemory;
     if (text.len == 0) return 0;
 
     var nlines: usize = 0;
@@ -228,4 +230,89 @@ test "wrap palavra longa, erros e out curto" {
     try stdt.testing.expectError(error.InvalidArgument, wrapLines("a", m, -5, &out));
     var tiny: [1]LineRange = undefined;
     try stdt.testing.expectError(error.NoSpaceLeft, wrapLines("aaa bbb", m, 20, &tiny));
+}
+
+test "fuzz decodeOne: sem crash, faixas válidas, len coerente" {
+    try std.testing.fuzz({}, fuzzDecode, .{});
+}
+
+fn fuzzDecode(_: void, smith: *std.testing.Smith) !void {
+    var buf: [32]u8 = undefined;
+    smith.bytes(&buf);
+    const n: usize = smith.valueRangeAtMost(u8, 0, 32);
+    const input = buf[0..n];
+    if (input.len == 0) {
+        try std.testing.expectError(error.InvalidUtf8, metrics.decodeOne(input));
+        return;
+    }
+    if (metrics.decodeOne(input)) |d| {
+        // Codepoint sempre representável e fora de surrogates.
+        try std.testing.expect(d.codepoint <= 0x10FFFF);
+        try std.testing.expect(d.codepoint < 0xD800 or d.codepoint > 0xDFFF);
+        try std.testing.expect(d.len >= 1 and d.len <= 4);
+        try std.testing.expect(d.len <= input.len);
+        // Lead byte determina o comprimento (overlong/continuação caem aqui).
+        const b0 = input[0];
+        if (b0 < 0x80) {
+            try std.testing.expectEqual(@as(u3, 1), d.len);
+        } else if (b0 < 0xC2) {
+            return error.TestUnexpectedResult; // deve ter falhado
+        } else if (b0 < 0xE0) {
+            try std.testing.expectEqual(@as(u3, 2), d.len);
+        } else if (b0 < 0xF0) {
+            try std.testing.expectEqual(@as(u3, 3), d.len);
+        } else if (b0 < 0xF5) {
+            try std.testing.expectEqual(@as(u3, 4), d.len);
+        } else {
+            return error.TestUnexpectedResult; // deve ter falhado
+        }
+    } else |err| {
+        try std.testing.expectEqual(error.InvalidUtf8, err);
+    }
+}
+
+test "fuzz wrap/measure: faixas contidas, contagens coerentes" {
+    try std.testing.fuzz({}, fuzzWrap, .{});
+}
+
+fn fuzzWrap(_: void, smith: *std.testing.Smith) !void {
+    var buf: [48]u8 = undefined;
+    smith.bytes(&buf);
+    const n: usize = smith.valueRangeAtMost(u8, 0, 48);
+    const text = buf[0..n];
+    const m = metrics.FontMetrics.withSize(10);
+    const widths = [_]f32{ 1, 6, 12, 30, 1000 };
+    const max_width = widths[smith.value(u8) % widths.len];
+
+    var out: [32]LineRange = undefined;
+    const counted = countLines(text, m, max_width) catch |err| {
+        // Únicos erros possíveis aqui (métricas válidas, largura válida).
+        try std.testing.expectEqual(error.InvalidUtf8, err);
+        // wrapLines deve concordar no erro.
+        var out2: [1]LineRange = undefined;
+        try std.testing.expectError(error.InvalidUtf8, wrapLines(text, m, max_width, &out2));
+        return;
+    };
+    // Texto válido: wrap escreve o mesmo tanto que conta (ou NoSpaceLeft).
+    const written = wrapLines(text, m, max_width, &out) catch |err| {
+        try std.testing.expectEqual(error.NoSpaceLeft, err);
+        return; // parcial preenchido; nada mais a afirmar sem realloc
+    };
+    try std.testing.expectEqual(counted, written);
+    for (out[0..written]) |r| {
+        const start: usize = r.start;
+        const end: usize = start + r.len;
+        try std.testing.expect(end <= text.len);
+        // Faixa sempre decodifica limpa (fronteira de codepoint).
+        var p = start;
+        while (p < end) {
+            const d = try metrics.decodeOne(text[p..end]);
+            p += d.len;
+        }
+        try std.testing.expectEqual(end, p);
+    }
+    // Medição coerente no mesmo texto.
+    const tm = try metrics.measure(text, m);
+    try std.testing.expect(tm.width <= @as(f32, @floatFromInt(tm.glyphs)) * m.advance + 0.001);
+    try std.testing.expectEqual(@as(f32, @floatFromInt(tm.lines)) * m.lineHeight(), tm.height);
 }
