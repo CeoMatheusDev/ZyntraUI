@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.17.0] - 2026-10-15
+
+MINOR estável, 100% compatível: visão tabular.
+
+- `widgets/table` (M62): tabela com header fixo e corpo rolável,
+  colunas com largura, seleção por click/teclado, wheel, auto-scroll,
+  zebra/hover/seleção, separadores, scrollbar e clip.
+- 100/100 testes, integração C, CI verde.
+
 ## [1.16.0] - 2026-10-15
 
 MINOR estável, 100% compatível: TreeView hierárquica + endurecimento.
