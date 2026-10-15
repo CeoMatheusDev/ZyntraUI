@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.15.0] - 2026-10-15
+
+MINOR estável, 100% compatível: widgets de organização de interfaces.
+
+- `widgets/tab_bar` (M56): barra de abas com click/seleção/teclado.
+- `widgets/splitter` (M57): divisor arrastável com mouse/teclado.
+- `widgets/list_view` (M58): lista vertical com scroll/seleção/wheel.
+- 96/96 testes, integração C, CI verde.
+
 ## [1.14.0] - 2026-10-15
 
 MINOR estável, 100% compatível: widgets e versionamento.
