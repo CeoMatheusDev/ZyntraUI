@@ -12,6 +12,7 @@ const menu_mod = @import("zyntra_ui").widgets.menu;
 const radio_mod = @import("zyntra_ui").widgets.radio;
 const tooltip_mod = @import("zyntra_ui").widgets.tooltip;
 const modal_mod = @import("zyntra_ui").widgets.modal;
+const combo_mod = @import("zyntra_ui").widgets.combo;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -286,6 +287,21 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m17 drag offset={d} dragging={}\n", .{ scrolled, scd.dragging });
 
+    // Solta o scroll (captura retida bloquearia o botão do combo).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = false, .pos = zyntra_ui.Vec2.init(496, 460) } });
+    _ = try scroll_mod.beginScroll(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m16:sc"),
+        sc_bounds,
+        &scrolled,
+        300,
+        24,
+        sc_style,
+    );
+    try scroll_mod.endScroll(&ctx, sc_bounds, scrolled, 300, sc_style);
+    ctx.endFrame();
+
     // Teclado no scroll: press foca + PageDown desce 100 (130→200 clamp).
     ctx.beginFrame();
     try ctx.pushEvent(.{
@@ -487,4 +503,29 @@ pub fn main() !void {
     }
     ctx.endFrame();
     std.debug.print("m27 modal open={} draws={d}\n", .{ mopen, ctx.drawCommands().len });
+
+    // Combo: abre no campo, escolhe item 1 no menu.
+    const copts = [_][]const u8{ "Red", "Green", "Blue" };
+    var csel: usize = 0;
+    var copen = false;
+    const cbounds = zyntra_ui.Rect.init(500, 500, 160, 30);
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(510, 510) },
+    });
+    _ = try combo_mod.combo(&ctx, zyntra_ui.Id.fromString("examples/m36:c"), cbounds, &copts, &csel, &copen, font, theme.buttonStyle(), theme.menuStyle());
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = zyntra_ui.Vec2.init(510, 510) },
+    });
+    _ = try combo_mod.combo(&ctx, zyntra_ui.Id.fromString("examples/m36:c"), cbounds, &copts, &csel, &copen, font, theme.buttonStyle(), theme.menuStyle());
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(510, 560) },
+    });
+    const cmb = try combo_mod.combo(&ctx, zyntra_ui.Id.fromString("examples/m36:c"), cbounds, &copts, &csel, &copen, font, theme.buttonStyle(), theme.menuStyle());
+    ctx.endFrame();
+    std.debug.print("m36 combo selected={d} open={} changed={}\n", .{ csel, copen, cmb.changed });
 }

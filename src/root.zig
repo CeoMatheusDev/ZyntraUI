@@ -63,6 +63,7 @@ pub const widgets = struct {
     pub const radio = @import("widgets/radio.zig");
     pub const tooltip = @import("widgets/tooltip.zig");
     pub const modal = @import("widgets/modal.zig");
+    pub const combo = @import("widgets/combo.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -134,6 +135,7 @@ pub const RadioResult = widgets.radio.RadioResult;
 pub const TooltipState = widgets.tooltip.TooltipState;
 pub const TooltipResult = widgets.tooltip.TooltipResult;
 pub const ModalResult = widgets.modal.ModalResult;
+pub const ComboResult = widgets.combo.ComboResult;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -177,4 +179,5 @@ test {
     _ = @import("widgets/radio.zig");
     _ = @import("widgets/tooltip.zig");
     _ = @import("widgets/modal.zig");
+    _ = @import("widgets/combo.zig");
 }

@@ -396,3 +396,18 @@ Pré-release instável: API pode mudar até a beta.
   (lixo do alocador, `0xAA` em Debug); com `clear`, idêntico (6/6).
   Framebuffer sem limpar = conteúdo indefinido (documentado).
 - Fuzz permanente nos primitivos do raster; resto aditivo.
+
+### Adicionado — Milestone 36 (combobox, compatível)
+- `widgets/combo`: campo + dropdown por composição (`button` + `menu`,
+  id filho via `Id.child(1)`); abre no click e foca o menu; escolha
+  fecha, fora/`Escape` fecha sem mudar; chevron em 2 linhas; itens na
+  pilha (teto 256, zero alloc).
+- Exemplo abre e escolhe item 1; resto aditivo (acumula p/ 1.11.0).
+
+### Adicionado — Milestone 36 (combobox, compatível)
+- `widgets/combo`: campo + dropdown por composição (`button` + `menu`,
+  id filho via `Id.child(1)`); abre no click e foca o menu; escolha
+  fecha, fora/`Escape` fecha sem mudar; chevron em 2 linhas; itens na
+  pilha (teto 256, zero alloc).
+- Exemplo abre e escolhe item 1 (após soltar captura do scroll, como
+  app real); resto aditivo (acumula p/ 1.11.0).
