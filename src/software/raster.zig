@@ -2,8 +2,9 @@
 //!
 //! Rasterizador CPU puro para VERIFICAÇÃO do contrato de desenho
 //! (pixels reais, asserts exatos) e saída sem GPU. NÃO é um renderer
-//! de produção: sem blending (último comando vence, alfa ignorado),
-//! sem rasterização de glifos (runs de texto são pulados E contados).
+//! de produção: sem rasterização de glifos (runs de texto são pulados
+//! E contados). Blending source-over com arredondamento (opaco e
+//! transparente têm caminho rápido/idêntico ao legado).
 //! - `SoftwareFramebuffer`: RGBA8 row-major, 1px = 1px lógico, origem
 //!   no canto superior-esquerdo, amostra no centro do pixel.
 //! - `render`: aplica `clip`, viewport e culling; retorna estatísticas.
@@ -51,10 +52,26 @@ pub const SoftwareFramebuffer = struct {
 
     fn set(self: *Self, x: u32, y: u32, c: types.Color) void {
         const i = (@as(usize, y) * self.w + x) * 4;
-        self.pixels[i] = c.r;
-        self.pixels[i + 1] = c.g;
-        self.pixels[i + 2] = c.b;
-        self.pixels[i + 3] = c.a;
+        if (c.a == 255) {
+            // Caminho rápido: opaco sobrescreve (idêntico ao legado).
+            self.pixels[i] = c.r;
+            self.pixels[i + 1] = c.g;
+            self.pixels[i + 2] = c.b;
+            self.pixels[i + 3] = c.a;
+            return;
+        }
+        if (c.a == 0) return; // transparente: no-op
+        const d0: u32 = self.pixels[i];
+        const d1: u32 = self.pixels[i + 1];
+        const d2: u32 = self.pixels[i + 2];
+        const d3: u32 = self.pixels[i + 3];
+        const sa: u32 = c.a;
+        const ia: u32 = 255 - sa;
+        // Source-over com arredondamento (+127 antes de /255).
+        self.pixels[i] = @intCast((@as(u32, c.r) * sa + d0 * ia + 127) / 255);
+        self.pixels[i + 1] = @intCast((@as(u32, c.g) * sa + d1 * ia + 127) / 255);
+        self.pixels[i + 2] = @intCast((@as(u32, c.b) * sa + d2 * ia + 127) / 255);
+        self.pixels[i + 3] = @intCast((sa * 255 + d3 * ia + 127) / 255);
     }
 
     pub fn clear(self: *Self, c: types.Color) void {
@@ -445,4 +462,26 @@ fn fuzzRaster(_: void, smith: *std.testing.Smith) !void {
 
     // Invariante estrutural: tamanho do buffer intacto.
     try std.testing.expectEqual(@as(usize, 16 * 16 * 4), fb.pixels.len);
+}
+
+test "raster blending source-over com arredondamento" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 4, 4);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+
+    // Vermelho 50% sobre preto: (255*128+127)/255 = 128.
+    fb.fillRect(types.Rect.init(0, 0, 4, 4), null, .{ .r = 255, .g = 0, .b = 0, .a = 128 });
+    try stdt.testing.expectEqual([4]u8{ 128, 0, 0, 255 }, fb.get(0, 0));
+
+    // Segunda demão: (255*128+128*127+127)/255 = 192.
+    fb.fillRect(types.Rect.init(0, 0, 4, 4), null, .{ .r = 255, .g = 0, .b = 0, .a = 128 });
+    try stdt.testing.expectEqual([4]u8{ 192, 0, 0, 255 }, fb.get(0, 0));
+
+    // Transparente não toca; opaco sobrescreve exato (legado).
+    fb.fillRect(types.Rect.init(0, 0, 4, 4), null, .{ .r = 0, .g = 0, .b = 0, .a = 0 });
+    try stdt.testing.expectEqual([4]u8{ 192, 0, 0, 255 }, fb.get(0, 0));
+    fb.fillRect(types.Rect.init(0, 0, 4, 4), null, types.Color.rgb(1, 2, 3));
+    try stdt.testing.expectEqual([4]u8{ 1, 2, 3, 255 }, fb.get(0, 0));
 }

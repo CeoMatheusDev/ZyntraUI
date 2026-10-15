@@ -417,3 +417,8 @@ Pré-release instável: API pode mudar até a beta.
   1 comando por linha não-vazia (máx. 64, trunca), `bounds.w == 0`
   rejeitado; `label` clássico intacto.
 - Exemplo com 3 linhas; resto aditivo (acumula p/ 1.11.0).
+
+### Adicionado — Milestone 38 (blending, compatível)
+- `software/raster`: source-over com arredondamento em `set()`; opaco
+  e transparente preservam o comportamento exato legado (fast paths).
+- Resto aditivo (acumula p/ próxima MINOR).
