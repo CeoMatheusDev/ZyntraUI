@@ -448,3 +448,8 @@ Pré-release instável: API pode mudar até a beta.
   (derivado, sem estado) com clip pareado só no overflow; highlight e
   caret acompanham o offset.
 - Resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 43 (posicionamento de popup, compatível)
+- `widgets/popup.popupPlace`: abaixo da âncora, vira p/ cima se
+  estourar, prende na horizontal; NaN/negativos saturam sem crash.
+- Resto aditivo (acumula p/ próxima MINOR).
