@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.8.0] - 2026-10-15
+
+Oitava MINOR estável, 100% compatível: teclado na cascata + radio.
+
+- `widgets/menu` com foco atravessando níveis (M24).
+- `widgets/radio` com seleção exclusiva (M25).
+- 62/62 testes, integração C, CI verde.
+
+
 ## [1.7.0] - 2026-10-15
 
 Sétima MINOR estável, 100% compatível: cascata de menus.
