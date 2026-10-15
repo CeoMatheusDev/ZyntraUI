@@ -71,7 +71,7 @@ networking by design — see `docs/` for contracts.
 Requires Zig 0.17.0. Add the dependency:
 
 ```sh
-zig fetch --save https://github.com/CeoMatheusDev/ZyntraUI/archive/refs/tags/v1.9.0.tar.gz
+zig fetch --save https://github.com/CeoMatheusDev/ZyntraUI/archive/refs/tags/v1.9.1.tar.gz
 ```
 
 The snippet below was compiled and run against this tag (`snippet ok`):
