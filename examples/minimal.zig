@@ -9,6 +9,7 @@ const scroll_mod = @import("zyntra_ui").widgets.scroll;
 const popup_mod = @import("zyntra_ui").widgets.popup;
 const progress_mod = @import("zyntra_ui").widgets.progress;
 const menu_mod = @import("zyntra_ui").widgets.menu;
+const radio_mod = @import("zyntra_ui").widgets.radio;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -374,4 +375,19 @@ pub fn main() !void {
     const smk = try menu_mod.menu(&ctx, zyntra_ui.Id.fromString("examples/m23:s"), sb2, &sitems, &sactive, font, theme.menuStyle());
     ctx.endFrame();
     std.debug.print("m24 kb cross-level chosen={?d}\n", .{smk.chosen});
+
+    // Radio: 3 opções, click na última + seta sobe.
+    const ropts = [_][]const u8{ "Red", "Green", "Blue" };
+    var rsel: usize = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(20, 655) },
+    });
+    _ = try radio_mod.radio(&ctx, zyntra_ui.Id.fromString("examples/m25:r"), zyntra_ui.Rect.init(16, 600, 160, 60), &ropts, &rsel, font, theme.radioStyle());
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .up, .pressed = true, .modifiers = .{} } });
+    const rr = try radio_mod.radio(&ctx, zyntra_ui.Id.fromString("examples/m25:r"), zyntra_ui.Rect.init(16, 600, 160, 60), &ropts, &rsel, font, theme.radioStyle());
+    ctx.endFrame();
+    std.debug.print("m25 radio selected={d} focused={}\n", .{ rsel, rr.focused });
 }

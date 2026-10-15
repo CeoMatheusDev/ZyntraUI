@@ -296,3 +296,10 @@ Pré-release instável: API pode mudar até a beta.
 - `widgets/menu`: `Right` com foco move ao filho (`MenuChild.id`);
   `Left` no filho pede o pai (`MenuResult.focus_parent`, chamador refoca).
   Um nível por vez; resto aditivo (acumula p/ 1.8.0).
+
+### Adicionado — Milestone 25 (radio group, compatível)
+- `widgets/radio`: seleção exclusiva com `selected: *usize` do chamador,
+  click seleciona, setas/Home/End com foco movem e selecionam (wrap),
+  registra foco para o Tab; sem opções desabilitadas (documentado).
+- `style/style`: `RadioStyle` + `Theme.radioStyle()`.
+- Exemplo clica Blue + seta; resto aditivo (rumo à 1.8.0).

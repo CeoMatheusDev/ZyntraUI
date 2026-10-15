@@ -95,6 +95,20 @@ pub const PopupStyle = extern struct {
     }
 };
 
+/// Estilo de grupo de radio.
+pub const RadioStyle = extern struct {
+    box: types.Color,
+    dot: types.Color,
+    text: types.Color,
+    border_width: f32 = 1.0,
+    radio_r: f32 = 7,
+
+    pub fn isValid(self: RadioStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0 and
+            std.math.isFinite(self.radio_r) and self.radio_r > 0;
+    }
+};
+
 /// Estilo de menu dropdown.
 pub const MenuStyle = extern struct {
     bg: types.Color,
@@ -232,6 +246,16 @@ pub const Theme = extern struct {
             .border_width = 1.0,
         };
     }
+
+    pub fn radioStyle(self: Theme) RadioStyle {
+        return .{
+            .box = self.surface,
+            .dot = types.Color.rgb(235, 235, 240),
+            .text = self.text,
+            .border_width = 1.0,
+            .radio_r = 7,
+        };
+    }
 };
 
 test "Theme defaults + derivados válidos" {
@@ -246,6 +270,7 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(dark.textInputStyle().isValid());
     try stdt.testing.expect(dark.scrollStyle().isValid());
     try stdt.testing.expect(dark.popupStyle().isValid());
+    try stdt.testing.expect(dark.radioStyle().isValid());
     try stdt.testing.expect(dark.menuStyle().isValid());
     try stdt.testing.expect(dark.progressStyle().isValid());
     const bad_btn = ButtonStyle{
