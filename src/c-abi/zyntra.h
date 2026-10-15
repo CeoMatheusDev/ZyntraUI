@@ -54,6 +54,7 @@ typedef struct ZyntraContext ZyntraContext;
 uint32_t zyntra_version_major(void);
 uint32_t zyntra_version_minor(void);
 uint32_t zyntra_version_patch(void);
+const char *zyntra_version_prerelease(void);
 
 ZyntraResult zyntra_context_create(ZyntraRect viewport, ZyntraContext **out_handle);
 void zyntra_context_destroy(ZyntraContext *handle);

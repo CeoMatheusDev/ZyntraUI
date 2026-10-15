@@ -56,6 +56,12 @@ pub export fn zyntra_version_patch() callconv(.c) u32 {
     return types_mod.version_patch;
 }
 
+/// Sufixo de pré-lançamento (`""` quando estável). Ponteiro para
+/// armazenamento estático — válido para sempre, sem free.
+pub export fn zyntra_version_prerelease() callconv(.c) [*:0]const u8 {
+    return types_mod.version_prerelease;
+}
+
 pub export fn zyntra_context_create(viewport: ct.ZyntraRect, out_handle: ?*?*ZyntraContext) callconv(.c) ct.ZyntraResult {
     const out = out_handle orelse return .invalid_argument;
     if (viewport.w < 0 or viewport.h < 0) return .invalid_argument;
@@ -302,4 +308,13 @@ test "C-ABI draw_text copia, valida e conta" {
     const cmds = toCtx(handle.?).drawCommands();
     try stdt.testing.expectEqualStrings("Hi", toCtx(handle.?).draw.textOf(cmds[0]));
     try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI versão espelha constantes Zig" {
+    const stdt = @import("std");
+    try stdt.testing.expectEqual(types_mod.version_major, zyntra_version_major());
+    try stdt.testing.expectEqual(types_mod.version_minor, zyntra_version_minor());
+    try stdt.testing.expectEqual(types_mod.version_patch, zyntra_version_patch());
+    const pre = std.mem.span(zyntra_version_prerelease());
+    try stdt.testing.expectEqualStrings(types_mod.version_prerelease, pre);
 }

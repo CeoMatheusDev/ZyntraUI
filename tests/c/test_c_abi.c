@@ -24,6 +24,8 @@ int main(void) {
 
     printf("zyntra %u.%u.%u\n",
         zyntra_version_major(), zyntra_version_minor(), zyntra_version_patch());
+    assert(zyntra_version_major() == 1);
+    assert(strcmp(zyntra_version_prerelease(), "") == 0);
 
     ZyntraContext *ctx = NULL;
     ZyntraRect vp = {0, 0, 800, 600};

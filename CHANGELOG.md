@@ -453,3 +453,10 @@ Pré-release instável: API pode mudar até a beta.
 - `widgets/popup.popupPlace`: abaixo da âncora, vira p/ cima se
   estourar, prende na horizontal; NaN/negativos saturam sem crash.
 - Resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 44 (versão na C-ABI, compatível)
+- `c-abi`: `zyntra_version_prerelease()` (estático, sem free);
+  `version_prerelease` agora `[:0]const u8` (literais já sentinela).
+- Teste de consistência Zig↔C (major/minor/patch + prerelease);
+  C fixa major==1 (quebra alto em MAJOR, de propósito).
+- Resto aditivo (acumula p/ próxima MINOR).
