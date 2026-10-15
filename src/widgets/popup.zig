@@ -1,12 +1,13 @@
 //! ZyntraUI — popup flutuante (widgets/popup).
 //!
-//! Modelo M18 (begin/end, estado no chamador):
+//! Modelo M18 (begin/end, estado no chamador) + M43 (place) + M55 (Escape):
 //! - `beginPopup` desenha painel (fundo + borda) e emite `clip(bounds)`;
 //!   conteúdo entre begin/end sai clippado; `endPopup` limpa o clip.
 //!   SEMPRE parear.
-//! - Dismiss: press esquerdo FORA de `bounds` neste frame →
-//!   `dismissed=true` (o chamador fecha, ex. `open=false`). `Escape`
-//!   NÃO dispensa (futuro; hoje é do text-input focado).
+//! - Dismiss: press esquerdo FORA de `bounds` neste frame, ou `Escape`
+//!   pressionado → `dismissed=true` (o chamador fecha, ex. `open=false`).
+//!   Botão direito não dispensa; `Escape` vale mesmo com text-input
+//!   focado (broadcast, como o press fora).
 //! - `popupPlace(anchor, size, viewport)`: posiciona abaixo, vira para
 //!   cima se estourar, prende na horizontal (puro, satura NaN).
 //! - Eventos são broadcast: press fora dispensa mesmo com outro widget
@@ -41,6 +42,12 @@ pub fn beginPopup(
     var res = PopupResult{ .hovered = hovered };
     if (fm.pressed_pos) |p| {
         if (!bounds.contains(p)) res.dismissed = true;
+    }
+    // Escape dispensa (M55; mesmo padrão do modal, sem modificadores).
+    for (ctx.pendingEvents()) |ev| {
+        if (ev != .key) continue;
+        const k = ev.key;
+        if (k.pressed and k.key == .escape) res.dismissed = true;
     }
 
     ctx.draw.rectFilled(ctx.allocator, bounds, style.bg) catch |err| switch (err) {
@@ -131,6 +138,20 @@ test "popup dispensa fora, mantém dentro" {
 
     ctx.beginFrame();
     try stdt.testing.expectError(error.InvalidArgument, beginPopup(&ctx, .null, bounds, style));
+    ctx.endFrame();
+
+    // Escape dispensa (M55); outra tecla não.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .escape, .pressed = true, .modifiers = .{} } });
+    const esc = try beginPopup(&ctx, id, bounds, style);
+    try stdt.testing.expect(esc.dismissed);
+    try endPopup(&ctx);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    const other = try beginPopup(&ctx, id, bounds, style);
+    try stdt.testing.expect(!other.dismissed);
+    try endPopup(&ctx);
     ctx.endFrame();
 }
 

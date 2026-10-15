@@ -551,3 +551,9 @@ Pré-release instável: API pode mudar até a beta.
   valida MAJOR/MINOR/PATCH completos. Sem contrato que definisse
   1.0.0 como versão independente (só assinaturas, preservadas).
 - Resto aditivo (só valores; acumula p/ MINOR).
+
+### Adicionado — Milestone 55 (Escape dispensa popup, compatível)
+- `widgets/popup`: `Escape` pressionado dispensa (mesmo padrão do
+  modal; fecha o "futuro" documentado desde a M18). Botão direito
+  segue sem dispensar; press fora inalterado.
+- Resto aditivo (acumula p/ MINOR).
