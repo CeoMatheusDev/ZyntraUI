@@ -6,7 +6,7 @@
 
 A work-in-progress GUI toolkit designed for lightweight, responsive native interfaces, written in Zig.
 
-[![Status](https://img.shields.io/badge/status-rc-blue)](https://github.com/CeoMatheusDev/ZyntraUI)
+[![Status](https://img.shields.io/badge/status-stable-green)](https://github.com/CeoMatheusDev/ZyntraUI)
 [![Language](https://img.shields.io/badge/language-Zig-f7a41d)](https://ziglang.org/)
 [![Contributions](https://img.shields.io/badge/contributions-welcome-brightgreen)](https://github.com/CeoMatheusDev/ZyntraUI/issues)
 
@@ -21,10 +21,10 @@ A work-in-progress GUI toolkit designed for lightweight, responsive native inter
 The project aims to favor understandable, low-level implementations over heavyweight abstractions. Its API, rendering architecture, and platform support have **not yet been finalized**.
 
 > [!IMPORTANT]
-> **Project status: release candidate (1.0.0-rc.1).** The core is implemented
-> and tested (see CHANGELOG.md), but the API may still change until 1.0.0.
-> ZyntraUI has no built-in GPU renderer or windowing: you feed normalized
-> events in and consume draw commands with an external backend.
+> **Project status: stable (1.0.0).** API pública congelada a partir desta
+> versão (mudanças incompatíveis exigem MAJOR). ZyntraUI has no built-in
+> GPU renderer or windowing: you feed normalized events in and consume
+> draw commands with an external backend.
 
 ## Design goals
 
@@ -64,14 +64,14 @@ networking by design — see `docs/` for contracts.
 - [x] Initial widget set (button, checkbox, label, slider, text input)
 - [x] Examples, tests, and documentation
 - [x] Pre-releases (alpha, beta)
-- [ ] 1.0.0 stable (API freeze + release review)
+- [x] 1.0.0 stable (API freeze + release review)
 
 ## Getting started
 
 Requires Zig 0.17.0. Add the dependency:
 
 ```sh
-zig fetch --save https://github.com/CeoMatheusDev/ZyntraUI/archive/refs/tags/v1.0.0-rc.1.tar.gz
+zig fetch --save https://github.com/CeoMatheusDev/ZyntraUI/archive/refs/tags/v1.0.0.tar.gz
 ```
 
 The snippet below was compiled and run against this tag (`snippet ok`):

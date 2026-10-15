@@ -30,6 +30,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `style/style`: `SliderStyle` + `Theme.sliderStyle()` validados.
 - Exemplo com drag em 2 frames; resto aditivo.
 
+## [1.0.0] - 2026-10-15
+
+Primeira versão estável: API pública congelada (incompatibilidades exigem
+MAJOR). Revisão final sem mudanças de código desde a rc.1 — só versão,
+README e changelog. 40/40 testes, integração C, CI verde, benchmarks.
+
 ## [1.0.0-rc.1] - 2026-10-15
 
 Release candidate: API em congelamento (só bugfixes até a 1.0.0).
