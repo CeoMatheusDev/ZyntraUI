@@ -5,6 +5,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.4.0] - 2026-10-15
+
+Quarta MINOR estável, 100% compatível: popup flutuante + progresso.
+
+- `widgets/popup` (M18): painel + clip, dismiss em press fora.
+- `widgets/progress` (M18): display 0..1, 3 draws.
+- 53/53 testes, integração C, CI verde.
+
 ## [1.3.0] - 2026-10-15
 
 Terceira MINOR estável, 100% compatível: scroll completo.
@@ -216,3 +224,10 @@ Pré-release instável: API pode mudar até a beta.
   posiciona absoluto (pulo, não relativo), release encerra; geometria do
   thumb partilhada entre hit-test e desenho (`thumbRect`); wheel segue
   quando sem drag. `ScrollResult.dragging`. Resto aditivo (rumo à 1.3.0).
+### Adicionado — Milestone 18 (popup + progresso, compatível)
+- `widgets/popup`: `beginPopup`/`endPopup` — painel + clip, dismiss em
+  press esquerdo fora (botão direito não dispensa); `Escape` não dispensa
+  (documentado, do text-input). Estado aberto/fechado no chamador.
+- `widgets/progress`: display puro 0..1 clampado (NaN rejeitado), 3 draws.
+- `style/style`: `PopupStyle`/`ProgressStyle` + derivados do tema.
+- Exemplo dispensa popup fora + progresso 75%; resto aditivo (1.4.0).
