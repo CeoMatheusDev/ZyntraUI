@@ -13,6 +13,9 @@
 //! - `Ctrl+A` seleciona tudo (só com âncora); `Ctrl+C/X/V` internos;
 //!   `Ctrl+Z/Y` undo/redo com histórico do chamador.
 //! - `Ctrl+Backspace`/`Ctrl+Delete` apagam por palavra (só `' '` separa).
+//! - Rolagem horizontal automática (M42, sem estado): texto além da
+//!   área útil desloca para o caret, com clip pareado no overflow.
+//! - `Ctrl+Backspace`/`Ctrl+Delete` apagam por palavra (só `' '` separa).
 //! Desenho: caixa com destaque + highlight da seleção + texto + caret.
 //! `id` não-nulo obrigatório.
 
@@ -606,6 +609,30 @@ fn textInputInner(
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
+
+    // Rolagem horizontal automática (M42, sem estado: derivada do cursor).
+    // Se o texto excede a área útil, desloca para manter o caret visível
+    // e clipa o conteúdo à caixa (só nesses frames com overflow).
+    const vis_w = bounds.w - 8;
+    var xoff: f32 = 0;
+    var clipped = false;
+    if (vis_w > 0 and len.* > 0) {
+        const full = metrics_mod.measure(buffer[0..len.*], font) catch {
+            return error.InvalidArgument;
+        };
+        if (full.width > vis_w) {
+            const pre = metrics_mod.measure(buffer[0..cursor.*], font) catch {
+                return error.InvalidArgument;
+            };
+            xoff = std.math.clamp(pre.width - vis_w, 0, full.width - vis_w);
+            ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = bounds, .null_rect = false } }) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidCommand => return error.InvalidCommand,
+            };
+            clipped = true;
+        }
+    }
+    const tx = bounds.x + 4 - xoff;
     if (res.selected) {
         // Highlight sob o texto, entre os offsets ordenados.
         const a = anchor.?;
@@ -621,7 +648,7 @@ fn textInputInner(
         const hh = bounds.h - 4;
         if (hh > 0) {
             ctx.draw.rectFilled(ctx.allocator, .{
-                .x = bounds.x + 4 + m0.width,
+                .x = tx + m0.width,
                 .y = hy,
                 .w = @max(0, m1.width - m0.width),
                 .h = hh,
@@ -634,7 +661,7 @@ fn textInputInner(
     if (len.* > 0) {
         ctx.draw.pushText(
             ctx.allocator,
-            .{ .x = bounds.x + 4, .y = bounds.y + (bounds.h - font.lineHeight()) / 2 },
+            .{ .x = tx, .y = bounds.y + (bounds.h - font.lineHeight()) / 2 },
             style.text,
             font,
             buffer[0..len.*],
@@ -646,11 +673,11 @@ fn textInputInner(
         };
     }
     if (res.focused) {
-        // Caret na posição do cursor (mede o prefixo + padding).
+        // Caret na posição do cursor (mede o prefixo + padding - offset).
         const m = metrics_mod.measure(buffer[0..cursor.*], font) catch {
             return error.InvalidArgument;
         };
-        const cx = bounds.x + 4 + m.width;
+        const cx = tx + m.width;
         const top = bounds.y + 4;
         const bottom = bounds.y + bounds.h - 4;
         if (bottom > top) {
@@ -665,6 +692,12 @@ fn textInputInner(
                 error.InvalidCommand => return error.InvalidCommand,
             };
         }
+    }
+    if (clipped) {
+        ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = .{}, .null_rect = true } }) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.InvalidCommand => return error.InvalidCommand,
+        };
     }
     return res;
 }
@@ -1289,5 +1322,45 @@ test "textInput Ctrl+Backspace/Delete por palavra" {
     const r3 = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
     try stdt.testing.expect(!r3.changed);
     try stdt.testing.expectEqualStrings("foo ", buf[0..len]);
+    ctx.endFrame();
+}
+
+test "textInput rolagem segue o caret com clip pareado" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10); // advance=6
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    // Caixa estreita (vis_w = 20-8 = 12): "ABCD" (24px) excede.
+    const bounds = types.Rect.init(0, 0, 20, 30);
+    const id = id_mod.Id.fromString("test:ti-scroll");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    for ("ABCD") |ch| try ctx.pushEvent(.{ .text = .{ .codepoint = ch } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expectEqualStrings("ABCD", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 4), cursor);
+    // caixa×2 + clip + texto + caret + clip-clear = 6
+    try stdt.testing.expectEqual(@as(usize, 6), ctx.drawCommands().len);
+    // Caret em 4+24-12=16 (visível no limite direito).
+    const cmds = ctx.drawCommands();
+    try stdt.testing.expect(cmds[2] == .clip and !cmds[2].clip.null_rect);
+    try stdt.testing.expect(cmds[5] == .clip and cmds[5].clip.null_rect);
+    try stdt.testing.expectEqual(@as(f32, 16), cmds[4].line.p0.x);
+    ctx.endFrame();
+
+    // Home volta o caret ao 0: sem deslocamento.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    const cmds2 = ctx.drawCommands();
+    try stdt.testing.expectEqual(@as(f32, 4), cmds2[4].line.p0.x);
     ctx.endFrame();
 }

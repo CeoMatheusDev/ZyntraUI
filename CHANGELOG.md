@@ -442,3 +442,9 @@ Pré-release instável: API pode mudar até a beta.
   compilam) desenha linha divisória sem hover/escolha; teclado pula;
   mapeamento 1:1 linha↔item preservado.
 - Resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 42 (rolagem no input, compatível)
+- `widgets/text_input`: texto além da área útil desloca para o caret
+  (derivado, sem estado) com clip pareado só no overflow; highlight e
+  caret acompanham o offset.
+- Resto aditivo (acumula p/ próxima MINOR).
