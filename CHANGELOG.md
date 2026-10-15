@@ -425,3 +425,9 @@ Pré-release instável: API pode mudar até a beta.
 - `software/raster`: source-over com arredondamento em `set()`; opaco
   e transparente preservam o comportamento exato legado (fast paths).
 - Resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 39 (modal arrastável, compatível)
+- `widgets/modal`: `beginModalDraggable` (faixa de título captura,
+  grab preservado em `ModalDragState` do chamador, clamp ao viewport,
+  release encerra); `beginModal` clássico delega sem mudar; `dragging`.
+- Exemplo arrasta (290,290); resto aditivo (acumula p/ próxima MINOR).

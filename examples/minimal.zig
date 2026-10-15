@@ -542,4 +542,21 @@ pub fn main() !void {
     );
     ctx.endFrame();
     std.debug.print("m37 wrapped draws={d} truncated={} lines={d}\n", .{ ctx.drawCommands().len, lw.truncated, lw.metrics.lines });
+
+    // Modal arrastável: press na barra + move preservando o grab.
+    var mbounds = zyntra_ui.Rect.init(250, 150, 300, 200);
+    var mdrag = zyntra_ui.ModalDragState{};
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(260, 160) },
+    });
+    _ = try modal_mod.beginModalDraggable(&ctx, zyntra_ui.Id.fromString("examples/m39:modal"), &mbounds, 24, &mdrag, theme.modalStyle());
+    try modal_mod.endModal(&ctx);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = zyntra_ui.Vec2.init(300, 300) } });
+    const md = try modal_mod.beginModalDraggable(&ctx, zyntra_ui.Id.fromString("examples/m39:modal"), &mbounds, 24, &mdrag, theme.modalStyle());
+    try modal_mod.endModal(&ctx);
+    ctx.endFrame();
+    std.debug.print("m39 drag pos={d},{d} dragging={}\n", .{ mbounds.x, mbounds.y, md.dragging });
 }

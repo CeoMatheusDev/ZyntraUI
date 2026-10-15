@@ -135,6 +135,7 @@ pub const RadioResult = widgets.radio.RadioResult;
 pub const TooltipState = widgets.tooltip.TooltipState;
 pub const TooltipResult = widgets.tooltip.TooltipResult;
 pub const ModalResult = widgets.modal.ModalResult;
+pub const ModalDragState = widgets.modal.ModalDragState;
 pub const ComboResult = widgets.combo.ComboResult;
 
 pub const version_major = core.types.version_major;
