@@ -10,6 +10,7 @@ const popup_mod = @import("zyntra_ui").widgets.popup;
 const progress_mod = @import("zyntra_ui").widgets.progress;
 const menu_mod = @import("zyntra_ui").widgets.menu;
 const radio_mod = @import("zyntra_ui").widgets.radio;
+const tooltip_mod = @import("zyntra_ui").widgets.tooltip;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -390,4 +391,28 @@ pub fn main() !void {
     const rr = try radio_mod.radio(&ctx, zyntra_ui.Id.fromString("examples/m25:r"), zyntra_ui.Rect.init(16, 600, 160, 60), &ropts, &rsel, font, theme.radioStyle());
     ctx.endFrame();
     std.debug.print("m25 radio selected={d} focused={}\n", .{ rsel, rr.focused });
+
+    // Tooltip: 2 frames com hover e delay 2 → visível no 2º.
+    var tip = zyntra_ui.TooltipState{};
+    var f: u32 = 0;
+    var tvis = false;
+    var tdraws: usize = 0;
+    while (f < 2) : (f += 1) {
+        ctx.beginFrame();
+        try ctx.pushEvent(.{ .mouse_move = .{ .pos = zyntra_ui.Vec2.init(30, 25) } });
+        const tr = try tooltip_mod.tooltip(
+            &ctx,
+            zyntra_ui.Id.fromString("examples/m26:tip"),
+            zyntra_ui.Rect.init(10, 10, 120, 40),
+            "Save file",
+            font,
+            theme.tooltipStyle(),
+            2,
+            &tip,
+        );
+        tvis = tr.visible;
+        tdraws = ctx.drawCommands().len;
+        ctx.endFrame();
+    }
+    std.debug.print("m26 tooltip visible={} draws={d}\n", .{ tvis, tdraws });
 }

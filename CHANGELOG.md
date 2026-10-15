@@ -312,3 +312,10 @@ Pré-release instável: API pode mudar até a beta.
   registra foco para o Tab; sem opções desabilitadas (documentado).
 - `style/style`: `RadioStyle` + `Theme.radioStyle()`.
 - Exemplo clica Blue + seta; resto aditivo (rumo à 1.8.0).
+
+### Adicionado — Milestone 26 (tooltip, compatível)
+- `widgets/tooltip`: hover contado em frames (sem relógio), `delay 0`
+  imediato, saída zera, caixa clampada ao viewport, estado `TooltipState`
+  do chamador saturado.
+- `style/style`: `TooltipStyle` + `Theme.tooltipStyle()`.
+- Exemplo visível no 2º frame; resto aditivo (rumo à 1.9.0).

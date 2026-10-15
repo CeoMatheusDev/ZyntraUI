@@ -61,6 +61,7 @@ pub const widgets = struct {
     pub const progress = @import("widgets/progress.zig");
     pub const menu = @import("widgets/menu.zig");
     pub const radio = @import("widgets/radio.zig");
+    pub const tooltip = @import("widgets/tooltip.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -114,6 +115,7 @@ pub const PopupStyle = style.style_mod.PopupStyle;
 pub const ProgressStyle = style.style_mod.ProgressStyle;
 pub const MenuStyle = style.style_mod.MenuStyle;
 pub const RadioStyle = style.style_mod.RadioStyle;
+pub const TooltipStyle = style.style_mod.TooltipStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -127,6 +129,8 @@ pub const PopupResult = widgets.popup.PopupResult;
 pub const MenuItem = widgets.menu.MenuItem;
 pub const MenuResult = widgets.menu.MenuResult;
 pub const RadioResult = widgets.radio.RadioResult;
+pub const TooltipState = widgets.tooltip.TooltipState;
+pub const TooltipResult = widgets.tooltip.TooltipResult;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -168,4 +172,5 @@ test {
     _ = @import("widgets/progress.zig");
     _ = @import("widgets/menu.zig");
     _ = @import("widgets/radio.zig");
+    _ = @import("widgets/tooltip.zig");
 }
