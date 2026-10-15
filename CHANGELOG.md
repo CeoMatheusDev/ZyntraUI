@@ -613,3 +613,14 @@ Pré-release instável: API pode mudar até a beta.
   `Theme.splitterStyle()`; 2 draws (fundo + handle); `endSplitter`
   NO-OP documentado; clássicos intactos.
 - Resto aditivo (acumula p/ MINOR).
+
+### Corrigido — Milestone 60 (colapso no mesmo frame, compatível)
+- `widgets/tree_view`: colapsar um nó no meio do frame encolhia a
+  lista achatada mas o desenho usava o limite antigo → OOB que
+  ABORTAVA com safety (`index out of bounds`, achado pelo teste de
+  cobertura M60, nunca publicado). Agora re-deriva `last_visible`,
+  seleção e hover da contagem pós-toggle antes de indexar.
+- Teste `TreeView colapso, scroll, contagem e profundidade`:
+  hierarquia 3 níveis, ordem achatada, no-ops nas extremidades,
+  scroll clampado, seleção válida após recolher, helpers puros.
+- Resto aditivo (acumula p/ MINOR).

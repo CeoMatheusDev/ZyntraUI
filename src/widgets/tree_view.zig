@@ -152,7 +152,7 @@ pub fn beginTreeView(
 
     // Layout dos itens visíveis
     const first_visible: usize = @as(usize, @intFromFloat(@floor(scroll_offset.* / style.item_height)));
-    const last_visible: usize = @min(visible_count, first_visible + @as(usize, @intFromFloat(@ceil(bounds.h / style.item_height))) + 1);
+    var last_visible: usize = @min(visible_count, first_visible + @as(usize, @intFromFloat(@ceil(bounds.h / style.item_height))) + 1);
 
     // Click seleciona ou alterna expansor
     if (fm.pressed_pos) |p| {
@@ -184,9 +184,14 @@ pub fn beginTreeView(
         }
     }
 
-    // Re-achata após possível toggle: limpa e reutiliza o mesmo ArrayList
+    // Re-achata após possível toggle: limpa e reutiliza o mesmo ArrayList.
+    // O colapso pode encolher a lista no meio do frame: re-deriva limites
+    // e seleção ANTES de qualquer indexação (sem isso, o desenho lê além
+    // do fim e o Zig com safety aborta).
     flat.clearRetainingCapacity();
     treeViewFlatten(items, &flat, 0, ctx.allocator);
+    if (selected.* >= flat.items.len and flat.items.len > 0) selected.* = flat.items.len - 1;
+    last_visible = @min(flat.items.len, last_visible);
 
     // Teclado com foco
     if (ctx.hasFocus(id)) {
@@ -272,11 +277,11 @@ pub fn beginTreeView(
         scroll_offset.* = std.math.clamp(scroll_offset.*, 0, max_scroll);
     }
 
-    // Hover index
+    // Hover index (contagem pós-toggle: a lista pode ter encolhido).
     if (ctx.mouse_pos) |p| {
         const rel_y = p.y - bounds.y + scroll_offset.*;
         const idx: usize = @as(usize, @intFromFloat(@floor(rel_y / style.item_height)));
-        if (idx < visible_count) {
+        if (idx < flat.items.len) {
             res.hovered_index = idx;
         }
     }
@@ -452,5 +457,131 @@ test "TreeView seleciona, navega, expande/colapsa" {
     try stdt.testing.expectError(error.InvalidArgument, beginTreeView(&ctx, id, bounds, &[_]TreeItem{}, &selected, &scroll, style));
     const bad_style = style_mod.TreeViewStyle{ .item_height = 0, .bg = .{}, .bg_selected = .{}, .bg_hover = .{}, .text = .{}, .text_selected = .{}, .border = .{}, .border_width = 1, .indent = 16, .expander_size = 12 };
     try stdt.testing.expectError(error.InvalidArgument, beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, bad_style));
+    ctx.endFrame();
+}
+
+test "TreeView colapso, scroll, contagem e profundidade" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().treeViewStyle(); // item_height = 24
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 300, 48); // 2 linhas visíveis
+    const id = id_mod.Id.fromString("test:tree-deep");
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+
+    var leaf_kids = [_]TreeItem{
+        .{ .label = "Neto", .children = &[_]TreeItem{}, .expanded = false },
+    };
+    var mid_kids = [_]TreeItem{
+        .{ .label = "Filho", .children = &leaf_kids, .expanded = true },
+    };
+    var items = [_]TreeItem{
+        .{ .label = "Raiz", .children = &mid_kids, .expanded = true },
+        .{ .label = "Raiz2", .children = &[_]TreeItem{}, .expanded = false },
+    };
+
+    // Helpers puros: 4 visíveis (Raiz, Filho, Neto, Raiz2).
+    try stdt.testing.expectEqual(@as(f32, 96), treeViewContentHeight(&items, style));
+    try stdt.testing.expectEqual(@as(f32, 48), treeViewMaxScroll(&items, bounds.h, style));
+
+    // Click foca (sem mudar seleção, já é 0 → !changed).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(150, 12) },
+    });
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(150, 12) },
+    });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    ctx.endFrame();
+
+    // Ordem achatada através das profundidades: down ×3 chega em Raiz2.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 1), selected);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 2), selected); // Neto, depth 2
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    const r3 = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expect(r3.changed);
+    try stdt.testing.expectEqual(@as(usize, 3), selected); // Raiz2
+    ctx.endFrame();
+
+    // Extremidades são no-op: down no último e up no primeiro.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    const r4 = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expect(!r4.changed and selected == 3);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 0), selected);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .up, .pressed = true, .modifiers = .{} } });
+    const r5 = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expect(!r5.changed and selected == 0);
+    ctx.endFrame();
+
+    // Scroll clampado ao máximo (48) e de volta ao 0.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = -10, .pos = types.Vec2.init(150, 24) } });
+    const r6 = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(f32, 48), r6.scroll_offset);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = 10, .pos = types.Vec2.init(150, 24) } });
+    const r7 = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(f32, 0), r7.scroll_offset);
+    ctx.endFrame();
+
+    // Seleção válida após recolher: volta ao topo (scroll zera),
+    // seleciona Neto (2), colapsa Raiz pelo expansor (click em x=6,
+    // linha 0) → próxima frame clampa p/ 1.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 0), selected);
+    try stdt.testing.expectEqual(@as(f32, 0), scroll);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 1), selected);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 2), selected);
+    ctx.endFrame();
+    // Rola de volta ao topo sem mover a seleção (scroll 24 → 0).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = 10, .pos = types.Vec2.init(150, 24) } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(f32, 0), scroll);
+    try stdt.testing.expectEqual(@as(usize, 2), selected);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(6, 6) },
+    });
+    const r8 = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expect(r8.toggled_index != null);
+    try stdt.testing.expect(!items[0].expanded);
+    ctx.endFrame();
+    ctx.beginFrame();
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expect(selected < 2); // clampado aos 2 visíveis
+    try stdt.testing.expectEqual(@as(f32, 48), treeViewContentHeight(&items, style));
     ctx.endFrame();
 }
