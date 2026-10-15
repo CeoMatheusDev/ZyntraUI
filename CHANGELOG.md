@@ -5,6 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.11.0] - 2026-10-15
+
+Décima primeira MINOR estável, 100% compatível: entrada e verificação.
+
+- Teclado: scroll (M31), `Ctrl+A` (M32), apagar por palavra (M34).
+- `widgets/combo` por composição e `labelWrapped` multilinha (M36+M37).
+- Verificação: fuzz no layout (M33), bench do raster + blending (M35+M38).
+- 76/76 testes, integração C, CI verde.
+
+
 ## [1.10.0] - 2026-10-15
 
 Décima MINOR estável, 100% compatível: teclado nos widgets.
@@ -396,13 +406,6 @@ Pré-release instável: API pode mudar até a beta.
   (lixo do alocador, `0xAA` em Debug); com `clear`, idêntico (6/6).
   Framebuffer sem limpar = conteúdo indefinido (documentado).
 - Fuzz permanente nos primitivos do raster; resto aditivo.
-
-### Adicionado — Milestone 36 (combobox, compatível)
-- `widgets/combo`: campo + dropdown por composição (`button` + `menu`,
-  id filho via `Id.child(1)`); abre no click e foca o menu; escolha
-  fecha, fora/`Escape` fecha sem mudar; chevron em 2 linhas; itens na
-  pilha (teto 256, zero alloc).
-- Exemplo abre e escolhe item 1; resto aditivo (acumula p/ 1.11.0).
 
 ### Adicionado — Milestone 36 (combobox, compatível)
 - `widgets/combo`: campo + dropdown por composição (`button` + `menu`,
