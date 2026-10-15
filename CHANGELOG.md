@@ -5,6 +5,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.5.0] - 2026-10-15
+
+Quinta MINOR estável, 100% compatível: edição de texto completa.
+
+- `textInputHistory` (M19): undo/redo com `TextHistory(S,B)` do chamador.
+- `textInputClipboard` (M20): `Ctrl+C/X/V` internos com undo integrado.
+- 55/55 testes, integração C, CI verde.
+
 ## [1.4.0] - 2026-10-15
 
 Quarta MINOR estável, 100% compatível: popup flutuante + progresso.
