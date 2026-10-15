@@ -5,6 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.13.0] - 2026-10-15
+
+MINOR estável, 100% compatível: entrada e widgets.
+
+- Fronteira de eventos endurecida (M49: mouse não-finito vira
+  `InvalidEvent`) + fuzz permanente (M50).
+- `widgets/slider.sliderVertical` e navegação por palavra no
+  text-input (`Ctrl+Left/Right`, M51+M52).
+- 91/91 testes, integração C, CI verde.
+
 ## [1.12.0] - 2026-10-15
 
 Décima segunda MINOR estável, 100% compatível: widgets polidos e verificação.
