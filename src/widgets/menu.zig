@@ -19,9 +19,12 @@ const metrics_mod = @import("../text/metrics.zig");
 const input = @import("input.zig");
 
 /// Item de menu (fatia do chamador; sem ownership).
+/// `separator` desenha linha divisória (sem hover/escolha); mantém a
+/// altura da linha para não quebrar o mapeamento índice↔linha.
 pub const MenuItem = struct {
     label: []const u8,
     enabled: bool = true,
+    separator: bool = false,
 };
 
 pub const MenuResult = struct {
@@ -46,9 +49,14 @@ fn itemHeight(font: metrics_mod.FontMetrics) f32 {
     return font.lineHeight() + 8;
 }
 
+/// Item interagível: habilitado e não-separador.
+fn selectable(it: MenuItem) bool {
+    return it.enabled and !it.separator;
+}
+
 fn firstEnabled(items: []const MenuItem) ?usize {
     for (items, 0..) |it, i| {
-        if (it.enabled) return i;
+        if (selectable(it)) return i;
     }
     return null;
 }
@@ -63,7 +71,7 @@ fn stepActive(items: []const MenuItem, from: usize, dir: i2) ?usize {
         } else {
             i = (i + items.len - 1) % items.len;
         }
-        if (items[i].enabled) return i;
+        if (selectable(items[i])) return i;
     }
     return null;
 }
@@ -133,7 +141,7 @@ fn menuInner(
     if (items.len > 4096) return error.InvalidArgument;
 
     // Normaliza o índice (fora da faixa ou sobre desabilitado).
-    if (active.* >= items.len or !items[active.*].enabled) {
+    if (active.* >= items.len or !selectable(items[active.*])) {
         active.* = firstEnabled(items) orelse 0;
     }
 
@@ -153,9 +161,9 @@ fn menuInner(
         break :blk if (idx < items.len) idx else null;
     } else null;
     res.hovered_index = row_at_mouse;
-    // Hover ajusta o ativo (só habilitados).
+    // Hover ajusta o ativo (só interagíveis).
     if (row_at_mouse) |idx| {
-        if (items[idx].enabled) active.* = idx;
+        if (selectable(items[idx])) active.* = idx;
     }
 
     if (focused) {
@@ -177,14 +185,14 @@ fn menuInner(
                             var i: usize = items.len;
                             while (i > 0) {
                                 i -= 1;
-                                if (items[i].enabled) {
+                                if (selectable(items[i])) {
                                     active.* = i;
                                     break;
                                 }
                             }
                         },
                         .enter => {
-                            if (items[active.*].enabled) res.chosen = active.*;
+                            if (selectable(items[active.*])) res.chosen = active.*;
                         },
                         .escape => {
                             ctx.focus_owner = null;
@@ -211,7 +219,7 @@ fn menuInner(
     if (fm.pressed_pos) |p| {
         if (bounds.contains(p)) {
             const idx: usize = @intFromFloat(@min(@floor((p.y - bounds.y) / ih), @as(f32, @floatFromInt(items.len - 1))));
-            if (idx < items.len and items[idx].enabled) {
+            if (idx < items.len and selectable(items[idx])) {
                 active.* = idx;
                 res.chosen = idx;
             }
@@ -242,6 +250,21 @@ fn menuInner(
             .w = bounds.w,
             .h = ih,
         };
+        if (items[i].separator) {
+            // Linha divisória centralizada (sem hover/texto).
+            const cy = row.y + ih / 2;
+            ctx.draw.line(
+                ctx.allocator,
+                .{ .x = row.x + 8, .y = cy },
+                .{ .x = row.x + row.w - 8, .y = cy },
+                style.border,
+                1.0,
+            ) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidCommand => return error.InvalidCommand,
+            };
+            continue;
+        }
         if (i == active.* and (hovered or focused)) {
             ctx.draw.rectFilled(ctx.allocator, row, style.item_hover) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
@@ -252,7 +275,7 @@ fn menuInner(
             ctx.draw.pushText(
                 ctx.allocator,
                 .{ .x = bounds.x + 8, .y = row.y + 4 },
-                if (items[i].enabled) style.text else style.text_disabled,
+                if (selectable(items[i])) style.text else style.text_disabled,
                 font,
                 items[i].label,
             ) catch |err| switch (err) {
@@ -489,5 +512,56 @@ test "menuNested teclado atravessa um nível por vez" {
     try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
     _ = try menu(&ctx, pid, pbounds, &items, &pactive, font, style);
     try stdt.testing.expect(ctx.hasFocus(pid));
+    ctx.endFrame();
+}
+
+test "menu separador: sem hover/escolha, teclado pula" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10); // ih=18.625
+    const style = style_mod.Theme.darkDefault().menuStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 160, 80);
+    const id = id_mod.Id.fromString("test:menu-sep");
+    const items = [_]MenuItem{
+        .{ .label = "A" },
+        .{ .label = "", .separator = true },
+        .{ .label = "B" },
+    };
+    var active: usize = 0;
+
+    // Click no separador (linha 1, y=20): sem escolha, sem captura ativa.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(10, 20) },
+    });
+    const r0 = try menu(&ctx, id, bounds, &items, &active, font, style);
+    try stdt.testing.expect(r0.chosen == null);
+    try stdt.testing.expectEqual(@as(usize, 0), active); // hover não move p/ separador
+    ctx.endFrame();
+
+    // Down do 0 pula o separador e cai no 2.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(10, 5) },
+    });
+    _ = try menu(&ctx, id, bounds, &items, &active, font, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try menu(&ctx, id, bounds, &items, &active, font, style);
+    try stdt.testing.expectEqual(@as(usize, 2), active);
+    ctx.endFrame();
+
+    // Enter no item normal escolhe; contagem inclui a linha divisória.
+    // (mouse para fora: hover retido governaria o ativo.)
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(500, 500) } });
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    const r1 = try menu(&ctx, id, bounds, &items, &active, font, style);
+    try stdt.testing.expectEqual(@as(?usize, 2), r1.chosen);
+    // painel×2 + clip + 2 textos + 1 linha + highlight (focado) + clear = 8
+    try stdt.testing.expectEqual(@as(usize, 8), ctx.drawCommands().len);
     ctx.endFrame();
 }

@@ -436,3 +436,9 @@ Pré-release instável: API pode mudar até a beta.
 - `widgets/combo`: setas com foco abrem direto no menu focado
   (Espaço/Enter já vinham do button); sem foco, ignoradas.
 - Resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 41 (separadores no menu, compatível)
+- `widgets/menu`: `MenuItem.separator` (default false; literais antigos
+  compilam) desenha linha divisória sem hover/escolha; teclado pula;
+  mapeamento 1:1 linha↔item preservado.
+- Resto aditivo (acumula p/ próxima MINOR).
