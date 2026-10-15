@@ -210,6 +210,29 @@ pub const TreeViewStyle = extern struct {
     }
 };
 
+/// Estilo de tabela com header fixo (M62).
+pub const TableStyle = extern struct {
+    bg: types.Color,
+    bg_alt: types.Color,
+    bg_selected: types.Color,
+    bg_hover: types.Color,
+    text: types.Color,
+    text_header: types.Color,
+    text_selected: types.Color,
+    border: types.Color,
+    border_width: f32 = 1.0,
+    row_height: f32 = 24.0,
+    header_height: f32 = 26.0,
+    padding_x: f32 = 8.0,
+
+    pub fn isValid(self: TableStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0 and
+            std.math.isFinite(self.row_height) and self.row_height > 0 and
+            std.math.isFinite(self.header_height) and self.header_height > 0 and
+            std.math.isFinite(self.padding_x) and self.padding_x >= 0;
+    }
+};
+
 /// Estilo de menu dropdown.
 pub const MenuStyle = extern struct {
     bg: types.Color,
@@ -428,6 +451,23 @@ pub const Theme = extern struct {
             .item_height = 24.0,
             .indent = 16.0,
             .expander_size = 12.0,
+        };
+    }
+
+    pub fn tableStyle(self: Theme) TableStyle {
+        return .{
+            .bg = self.surface,
+            .bg_alt = types.Color.rgb(48, 48, 56),
+            .bg_selected = self.accent,
+            .bg_hover = types.Color.rgb(80, 80, 90),
+            .text = self.text,
+            .text_header = self.text,
+            .text_selected = types.Color.rgb(255, 255, 255),
+            .border = self.border,
+            .border_width = 1.0,
+            .row_height = 24.0,
+            .header_height = 26.0,
+            .padding_x = 8.0,
         };
     }
 };

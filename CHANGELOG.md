@@ -641,3 +641,16 @@ Pré-release instável: API pode mudar até a beta.
   via `textOf`, inválido rejeitado sem enfileirar, offsets sempre
   contidos na arena).
 - Sem mudança de comportamento; resto aditivo (acumula p/ MINOR).
+
+### Adicionado — Milestone 62 (Table, compatível)
+- `widgets/table.beginTable`/`endTable`: tabela com header fixo
+  (`columns: []const TableColumn` com título/largura) e corpo rolável
+  (`rows: []const TableRow`, `cells: []const []const u8`); seleção por
+  click/teclado (setas/Home/End/PageUp/PageDown/Tab), wheel, auto-scroll,
+  fundo zebrado/hover/seleção, separadores de coluna, scrollbar e clip;
+  helpers puros `tableBodyRect`/`tableContentHeight`/`tableMaxScroll`/
+  `tableColumnsWidth`; `TableStyle` + `Theme.tableStyle()`; `endTable`
+  NO-OP documentado.
+- Contratos: `id` não-nulo, estilo válido, `bounds.h > header_height`,
+  ≥1 coluna com largura finita positiva, ≥1 linha.
+- Resto aditivo (acumula p/ MINOR).

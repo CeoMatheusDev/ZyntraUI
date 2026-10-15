@@ -68,6 +68,7 @@ pub const widgets = struct {
     pub const splitter = @import("widgets/splitter.zig");
     pub const list_view = @import("widgets/list_view.zig");
     pub const tree_view = @import("widgets/tree_view.zig");
+    pub const table = @import("widgets/table.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -126,6 +127,7 @@ pub const ModalStyle = style.style_mod.ModalStyle;
 pub const SplitterStyle = style.style_mod.SplitterStyle;
 pub const ListViewStyle = style.style_mod.ListViewStyle;
 pub const TreeViewStyle = style.style_mod.TreeViewStyle;
+pub const TableStyle = style.style_mod.TableStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -150,6 +152,9 @@ pub const SplitterOrientation = widgets.splitter.SplitterOrientation;
 pub const ListViewResult = widgets.list_view.ListViewResult;
 pub const TreeViewResult = widgets.tree_view.TreeViewResult;
 pub const TreeItem = widgets.tree_view.TreeItem;
+pub const TableResult = widgets.table.TableResult;
+pub const TableColumn = widgets.table.TableColumn;
+pub const TableRow = widgets.table.TableRow;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -198,4 +203,5 @@ test {
     _ = @import("widgets/splitter.zig");
     _ = @import("widgets/list_view.zig");
     _ = @import("widgets/tree_view.zig");
+    _ = @import("widgets/table.zig");
 }
