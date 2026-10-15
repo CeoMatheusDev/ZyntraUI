@@ -224,6 +224,17 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m32 select-all selected={}\n", .{ta.selected});
 
+    // Ctrl+Backspace apaga a palavra anterior ("Z foo" → "Z ").
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .text = .{ .codepoint = ' ' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'f' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'o' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'o' } });
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try text_input_mod.textInputSelected(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, &sel_anchor, font, ti_style);
+    ctx.endFrame();
+    std.debug.print("m34 word-kill len={d}\n", .{name_len});
+
     // Frame 11: scroll com wheel sobre a vista (conteúdo 300px em 100px).
     var scrolled: f32 = 0;
     const sc_style = theme.scrollStyle();

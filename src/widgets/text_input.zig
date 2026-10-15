@@ -12,6 +12,7 @@
 //! - Click dentro assume o foco; `Escape`/`clearFocus` liberam.
 //! - `Ctrl+A` seleciona tudo (só com âncora); `Ctrl+C/X/V` internos;
 //!   `Ctrl+Z/Y` undo/redo com histórico do chamador.
+//! - `Ctrl+Backspace`/`Ctrl+Delete` apagam por palavra (só `' '` separa).
 //! Desenho: caixa com destaque + highlight da seleção + texto + caret.
 //! `id` não-nulo obrigatório.
 
@@ -164,6 +165,32 @@ fn encodeUtf8(codepoint: u32, out: *[4]u8) !u3 {
         out[3] = @intCast(0x80 | (codepoint & 0x3F));
         return 4;
     }
+}
+
+/// Início da palavra anterior a `pos` (pula espaços e depois a palavra).
+/// Opera em bytes; recua só por fronteiras já válidas (buffer validado
+/// na entrada, só ASCII ` ` separa — resto é "palavra").
+fn wordStartBack(buf: []const u8, pos: usize) usize {
+    var i = pos;
+    while (i > 0 and buf[i - 1] == ' ') : (i -= 1) {}
+    while (i > 0 and buf[i - 1] != ' ') {
+        // Recua por codepoints (multibyte-safe).
+        var j = i - 1;
+        while (j > 0 and buf[j] & 0xC0 == 0x80) : (j -= 1) {}
+        i = j;
+    }
+    return i;
+}
+
+/// Fim da próxima palavra a partir de `pos` (pula espaços e a palavra).
+fn wordEndFwd(buf: []const u8, len: usize, pos: usize) usize {
+    var i = pos;
+    while (i < len and buf[i] == ' ') : (i += 1) {}
+    while (i < len and buf[i] != ' ') {
+        const d = metrics_mod.decodeOne(buf[i..len]) catch break; // defensivo
+        i += d.len;
+    }
+    return i;
 }
 
 /// Remove o último codepoint de `buf[0..len]`. Retorna o novo `len`.
@@ -439,6 +466,20 @@ fn textInputInner(
                                     continue;
                                 }
                             }
+                            // Ctrl+Backspace apaga a palavra anterior.
+                            if (k.modifiers.ctrl and !k.modifiers.shift) {
+                                const at = wordStartBack(buffer, cursor.*);
+                                if (at != cursor.*) {
+                                    if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
+                                    const n = cursor.* - at;
+                                    std.mem.copyForwards(u8, buffer[at .. len.* - n], buffer[cursor.*..len.*]);
+                                    cursor.* = at;
+                                    len.* -= n;
+                                    if (anchor) |a| a.* = cursor.*;
+                                    res.changed = true;
+                                }
+                                continue;
+                            }
                             if (cursor.* > 0) {
                                 if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
                                 const at = popCodepoint(buffer, cursor.*);
@@ -458,6 +499,19 @@ fn textInputInner(
                                     res.changed = true;
                                     continue;
                                 }
+                            }
+                            // Ctrl+Delete apaga a próxima palavra.
+                            if (k.modifiers.ctrl and !k.modifiers.shift) {
+                                const to = wordEndFwd(buffer, len.*, cursor.*);
+                                if (to != cursor.*) {
+                                    if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
+                                    const n = to - cursor.*;
+                                    std.mem.copyForwards(u8, buffer[cursor.* .. len.* - n], buffer[to..len.*]);
+                                    len.* -= n;
+                                    if (anchor) |a| a.* = cursor.*;
+                                    res.changed = true;
+                                }
+                                continue;
                             }
                             if (cursor.* < len.*) {
                                 if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
@@ -1175,5 +1229,65 @@ test "textInputSelected Ctrl+A seleciona tudo" {
     const r2 = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
     try stdt.testing.expect(r2.selected); // seleção anterior preservada
     try stdt.testing.expectEqualStrings("Hi", buf[0..len]);
+    ctx.endFrame();
+}
+
+test "textInput Ctrl+Backspace/Delete por palavra" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-word");
+    var buf: [32]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var hist = TextHistory(8, 32){};
+
+    // Digita "foo bar" (foca antes).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    for ("foo bar") |ch| try ctx.pushEvent(.{ .text = .{ .codepoint = ch } });
+    _ = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expectEqualStrings("foo bar", buf[0..len]);
+    ctx.endFrame();
+
+    // Ctrl+Backspace apaga "bar" (cursor no fim).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const r1 = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(r1.changed);
+    try stdt.testing.expectEqualStrings("foo ", buf[0..len]);
+    ctx.endFrame();
+
+    // Home + Ctrl+Delete apaga "foo" (para no espaço seguinte).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .delete, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expectEqualStrings(" ", buf[0..len]);
+    ctx.endFrame();
+
+    // Ctrl+Z desfaz a exclusão por palavra (passo isolado).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const r2 = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(r2.undone);
+    try stdt.testing.expectEqualStrings("foo ", buf[0..len]);
+    ctx.endFrame();
+
+    // Com cursor no 0 ("foo " restaurado): exclusões são no-op seguro.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const r3 = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(!r3.changed);
+    try stdt.testing.expectEqualStrings("foo ", buf[0..len]);
     ctx.endFrame();
 }

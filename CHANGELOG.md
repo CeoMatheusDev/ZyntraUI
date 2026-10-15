@@ -381,3 +381,9 @@ Pré-release instável: API pode mudar até a beta.
   finitas: inset nunca negativo, cursor avança, clamp respeitado;
   sem crash com NaN/Inf — só matemática f32, sem conversão p/ int).
 - Resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 34 (Ctrl+Backspace/Delete, compatível)
+- `widgets/text_input`: `Ctrl+Backspace` apaga a palavra anterior,
+  `Ctrl+Delete` a próxima (só `' '` separa; multibyte-safe); com seleção,
+  vale a faixa; passos isolados no undo; no-op seguro nos limites.
+- Exemplo + teste; resto aditivo (acumula p/ próxima MINOR).
