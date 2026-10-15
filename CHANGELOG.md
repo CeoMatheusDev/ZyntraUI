@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.2.0] - 2026-10-15
+
+Segunda MINOR estável, 100% compatível: rasterizador de referência +
+quebra de linha para text-runs.
+
+- `software/raster` (M14): framebuffer RGBA8, clip/cull, PPM sem deps.
+- `text/wrap` (M15): `wrapLines`/`countLines` puros para backends.
+- 49/49 testes, integração C, CI verde.
+
 ## [1.1.0] - 2026-10-15
 
 Primeira MINOR estável: história de teclado completa no text-input, 100%
@@ -179,3 +188,10 @@ Pré-release instável: API pode mudar até a beta.
   glifos — documentado como ferramenta de verificação, não produção.
 - Asserts pixel-exatos (rect/clip/linha/círculo/PPM); exemplo rasteriza e
   imprime checksum; resto aditivo (rumo à 1.2.0).
+
+### Adicionado — Milestone 15 (quebra de linha, compatível)
+- `text/wrap`: `wrapLines`/`countLines` gananciosos e puros (palavras,
+  `'\n'` força, parágrafo vazio gera linha vazia, palavra longa fatia
+  por codepoints, UTF-8 validado, `NoSpaceLeft` em `out` curto).
+  `LineRange` em offsets `u32` (convenção de `DrawCommand.text`).
+- Resto aditivo (rumo à 1.2.0).

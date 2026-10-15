@@ -26,6 +26,7 @@ pub const draw = struct {
 
 pub const text = struct {
     pub const metrics = @import("text/metrics.zig");
+    pub const wrap = @import("text/wrap.zig");
 };
 
 pub const c_abi = struct {
@@ -81,6 +82,7 @@ pub const Backend = draw.renderer.Backend;
 
 pub const FontMetrics = text.metrics.FontMetrics;
 pub const TextMetrics = text.metrics.TextMetrics;
+pub const LineRange = text.wrap.LineRange;
 
 pub const ZyntraResult = c_abi.types.ZyntraResult;
 pub const ZyntraRect = c_abi.types.ZyntraRect;
@@ -132,6 +134,7 @@ test {
     _ = @import("layout/layout.zig");
     _ = @import("style/style.zig");
     _ = @import("text/metrics.zig");
+    _ = @import("text/wrap.zig");
     _ = @import("draw/renderer.zig");
     _ = @import("c-abi/types.zig");
     _ = @import("c-abi/api.zig");
