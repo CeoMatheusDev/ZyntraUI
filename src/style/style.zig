@@ -129,6 +129,8 @@ pub const ModalStyle = extern struct {
     bg: types.Color,
     border: types.Color,
     border_width: f32 = 1.0,
+    /// Cor do título (M53; default preserva literais antigos).
+    title_text: types.Color = types.Color.rgb(235, 235, 240),
 
     pub fn isValid(self: ModalStyle) bool {
         return std.math.isFinite(self.border_width) and self.border_width >= 0;
@@ -299,6 +301,7 @@ pub const Theme = extern struct {
             .bg = self.surface,
             .border = self.border,
             .border_width = 1.0,
+            .title_text = self.text,
         };
     }
 };

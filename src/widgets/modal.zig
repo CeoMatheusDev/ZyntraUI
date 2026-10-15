@@ -1,6 +1,6 @@
 //! ZyntraUI — janela modal (widgets/modal).
 //!
-//! Modelo M27 (begin/end, estado no chamador) + M39 (arrasto):
+//! Modelo M27 (begin/end, estado no chamador) + M39 (arrasto) + M53 (título):
 //! - `beginModal` escurece a vista inteira, desenha o painel e emite
 //!   `clip(bounds)`; `endModal` limpa o clip. SEMPRE parear.
 //! - Bloqueio por CONVENÇÃO (documentada, sem invasão nos widgets):
@@ -11,6 +11,9 @@
 //! - `beginModalDraggable`: press na faixa de título captura; o painel
 //!   segue o mouse preservando o grab (`ModalDragState` do chamador),
 //!   clampado ao viewport quando cabe. Release encerra.
+//! - `beginModalTitled`: draggable com texto na barra (`title`, `font`
+//!   do chamador; vazio emite 0 draws extras; o clip do painel contém
+//!   o overflow). Clássicos intactos.
 //! `id` não-nulo; aberto/fechado/posição no chamador.
 
 const std = @import("std");
@@ -18,6 +21,7 @@ const types = @import("../core/types.zig");
 const context_mod = @import("../core/context.zig");
 const id_mod = @import("../core/id.zig");
 const style_mod = @import("../style/style.zig");
+const metrics_mod = @import("../text/metrics.zig");
 const input = @import("input.zig");
 
 pub const ModalResult = struct {
@@ -139,6 +143,43 @@ fn beginModalInner(
     return res;
 }
 
+/// Modal arrastável com título renderizado na barra (M53, aditivo).
+/// `title`/`font` do chamador; mesma interação do `beginModalDraggable`
+/// (via `beginModalInner`) + 1 comando `.text` quando `title` não-vazio
+/// (centralizado na barra, com margem 8; overflow contido pelo clip do
+/// painel, como no `label`). Título vazio = 0 draws extras.
+/// `endModal` continua pareando. Clássicos intactos.
+pub fn beginModalTitled(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: *types.Rect,
+    title: []const u8,
+    font: metrics_mod.FontMetrics,
+    title_h: f32,
+    drag: *ModalDragState,
+    style: style_mod.ModalStyle,
+) context_mod.ContextError!ModalResult {
+    if (!font.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(title_h) or title_h <= 0) return error.InvalidArgument;
+    const res = try beginModalInner(ctx, id, bounds, drag, title_h, style);
+    if (title.len > 0) {
+        const ty = bounds.y + @max(0, (title_h - font.lineHeight()) / 2);
+        ctx.draw.pushText(
+            ctx.allocator,
+            .{ .x = bounds.x + 8, .y = ty },
+            style.title_text,
+            font,
+            title,
+        ) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.InvalidCommand => return error.InvalidCommand,
+            error.InvalidUtf8 => return error.InvalidArgument,
+            error.InvalidMetrics => return error.InvalidArgument,
+        };
+    }
+    return res;
+}
+
 /// Limpa o clip do `beginModal` correspondente.
 pub fn endModal(ctx: *context_mod.Context) context_mod.ContextError!void {
     ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = .{}, .null_rect = true } }) catch |err| switch (err) {
@@ -254,5 +295,61 @@ test "modalDraggable arrasta pela barra, clamp e solta" {
     // title_h inválido rejeitado.
     ctx.beginFrame();
     try stdt.testing.expectError(error.InvalidArgument, beginModalDraggable(&ctx, id, &bounds, 0, &drag, style));
+    ctx.endFrame();
+}
+
+test "modalTitled desenha título, arrasta e valida" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().modalStyle();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    var ctx = try context_mod.Context.init(gpa, .{
+        .viewport = types.Rect.init(0, 0, 800, 600),
+    });
+    defer ctx.deinit();
+    var bounds = types.Rect.init(100, 100, 200, 150);
+    const id = id_mod.Id.fromString("test:modal-titled");
+    var drag = ModalDragState{};
+
+    // Título rende 1 draw extra (dim, painel, outline, clip + texto).
+    ctx.beginFrame();
+    const r0 = try beginModalTitled(&ctx, id, &bounds, "Salvar", font, 24, &drag, style);
+    try stdt.testing.expect(!r0.dismissed);
+    try stdt.testing.expectEqual(@as(usize, 5), ctx.drawCommands().len);
+    try stdt.testing.expectEqualStrings("Salvar", ctx.draw.textOf(ctx.drawCommands()[4]));
+    try endModal(&ctx);
+    ctx.endFrame();
+
+    // Press na barra captura mesmo com título (drag preservado).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(110, 110) },
+    });
+    const r1 = try beginModalTitled(&ctx, id, &bounds, "Salvar", font, 24, &drag, style);
+    try stdt.testing.expect(r1.dragging and ctx.press_owner == id);
+    try endModal(&ctx);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(110, 110) },
+    });
+    _ = try beginModalTitled(&ctx, id, &bounds, "Salvar", font, 24, &drag, style);
+    try stdt.testing.expect(ctx.press_owner == null);
+    try endModal(&ctx);
+    ctx.endFrame();
+
+    // Título vazio = 0 draws extras; contratos inválidos rejeitados.
+    ctx.beginFrame();
+    _ = try beginModalTitled(&ctx, id, &bounds, "", font, 24, &drag, style);
+    try stdt.testing.expectEqual(@as(usize, 4), ctx.drawCommands().len);
+    try endModal(&ctx);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try stdt.testing.expectError(error.InvalidArgument, beginModalTitled(&ctx, .null, &bounds, "A", font, 24, &drag, style));
+    try stdt.testing.expectError(error.InvalidArgument, beginModalTitled(&ctx, id, &bounds, "A", font, 0, &drag, style));
+    const bad_font = metrics_mod.FontMetrics{ .size = 0, .advance = 0, .ascent = 0, .descent = 0, .line_gap = 0 };
+    try stdt.testing.expectError(error.InvalidArgument, beginModalTitled(&ctx, id, &bounds, "A", bad_font, 24, &drag, style));
+    try stdt.testing.expectError(error.InvalidArgument, beginModalTitled(&ctx, id, &bounds, "\xff", font, 24, &drag, style));
+    try endModal(&ctx);
     ctx.endFrame();
 }

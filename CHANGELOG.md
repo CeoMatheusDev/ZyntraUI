@@ -531,3 +531,11 @@ Pré-release instável: API pode mudar até a beta.
   estende a seleção; sem mutação, fora do histórico). Vale nas
   3 variantes (código partilhado).
 - Resto aditivo (acumula p/ MINOR).
+
+### Adicionado — Milestone 53 (título no modal, compatível)
+- `widgets/modal.beginModalTitled`: draggable com texto na barra
+  (`title`/`font` do chamador, +1 `.text` centralizado com margem 8;
+  vazio = 0 extras; overflow contido pelo clip do painel).
+- `style/style.ModalStyle.title_text` com default (literais antigos
+  compilam; `Theme.modalStyle()` usa `text` do tema).
+- `beginModal`/`beginModalDraggable` intactos; resto aditivo.
