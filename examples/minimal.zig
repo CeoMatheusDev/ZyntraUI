@@ -11,6 +11,7 @@ const progress_mod = @import("zyntra_ui").widgets.progress;
 const menu_mod = @import("zyntra_ui").widgets.menu;
 const radio_mod = @import("zyntra_ui").widgets.radio;
 const tooltip_mod = @import("zyntra_ui").widgets.tooltip;
+const modal_mod = @import("zyntra_ui").widgets.modal;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -415,4 +416,24 @@ pub fn main() !void {
         ctx.endFrame();
     }
     std.debug.print("m26 tooltip visible={} draws={d}\n", .{ tvis, tdraws });
+
+    // Modal: aberto bloqueia o fundo por convenção (botão nem sondado);
+    // Escape dispensa.
+    var mopen = true;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .escape, .pressed = true, .modifiers = .{} } });
+    if (mopen) {
+        const mo = try modal_mod.beginModal(
+            &ctx,
+            zyntra_ui.Id.fromString("examples/m27:modal"),
+            zyntra_ui.Rect.init(250, 150, 300, 200),
+            theme.modalStyle(),
+        );
+        if (mo.dismissed) mopen = false;
+        try modal_mod.endModal(&ctx);
+    } else {
+        _ = try button_mod.button(&ctx, zyntra_ui.Id.fromString("examples/m7:btn"), btn_rect, btn_style);
+    }
+    ctx.endFrame();
+    std.debug.print("m27 modal open={} draws={d}\n", .{ mopen, ctx.drawCommands().len });
 }

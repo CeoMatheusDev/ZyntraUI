@@ -123,6 +123,18 @@ pub const TooltipStyle = extern struct {
     }
 };
 
+/// Estilo de janela modal.
+pub const ModalStyle = extern struct {
+    dim: types.Color,
+    bg: types.Color,
+    border: types.Color,
+    border_width: f32 = 1.0,
+
+    pub fn isValid(self: ModalStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0;
+    }
+};
+
 /// Estilo de menu dropdown.
 pub const MenuStyle = extern struct {
     bg: types.Color,
@@ -280,6 +292,15 @@ pub const Theme = extern struct {
             .padding = 6,
         };
     }
+
+    pub fn modalStyle(self: Theme) ModalStyle {
+        return .{
+            .dim = .{ .r = 0, .g = 0, .b = 0, .a = 160 },
+            .bg = self.surface,
+            .border = self.border,
+            .border_width = 1.0,
+        };
+    }
 };
 
 test "Theme defaults + derivados válidos" {
@@ -295,6 +316,7 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(dark.scrollStyle().isValid());
     try stdt.testing.expect(dark.popupStyle().isValid());
     try stdt.testing.expect(dark.tooltipStyle().isValid());
+    try stdt.testing.expect(dark.modalStyle().isValid());
     try stdt.testing.expect(dark.radioStyle().isValid());
     try stdt.testing.expect(dark.menuStyle().isValid());
     try stdt.testing.expect(dark.progressStyle().isValid());
