@@ -69,6 +69,9 @@ pub const widgets = struct {
     pub const list_view = @import("widgets/list_view.zig");
     pub const tree_view = @import("widgets/tree_view.zig");
     pub const table = @import("widgets/table.zig");
+    /// `switch` é palavra reservada em Zig; o campo usa identificador
+    /// escapado. Acesse via `widgets.@"switch"`.
+    pub const @"switch" = @import("widgets/switch.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -128,6 +131,7 @@ pub const SplitterStyle = style.style_mod.SplitterStyle;
 pub const ListViewStyle = style.style_mod.ListViewStyle;
 pub const TreeViewStyle = style.style_mod.TreeViewStyle;
 pub const TableStyle = style.style_mod.TableStyle;
+pub const SwitchStyle = style.style_mod.SwitchStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -155,6 +159,7 @@ pub const TreeItem = widgets.tree_view.TreeItem;
 pub const TableResult = widgets.table.TableResult;
 pub const TableColumn = widgets.table.TableColumn;
 pub const TableRow = widgets.table.TableRow;
+pub const SwitchResult = widgets.@"switch".SwitchResult;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -204,4 +209,5 @@ test {
     _ = @import("widgets/list_view.zig");
     _ = @import("widgets/tree_view.zig");
     _ = @import("widgets/table.zig");
+    _ = @import("widgets/switch.zig");
 }

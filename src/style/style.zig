@@ -233,6 +233,22 @@ pub const TableStyle = extern struct {
     }
 };
 
+/// Estilo de switch (toggle) (M63).
+pub const SwitchStyle = extern struct {
+    track: types.Color,
+    track_on: types.Color,
+    track_hover: types.Color,
+    knob: types.Color,
+    border: types.Color,
+    border_width: f32 = 1.0,
+    knob_pad: f32 = 3.0,
+
+    pub fn isValid(self: SwitchStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0 and
+            std.math.isFinite(self.knob_pad) and self.knob_pad >= 0;
+    }
+};
+
 /// Estilo de menu dropdown.
 pub const MenuStyle = extern struct {
     bg: types.Color,
@@ -362,6 +378,18 @@ pub const Theme = extern struct {
         };
     }
 
+    pub fn switchStyle(self: Theme) SwitchStyle {
+        return .{
+            .track = types.Color.rgb(70, 70, 78),
+            .track_on = self.accent,
+            .track_hover = types.Color.rgb(90, 90, 100),
+            .knob = types.Color.rgb(245, 245, 247),
+            .border = self.border,
+            .border_width = 1.0,
+            .knob_pad = 3.0,
+        };
+    }
+
     pub fn progressStyle(self: Theme) ProgressStyle {
         return .{
             .bg = self.surface,
@@ -488,6 +516,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(dark.modalStyle().isValid());
     try stdt.testing.expect(dark.radioStyle().isValid());
     try stdt.testing.expect(dark.menuStyle().isValid());
+    try stdt.testing.expect(dark.switchStyle().isValid());
+    try stdt.testing.expect(light.switchStyle().isValid());
     try stdt.testing.expect(dark.progressStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,

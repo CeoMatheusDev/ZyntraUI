@@ -13,6 +13,7 @@ const radio_mod = @import("zyntra_ui").widgets.radio;
 const tooltip_mod = @import("zyntra_ui").widgets.tooltip;
 const modal_mod = @import("zyntra_ui").widgets.modal;
 const combo_mod = @import("zyntra_ui").widgets.combo;
+const switch_mod = @import("zyntra_ui").widgets.@"switch";
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -565,4 +566,23 @@ pub fn main() !void {
     try modal_mod.endModal(&ctx);
     ctx.endFrame();
     std.debug.print("m39 drag pos={d},{d} dragging={}\n", .{ mbounds.x, mbounds.y, md.dragging });
+
+    // Switch (M63): press + release dentro alterna; foco + Espaço alterna.
+    ctx.clearPressCapture();
+    const sw_style = theme.switchStyle();
+    const sw_bounds = zyntra_ui.Rect.init(600, 560, 44, 22);
+    var sw_on = false;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(605, 571) },
+    });
+    _ = try switch_mod.beginSwitch(&ctx, zyntra_ui.Id.fromString("examples/m63:sw"), sw_bounds, &sw_on, sw_style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = zyntra_ui.Vec2.init(605, 571) },
+    });
+    const swc = try switch_mod.beginSwitch(&ctx, zyntra_ui.Id.fromString("examples/m63:sw"), sw_bounds, &sw_on, sw_style);
+    ctx.endFrame();
+    std.debug.print("m63 switch toggled={} on={} focused={}\n", .{ swc.toggled, sw_on, swc.focused });
 }

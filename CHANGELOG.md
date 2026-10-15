@@ -5,6 +5,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `widgets/switch` (M63): controle binário ligado/desligado (toggle),
+  complementar ao checkbox — trilho + knob deslizante, mouse com
+  press/release-to-toggle e cancelamento fora, foco por click/Tab,
+  Espaço alterna, `SwitchStyle` + `Theme.switchStyle()`. Aditivo;
+  impacto SemVer MINOR.
+
 ## [1.17.0] - 2026-10-15
 
 MINOR estável, 100% compatível: visão tabular.
