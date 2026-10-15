@@ -14,6 +14,7 @@ const tooltip_mod = @import("zyntra_ui").widgets.tooltip;
 const modal_mod = @import("zyntra_ui").widgets.modal;
 const combo_mod = @import("zyntra_ui").widgets.combo;
 const switch_mod = @import("zyntra_ui").widgets.@"switch";
+const spinner_mod = @import("zyntra_ui").widgets.spinner;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -585,4 +586,13 @@ pub fn main() !void {
     const swc = try switch_mod.beginSwitch(&ctx, zyntra_ui.Id.fromString("examples/m63:sw"), sw_bounds, &sw_on, sw_style);
     ctx.endFrame();
     std.debug.print("m63 switch toggled={} on={} focused={}\n", .{ swc.toggled, sw_on, swc.focused });
+
+    // Spinner (M64): indicador indeterminado; a cabeça gira com o tempo.
+    const sp_style = theme.spinnerStyle();
+    ctx.beginFrame();
+    try spinner_mod.spinner(&ctx, zyntra_ui.Vec2.init(680, 571), 0.3, sp_style);
+    const sp_head = spinner_mod.spinnerHeadIndex(sp_style.dots, 0.3);
+    const sp_draws = ctx.drawCommands().len;
+    ctx.endFrame();
+    std.debug.print("m64 spinner head={d} draws={d}\n", .{ sp_head, sp_draws });
 }

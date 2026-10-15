@@ -5,6 +5,13 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `widgets/spinner` (M64): indicador de carregamento **indeterminado**,
+  complementar a `progress`. Display puro (sem interação/estado) guiado
+  por tempo do chamador (`t` em segundos) — determinístico; anel de dots
+  com cabeça rotativa, `SpinnerStyle` + `Theme.spinnerStyle()`.
+
 ## [1.18.0] - 2026-10-15
 
 MINOR estável, 100% compatível: controle binário.

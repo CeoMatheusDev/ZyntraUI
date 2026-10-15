@@ -249,6 +249,23 @@ pub const SwitchStyle = extern struct {
     }
 };
 
+/// Estilo de spinner de carregamento (M64).
+pub const SpinnerStyle = extern struct {
+    track: types.Color,
+    head: types.Color,
+    /// Número de dots no anel (>= 2).
+    dots: u8 = 8,
+    radius: f32 = 10.0,
+    dot_radius: f32 = 2.0,
+
+    pub fn isValid(self: SpinnerStyle) bool {
+        return self.dots >= 2 and
+            std.math.isFinite(self.radius) and self.radius > 0 and
+            std.math.isFinite(self.dot_radius) and self.dot_radius > 0 and
+            self.dot_radius <= self.radius;
+    }
+};
+
 /// Estilo de menu dropdown.
 pub const MenuStyle = extern struct {
     bg: types.Color,
@@ -399,6 +416,16 @@ pub const Theme = extern struct {
         };
     }
 
+    pub fn spinnerStyle(self: Theme) SpinnerStyle {
+        return .{
+            .track = types.Color.rgb(90, 90, 100),
+            .head = self.accent,
+            .dots = 8,
+            .radius = 10.0,
+            .dot_radius = 2.0,
+        };
+    }
+
     pub fn radioStyle(self: Theme) RadioStyle {
         return .{
             .box = self.surface,
@@ -518,6 +545,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(dark.menuStyle().isValid());
     try stdt.testing.expect(dark.switchStyle().isValid());
     try stdt.testing.expect(light.switchStyle().isValid());
+    try stdt.testing.expect(dark.spinnerStyle().isValid());
+    try stdt.testing.expect(light.spinnerStyle().isValid());
     try stdt.testing.expect(dark.progressStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,

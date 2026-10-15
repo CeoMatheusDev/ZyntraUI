@@ -72,6 +72,7 @@ pub const widgets = struct {
     /// `switch` é palavra reservada em Zig; o campo usa identificador
     /// escapado. Acesse via `widgets.@"switch"`.
     pub const @"switch" = @import("widgets/switch.zig");
+    pub const spinner = @import("widgets/spinner.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -132,6 +133,7 @@ pub const ListViewStyle = style.style_mod.ListViewStyle;
 pub const TreeViewStyle = style.style_mod.TreeViewStyle;
 pub const TableStyle = style.style_mod.TableStyle;
 pub const SwitchStyle = style.style_mod.SwitchStyle;
+pub const SpinnerStyle = style.style_mod.SpinnerStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -210,4 +212,5 @@ test {
     _ = @import("widgets/tree_view.zig");
     _ = @import("widgets/table.zig");
     _ = @import("widgets/switch.zig");
+    _ = @import("widgets/spinner.zig");
 }
