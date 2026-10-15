@@ -170,6 +170,25 @@ pub const SplitterStyle = extern struct {
     }
 };
 
+/// Estilo de lista vertical (M58).
+pub const ListViewStyle = extern struct {
+    bg: types.Color,
+    bg_selected: types.Color,
+    bg_hover: types.Color,
+    text: types.Color,
+    text_selected: types.Color,
+    border: types.Color,
+    border_width: f32 = 1.0,
+    item_height: f32 = 28.0,
+    padding_x: f32 = 8.0,
+
+    pub fn isValid(self: ListViewStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0 and
+            std.math.isFinite(self.item_height) and self.item_height > 0 and
+            std.math.isFinite(self.padding_x) and self.padding_x >= 0;
+    }
+};
+
 /// Estilo de menu dropdown.
 pub const MenuStyle = extern struct {
     bg: types.Color,
@@ -359,6 +378,20 @@ pub const Theme = extern struct {
             .bg_drag = self.accent,
             .handle_w = 8.0,
             .handle_h = 8.0,
+        };
+    }
+
+    pub fn listViewStyle(self: Theme) ListViewStyle {
+        return .{
+            .bg = self.surface,
+            .bg_selected = self.accent,
+            .bg_hover = types.Color.rgb(80, 80, 90),
+            .text = self.text,
+            .text_selected = types.Color.rgb(255, 255, 255),
+            .border = self.border,
+            .border_width = 1.0,
+            .item_height = 28.0,
+            .padding_x = 8.0,
         };
     }
 };

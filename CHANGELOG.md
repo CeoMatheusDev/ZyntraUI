@@ -578,6 +578,15 @@ Pré-release instável: API pode mudar até a beta.
   `tab_bar`; `endTabBar` existe para simetria (sem estado retido).
 - Resto aditivo (acumula p/ MINOR).
 
+### Adicionado — Milestone 58 (ListView, compatível)
+- `widgets/list_view.beginListView`/`endListView`: lista vertical com
+  scroll, seleção por click/teclado (setas/Home/End/PageUp/PageDown),
+  wheel, auto-scroll para seleção, scrollbar proporcional, clip;
+  helpers puros `listViewContentHeight`/`listViewMaxScroll`;
+  `ListViewStyle` + `Theme.listViewStyle()`; `endListView` NO-OP
+  documentado; clássicos intactos.
+- Resto aditivo (acumula p/ MINOR).
+
 ### Adicionado — Milestone 57 (Splitter, compatível)
 - `widgets/splitter.beginSplitter`/`endSplitter`: divisor arrastável
   (`pos: *f32` no chamador); mouse drag com captura, clamp, teclado
