@@ -334,3 +334,11 @@ Pré-release instável: API pode mudar até a beta.
   sondado com modal aberto; sem flag global, sem invasão).
 - `style/style`: `ModalStyle` + `Theme.modalStyle()`.
 - Exemplo bloqueia botão e dispensa com Escape; resto aditivo (1.9.0).
+
+### Corrigido/Endurecido — Milestone 28 (raster, compatível)
+- Fuzz nos primitivos do rasterizador + teste determinístico NaN/Inf
+  que ABORTAVA (`integer part of floating point value out of bounds`):
+  `fillRect/strokeLine/fillCircle/strokeRect` saturam entradas
+  não-finitas em no-op. Comportamento inalterado para entradas válidas
+  (`render` já validava); só chamadas diretas degeneradas mudam
+  (panic → no-op documentado).

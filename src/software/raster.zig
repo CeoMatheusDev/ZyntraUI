@@ -67,7 +67,11 @@ pub const SoftwareFramebuffer = struct {
 
     /// Preenche a interseção de `r` com `clip` (quando presente).
     /// Coordenadas: pixel (i,j) cobre [i,i+1)×[j,j+1).
+    /// Entradas não-finitas saturam em no-op (conversão float→int
+    /// travaria; `render` já rejeita, isto protege chamadas diretas).
     pub fn fillRect(self: *Self, r: types.Rect, clip: ?types.Rect, c: types.Color) void {
+        if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
+            !std.math.isFinite(r.w) or !std.math.isFinite(r.h)) return;
         var x0 = @as(i64, @intFromFloat(@floor(r.x)));
         var y0 = @as(i64, @intFromFloat(@floor(r.y)));
         var x1 = @as(i64, @intFromFloat(@ceil(r.x + r.w)));
@@ -115,6 +119,9 @@ pub const SoftwareFramebuffer = struct {
     }
 
     pub fn strokeLine(self: *Self, p0: types.Vec2, p1: types.Vec2, thickness: f32, clip: ?types.Rect, c: types.Color) void {
+        if (!std.math.isFinite(p0.x) or !std.math.isFinite(p0.y) or
+            !std.math.isFinite(p1.x) or !std.math.isFinite(p1.y) or
+            !std.math.isFinite(thickness) or thickness <= 0) return;
         const r = thickness / 2;
         const x0f = @min(p0.x, p1.x) - r - 1;
         const y0f = @min(p0.y, p1.y) - r - 1;
@@ -137,6 +144,8 @@ pub const SoftwareFramebuffer = struct {
     }
 
     pub fn fillCircle(self: *Self, center: types.Vec2, radius: f32, clip: ?types.Rect, c: types.Color) void {
+        if (!std.math.isFinite(center.x) or !std.math.isFinite(center.y) or
+            !std.math.isFinite(radius) or radius < 0) return;
         var y = @max(0, @as(i64, @intFromFloat(@floor(center.y - radius))));
         const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(center.y + radius))));
         while (y < y_end) : (y += 1) {
@@ -156,6 +165,9 @@ pub const SoftwareFramebuffer = struct {
     }
 
     pub fn strokeRect(self: *Self, r: types.Rect, thickness: f32, clip: ?types.Rect, c: types.Color) void {
+        if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
+            !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
+            !std.math.isFinite(thickness) or thickness <= 0) return;
         const t = @max(1.0, thickness);
         // Barras superior/inferior (largura total) + laterais (entre elas).
         self.fillRect(.{ .x = r.x, .y = r.y, .w = r.w, .h = @min(t, r.h) }, clip, c);
@@ -377,4 +389,58 @@ test "encodePpm cabeçalho e bytes exatos" {
     try stdt.testing.expectEqualSlices(u8, &.{ 255, 0, 0, 0, 255, 0 }, out[11..17]);
     var tiny: [5]u8 = undefined;
     try stdt.testing.expectError(error.NoSpaceLeft, encodePpm(&fb, &tiny));
+}
+
+test "raster entradas não-finitas saturam em no-op" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 8, 8);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(1, 2, 3));
+    const nan = std.math.nan(f32);
+    const inf = std.math.inf(f32);
+    const c = types.Color.rgb(9, 9, 9);
+
+    // Nenhuma entrada degenerada pode travar/estourar; tudo vira no-op
+    // e o buffer permanece intacto.
+    fb.fillRect(types.Rect.init(nan, 0, 4, 4), null, c);
+    fb.fillRect(types.Rect.init(0, 0, inf, 4), null, c);
+    fb.strokeLine(.{ .x = nan, .y = 0 }, .{ .x = 1, .y = 1 }, 1, null, c);
+    fb.strokeLine(.{ .x = 0, .y = 0 }, .{ .x = 1, .y = 1 }, nan, null, c);
+    fb.fillCircle(.{ .x = nan, .y = nan }, 2, null, c);
+    fb.fillCircle(.{ .x = 4, .y = 4 }, nan, null, c);
+    fb.strokeRect(types.Rect.init(0, 0, inf, inf), 1, null, c);
+    for (0..8) |y| {
+        for (0..8) |x| {
+            try stdt.testing.expectEqual([4]u8{ 1, 2, 3, 255 }, fb.get(@intCast(x), @intCast(y)));
+        }
+    }
+}
+test "fuzz primitivas: sem crash com bits arbitrários" {
+    try std.testing.fuzz({}, fuzzRaster, .{});
+}
+
+fn fuzzRaster(_: void, smith: *std.testing.Smith) !void {
+    var backing: [16 * 16 * 4]u8 = undefined;
+    smith.bytes(&backing);
+    var fb = SoftwareFramebuffer{ .w = 16, .h = 16, .pixels = &backing };
+
+    var fb2: [16]u8 = undefined;
+    smith.bytes(&fb2);
+    const bits: [4]f32 = @bitCast(fb2);
+    const r = types.Rect{ .x = bits[0], .y = bits[1], .w = bits[2], .h = bits[3] };
+    const p0 = types.Vec2{ .x = bits[0], .y = bits[1] };
+    const p1 = types.Vec2{ .x = bits[2], .y = bits[3] };
+    const c = types.Color{ .r = 1, .g = 2, .b = 3, .a = 4 };
+
+    // Nenhuma chamada pode travar/estourar: conversão insegura seria
+    // panic no build com safety (o que o fuzz denunciaria).
+    fb.fillRect(r, null, c);
+    fb.fillRect(r, types.Rect.init(-100, -100, 1000, 1000), c);
+    fb.strokeLine(p0, p1, @abs(bits[0]) + 1, null, c);
+    fb.fillCircle(p0, @abs(bits[1]), null, c);
+    fb.strokeRect(r, @abs(bits[2]) + 1, null, c);
+
+    // Invariante estrutural: tamanho do buffer intacto.
+    try std.testing.expectEqual(@as(usize, 16 * 16 * 4), fb.pixels.len);
 }
