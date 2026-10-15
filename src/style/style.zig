@@ -189,6 +189,27 @@ pub const ListViewStyle = extern struct {
     }
 };
 
+/// Estilo de árvore hierárquica (M59).
+pub const TreeViewStyle = extern struct {
+    bg: types.Color,
+    bg_selected: types.Color,
+    bg_hover: types.Color,
+    text: types.Color,
+    text_selected: types.Color,
+    border: types.Color,
+    border_width: f32 = 1.0,
+    item_height: f32 = 24.0,
+    indent: f32 = 16.0,
+    expander_size: f32 = 12.0,
+
+    pub fn isValid(self: TreeViewStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0 and
+            std.math.isFinite(self.item_height) and self.item_height > 0 and
+            std.math.isFinite(self.indent) and self.indent >= 0 and
+            std.math.isFinite(self.expander_size) and self.expander_size > 0;
+    }
+};
+
 /// Estilo de menu dropdown.
 pub const MenuStyle = extern struct {
     bg: types.Color,
@@ -392,6 +413,21 @@ pub const Theme = extern struct {
             .border_width = 1.0,
             .item_height = 28.0,
             .padding_x = 8.0,
+        };
+    }
+
+    pub fn treeViewStyle(self: Theme) TreeViewStyle {
+        return .{
+            .bg = self.surface,
+            .bg_selected = self.accent,
+            .bg_hover = types.Color.rgb(80, 80, 90),
+            .text = self.text,
+            .text_selected = types.Color.rgb(255, 255, 255),
+            .border = self.border,
+            .border_width = 1.0,
+            .item_height = 24.0,
+            .indent = 16.0,
+            .expander_size = 12.0,
         };
     }
 };

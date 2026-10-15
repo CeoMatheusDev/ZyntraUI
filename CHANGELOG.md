@@ -596,6 +596,15 @@ Pré-release instável: API pode mudar até a beta.
   documentado; clássicos intactos.
 - Resto aditivo (acumula p/ MINOR).
 
+### Adicionado — Milestone 59 (TreeView, compatível)
+- `widgets/tree_view.beginTreeView`/`endTreeView`: árvore hierárquica
+  com expand/collapse, seleção por click/teclado (setas/Home/End/Enter/
+  Space/Left/Right), wheel, auto-scroll, scrollbar; helpers puros
+  `treeViewContentHeight`/`treeViewMaxScroll`/`treeViewFlatten`;
+  `TreeItem` (label, children, expanded), `TreeViewStyle` +
+  `Theme.treeViewStyle()`; `endTreeView` NO-OP documentado.
+- Resto aditivo (acumula p/ MINOR).
+
 ### Adicionado — Milestone 57 (Splitter, compatível)
 - `widgets/splitter.beginSplitter`/`endSplitter`: divisor arrastável
   (`pos: *f32` no chamador); mouse drag com captura, clamp, teclado
