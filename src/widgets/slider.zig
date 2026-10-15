@@ -1,11 +1,13 @@
 //! ZyntraUI — slider horizontal (widgets/slider).
 //!
-//! Modelo M8 (drag com captura, mouse-only; teclado em milestone futura):
+//! Modelo M8 (drag com captura, mouse) + M30 (teclado):
 //! - `value: *f32` pertence ao chamador; `min < max` obrigatório e
 //!   `value` inicial deve ser finito (senão `InvalidArgument`).
 //! - Press dentro captura (`press_owner`); enquanto dono + botão
 //!   pressionado, o valor segue o mouse X (clampado — pode arrastar para
 //!   fora da trilha). Release em qualquer lugar encerra o drag.
+//! - Teclado com foco (click foca, Tab circula): setas ajustam em
+//!   `(max-min)/20`, `Home`/`End` saltam (sempre clampado).
 //! - `changed`: valor difere do da entrada nesta chamada.
 //! Desenho (4 comandos): trilha, preenchimento 0..t, handle, outline.
 //! `id` não-nulo obrigatório.
@@ -46,6 +48,13 @@ pub fn slider(
     const hovered = if (ctx.mouse_pos) |p| bounds.contains(p) else false;
     var res = SliderResult{ .value = value.*, .hovered = hovered };
     const entry = value.*;
+    const step = (max - min) / 20; // passo de teclado (M30)
+
+    // Focável (Tab circula); click foca.
+    try ctx.registerFocusable(id);
+    if (fm.pressedInside(bounds)) {
+        ctx.focus_owner = id;
+    }
 
     if (ctx.press_owner == null and fm.pressedInside(bounds)) {
         ctx.press_owner = id;
@@ -65,6 +74,30 @@ pub fn slider(
     }
     res.value = value.*;
     res.changed = res.value != entry;
+
+    // Teclado com foco (M30): setas ajustam em `step`, Home/End saltam,
+    // Tab circula. Sem drag pelo teclado (só mouse arrasta).
+    if (ctx.hasFocus(id)) {
+        for (ctx.pendingEvents()) |ev| {
+            if (ev != .key) continue;
+            const k = ev.key;
+            if (!k.pressed or k.modifiers.ctrl) continue;
+            switch (k.key) {
+                .left, .down => {
+                    value.* = std.math.clamp(value.* - step, min, max);
+                },
+                .right, .up => {
+                    value.* = std.math.clamp(value.* + step, min, max);
+                },
+                .home => value.* = min,
+                .end => value.* = max,
+                .tab => ctx.requestFocusAdvance(if (k.modifiers.shift) .prev else .next),
+                else => {},
+            }
+        }
+        res.value = value.*;
+        res.changed = res.value != entry;
+    }
 
     const t = (value.* - min) / (max - min);
     const cy = bounds.y + bounds.h / 2;
@@ -163,5 +196,61 @@ test "slider arrasta entre frames, clampa e valida" {
     try stdt.testing.expectError(error.InvalidArgument, slider(&ctx, id, bounds, &v, 100, 0, style));
     var nan: f32 = std.math.nan(f32);
     try stdt.testing.expectError(error.InvalidArgument, slider(&ctx, id, bounds, &nan, 0, 100, style));
+    ctx.endFrame();
+}
+
+test "slider teclado: setas, Home/End, Tab" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().sliderStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:sld-kb");
+    var v: f32 = 50; // step = 5
+
+    // Click foca; Right soma um passo.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(100, 15) },
+    });
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(100, 15) },
+    });
+    _ = try slider(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    const r1 = try slider(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(r1.changed and !r1.dragging);
+    try stdt.testing.expectEqual(@as(f32, 55), v);
+    ctx.endFrame();
+
+    // Left volta; Home/End saltam (clampados).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    _ = try slider(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expectEqual(@as(f32, 50), v);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    _ = try slider(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expectEqual(@as(f32, 100), v);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    const r2 = try slider(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(!r2.changed); // já no máximo
+    try stdt.testing.expectEqual(@as(f32, 100), v);
+    ctx.endFrame();
+
+    // Sem foco: setas ignoradas.
+    ctx.clearFocus();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    const r3 = try slider(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(!r3.changed);
+    try stdt.testing.expectEqual(@as(f32, 100), v);
     ctx.endFrame();
 }

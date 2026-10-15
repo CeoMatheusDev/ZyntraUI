@@ -352,3 +352,8 @@ Pré-release instável: API pode mudar até a beta.
   foco clicam (sem visual de segurado); `Ctrl`+tecla ignorado.
 - `widgets/checkbox`: idem; Espaço alterna, Enter ignorado.
 - Exemplo com Espaço; resto aditivo (acumula p/ 1.10.0).
+
+### Adicionado — Milestone 30 (teclado no slider, compatível)
+- `widgets/slider`: focável (click foca, Tab circula); setas ajustam em
+  `(max-min)/20`, `Home`/`End` saltam, tudo clampado. Drag segue só mouse.
+- Exemplo com Right; resto aditivo (acumula p/ 1.10.0).

@@ -122,6 +122,13 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m8 slider value={d} dragging={}\n", .{ volume, sld.dragging });
 
+    // Teclado no slider (focado no press do frame do drag): Right +5.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    const sldk = try slider_mod.slider(&ctx, zyntra_ui.Id.fromString("examples/m8:sld"), sld_rect, &volume, 0, 100, sld_style);
+    ctx.endFrame();
+    std.debug.print("m30 slider kb value={d} changed={}\n", .{ volume, sldk.changed });
+
     // Solta o botão sondando o slider (captura órfã bloqueia outros).
     ctx.beginFrame();
     try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = false, .pos = zyntra_ui.Vec2.init(sld_rect.x + 180, sld_rect.y + 15) } });
