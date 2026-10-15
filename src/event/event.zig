@@ -40,6 +40,7 @@ pub const Key = enum(u32) {
     delete = 15,
     home = 16,
     end = 17,
+    y = 18,
     _,
 };
 

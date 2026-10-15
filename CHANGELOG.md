@@ -231,3 +231,11 @@ Pré-release instável: API pode mudar até a beta.
 - `widgets/progress`: display puro 0..1 clampado (NaN rejeitado), 3 draws.
 - `style/style`: `PopupStyle`/`ProgressStyle` + derivados do tema.
 - Exemplo dispensa popup fora + progresso 75%; resto aditivo (1.4.0).
+
+### Adicionado — Milestone 19 (undo/redo, compatível)
+- `widgets/text_input`: `TextHistory(S,B)` genérico (pilhas de snapshots
+  em buffers do chamador, rajadas de digitação agrupam, redo esvazia em
+  nova mutação) + `textInputHistory(S,B,...)` (`Ctrl+Z`/`Ctrl+Y`/
+  `Ctrl+Shift+Z`, flags `undone`/`redone`); `textInput*` antigos intactos.
+- `event/event`: `Key` ganha `y` (enum já tinha `_`, aditivo).
+- Exemplo desfaz/refaz; resto aditivo (rumo à 1.5.0).

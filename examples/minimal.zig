@@ -167,14 +167,26 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m13 select selected={} draws={d}\n", .{ ts.selected, ctx.drawCommands().len });
 
-    // Frame 8: digitar substitui a faixa ("O!i" → "Z").
+    // Frame 8: digitar substitui a faixa ("O!i" → "Z", com histórico).
+    var hist = zyntra_ui.TextHistory(8, 32){};
     ctx.beginFrame();
     try ctx.pushEvent(.{ .text = .{ .codepoint = 'Z' } });
-    _ = try text_input_mod.textInputSelected(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, &sel_anchor, font, ti_style);
+    _ = try text_input_mod.textInputHistory(8, 32, &ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, &sel_anchor, &hist, font, ti_style);
     ctx.endFrame();
     std.debug.print("m13 replace text={s}\n", .{name_buf[0..name_len]});
 
-    // Frame 9: scroll com wheel sobre a vista (conteúdo 300px em 100px).
+    // Frame 9: undo (Ctrl+Z) restaura "O!i"; redo (Ctrl+Y) volta "Z".
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const hu = try text_input_mod.textInputHistory(8, 32, &ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, &sel_anchor, &hist, font, ti_style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .y, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const hr = try text_input_mod.textInputHistory(8, 32, &ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, &sel_anchor, &hist, font, ti_style);
+    ctx.endFrame();
+    std.debug.print("m19 undo={} redo={} text={s}\n", .{ hu.undone, hr.redone, name_buf[0..name_len] });
+
+    // Frame 10: scroll com wheel sobre a vista (conteúdo 300px em 100px).
     var scrolled: f32 = 0;
     const sc_style = theme.scrollStyle();
     const sc_bounds = zyntra_ui.Rect.init(300, 400, 200, 100);
@@ -194,7 +206,7 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m16 scroll offset={d} max={d} draws={d}\n", .{ scrolled, sc.max_offset, ctx.drawCommands().len });
 
-    // Frame 10: press no thumb + arrasto (thumb em y≈432..465).
+    // Frame 11: press no thumb + arrasto (thumb em y≈432..465).
     ctx.beginFrame();
     try ctx.pushEvent(.{
         .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(496, 440) },
@@ -225,7 +237,7 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m17 drag offset={d} dragging={}\n", .{ scrolled, scd.dragging });
 
-    // Frame 10: easing dirige um fade (0→1 em 1s, amostrado).
+    // Frame 12: easing dirige um fade (0→1 em 1s, amostrado).
     const tw = try zyntra_ui.Tween.init(0, 1, 1.0, .quad_out);
     var timer = try zyntra_ui.AnimTimer.init(1.0, false);
     var step: u32 = 0;
@@ -234,7 +246,7 @@ pub fn main() !void {
         std.debug.print("m11 t={d:.2} v={d:.3}\n", .{ timer.progress(), tw.valueAt(timer.elapsed) });
     }
 
-    // Frame 11: popup aberto + press fora dispensa; progresso a 75%.
+    // Frame 13: popup aberto + press fora dispensa; progresso a 75%.
     var open = true;
     ctx.beginFrame();
     try ctx.pushEvent(.{

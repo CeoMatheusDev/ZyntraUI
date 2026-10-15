@@ -26,10 +26,103 @@ pub const TextInputResult = struct {
     changed: bool = false,
     submitted: bool = false,
     overflowed: bool = false,
-    /// True quando há faixa selecionada (só em `textInputSelected`).
+    /// True quando há faixa selecionada (só em `textInputSelected`+).
     selected: bool = false,
+    /// Undo (`Ctrl+Z`) / redo (`Ctrl+Y` ou `Ctrl+Shift+Z`) aplicados
+    /// nesta chamada (só em `textInputHistory`).
+    undone: bool = false,
+    redone: bool = false,
     len: usize = 0,
 };
+
+/// Histórico de undo/redo com pilhas de snapshots em buffers do
+/// CHAMADOR (zero alocação na lib). `S` = passos guardados, `B` = bytes
+/// por snapshot (deve cobrir `buffer.len` do campo, senão
+/// `InvalidArgument`). Redo esvazia a cada nova mutação.
+pub fn TextHistory(comptime S: usize, comptime B: usize) type {
+    return struct {
+        undo_bytes: [S][B]u8 = undefined,
+        undo_len: [S]usize = std.mem.zeroes([S]usize),
+        undo_cursor: [S]usize = std.mem.zeroes([S]usize),
+        undo_top: usize = 0,
+        redo_bytes: [S][B]u8 = undefined,
+        redo_len: [S]usize = std.mem.zeroes([S]usize),
+        redo_cursor: [S]usize = std.mem.zeroes([S]usize),
+        redo_top: usize = 0,
+        group_open: bool = false,
+
+        const Self = @This();
+
+        fn snapshot(
+            stack_b: *[S][B]u8,
+            stack_l: *[S]usize,
+            stack_c: *[S]usize,
+            top: *usize,
+            buf: []const u8,
+            len: usize,
+            cursor: usize,
+        ) void {
+            if (S == 0) return; // histórico desabilitado: sem passos
+            if (top.* >= S) {
+                // Desloca (descarta o mais antigo); S pequeno, O(S·B).
+                std.mem.copyForwards([B]u8, stack_b[0 .. S - 1], stack_b[1..S]);
+                std.mem.copyForwards(usize, stack_l[0 .. S - 1], stack_l[1..S]);
+                std.mem.copyForwards(usize, stack_c[0 .. S - 1], stack_c[1..S]);
+                top.* = S - 1;
+            }
+            const n = @min(len, B);
+            @memcpy(stack_b[top.*][0..n], buf[0..n]);
+            stack_l[top.*] = n;
+            stack_c[top.*] = @min(cursor, n);
+            top.* += 1;
+        }
+
+        pub fn checkpoint(self: *Self, buf: []const u8, len: usize, cursor: usize) void {
+            // Grupo de digitação: um snapshot por rajada.
+            if (self.group_open) return;
+            snapshot(&self.undo_bytes, &self.undo_len, &self.undo_cursor, &self.undo_top, buf, len, cursor);
+            self.redo_top = 0;
+            self.group_open = true;
+        }
+
+        pub fn checkpointBreak(self: *Self, buf: []const u8, len: usize, cursor: usize) void {
+            // Mutação isolada (sempre novo passo).
+            snapshot(&self.undo_bytes, &self.undo_len, &self.undo_cursor, &self.undo_top, buf, len, cursor);
+            self.redo_top = 0;
+            self.group_open = false;
+        }
+
+        pub fn closeGroup(self: *Self) void {
+            self.group_open = false;
+        }
+
+        pub fn undo(self: *Self, buf: []u8, len: *usize, cursor: *usize, anchor: ?*usize) bool {
+            if (self.undo_top == 0) return false;
+            self.undo_top -= 1;
+            snapshot(&self.redo_bytes, &self.redo_len, &self.redo_cursor, &self.redo_top, buf[0..len.*], len.*, cursor.*);
+            const n = self.undo_len[self.undo_top];
+            @memcpy(buf[0..n], self.undo_bytes[self.undo_top][0..n]);
+            len.* = n;
+            cursor.* = self.undo_cursor[self.undo_top];
+            if (anchor) |a| a.* = cursor.*;
+            self.group_open = false;
+            return true;
+        }
+
+        pub fn redo(self: *Self, buf: []u8, len: *usize, cursor: *usize, anchor: ?*usize) bool {
+            if (self.redo_top == 0) return false;
+            self.redo_top -= 1;
+            snapshot(&self.undo_bytes, &self.undo_len, &self.undo_cursor, &self.undo_top, buf[0..len.*], len.*, cursor.*);
+            const n = self.redo_len[self.redo_top];
+            @memcpy(buf[0..n], self.redo_bytes[self.redo_top][0..n]);
+            len.* = n;
+            cursor.* = self.redo_cursor[self.redo_top];
+            if (anchor) |a| a.* = cursor.*;
+            self.group_open = false;
+            return true;
+        }
+    };
+}
 
 /// Codifica `codepoint` (0..0x10FFFF, sem surrogates) em UTF-8.
 /// Chamar só após validar a faixa; fora dela retorna erro.
@@ -67,8 +160,9 @@ fn popCodepoint(buf: []u8, len: usize) usize {
     return i;
 }
 
-/// Campo de texto clássico (1.0.0, preservado): sem seleção; setas
-/// colapsam. Para seleção, ver `textInputSelected` (aditivo, 1.1.0).
+/// Campo de texto clássico (1.0.0, preservado): sem seleção e sem
+/// histórico; setas colapsam. Para seleção, `textInputSelected`; para
+/// undo/redo, `textInputHistory` (ambos aditivos).
 pub fn textInput(
     ctx: *context_mod.Context,
     id: id_mod.Id,
@@ -79,7 +173,7 @@ pub fn textInput(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextInputResult {
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, null, font, style);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, null, font, style, void, {});
 }
 
 /// Campo de texto com seleção (1.1.0): `anchor` persiste entre frames
@@ -97,7 +191,30 @@ pub fn textInputSelected(
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextInputResult {
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, void, {});
+}
+
+/// Campo de texto com undo/redo (1.5.0, aditivo): `Ctrl+Z` desfaz,
+/// `Ctrl+Y` ou `Ctrl+Shift+Z` refazem; rajadas de digitação agrupam em
+/// um passo. `hist` é `*TextHistory(S, B)` do chamador com `B` cobrindo
+/// `buffer.len` (senão `InvalidArgument`).
+pub fn textInputHistory(
+    comptime S: usize,
+    comptime B: usize,
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    hist: *TextHistory(S, B),
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextInputResult {
+    if (buffer.len > B) return error.InvalidArgument;
+    if (anchor.* > len.*) return error.InvalidArgument;
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, *TextHistory(S, B), hist);
 }
 
 fn textInputInner(
@@ -110,6 +227,8 @@ fn textInputInner(
     anchor: ?*usize,
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
+    Hist: type,
+    hist: Hist,
 ) context_mod.ContextError!TextInputResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
@@ -118,6 +237,7 @@ fn textInputInner(
     if (anchor) |a| {
         if (a.* > len.*) return error.InvalidArgument;
     }
+    const use_hist = Hist != void;
 
     var res = TextInputResult{ .len = len.* };
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
@@ -126,8 +246,11 @@ fn textInputInner(
     try ctx.registerFocusable(id);
 
     // Click dentro assume o foco (independe de captura de press).
+    // Troca de foco quebra rajada de digitação do histórico.
+    const had_focus = ctx.hasFocus(id);
     if (fm.pressedInside(bounds)) {
         ctx.focus_owner = id;
+        if (use_hist and !had_focus) hist.closeGroup();
     }
     const focused = ctx.hasFocus(id);
     res.focused = focused;
@@ -150,6 +273,7 @@ fn textInputInner(
                 .text => |t| {
                     if (anchor) |a| {
                         if (a.* != cursor.*) {
+                            if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
                             deleteSelection(buffer, len, cursor, a);
                             res.changed = true;
                         }
@@ -157,6 +281,7 @@ fn textInputInner(
                     var enc: [4]u8 = undefined;
                     const n = encodeUtf8(t.codepoint, &enc) catch continue; // defensivo; fila já valida
                     if (len.* + n <= buffer.len) {
+                        if (use_hist) hist.checkpoint(buffer[0..len.*], len.*, cursor.*);
                         // Insere no cursor (desloca o sufixo para a direita).
                         std.mem.copyBackwards(u8, buffer[cursor.* + n .. len.* + n], buffer[cursor.*..len.*]);
                         @memcpy(buffer[cursor.*..][0..n], enc[0..n]);
@@ -170,17 +295,36 @@ fn textInputInner(
                 },
                 .key => |k| {
                     if (!k.pressed) continue;
+                    // Undo/redo consomem o evento antes de todo o resto.
+                    if (use_hist and k.key == .z and k.modifiers.ctrl and !k.modifiers.shift) {
+                        if (hist.undo(buffer, len, cursor, anchor)) {
+                            res.undone = true;
+                            res.changed = true;
+                        }
+                        continue;
+                    }
+                    if (use_hist and ((k.key == .y and k.modifiers.ctrl) or
+                        (k.key == .z and k.modifiers.ctrl and k.modifiers.shift)))
+                    {
+                        if (hist.redo(buffer, len, cursor, anchor)) {
+                            res.redone = true;
+                            res.changed = true;
+                        }
+                        continue;
+                    }
                     const extend = anchor != null and k.modifiers.shift;
                     switch (k.key) {
                         .backspace => {
                             if (anchor) |a| {
                                 if (a.* != cursor.*) {
+                                    if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
                                     deleteSelection(buffer, len, cursor, a);
                                     res.changed = true;
                                     continue;
                                 }
                             }
                             if (cursor.* > 0) {
+                                if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
                                 const at = popCodepoint(buffer, cursor.*);
                                 const n = cursor.* - at;
                                 std.mem.copyForwards(u8, buffer[at .. len.* - n], buffer[cursor.*..len.*]);
@@ -193,12 +337,14 @@ fn textInputInner(
                         .delete => {
                             if (anchor) |a| {
                                 if (a.* != cursor.*) {
+                                    if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
                                     deleteSelection(buffer, len, cursor, a);
                                     res.changed = true;
                                     continue;
                                 }
                             }
                             if (cursor.* < len.*) {
+                                if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
                                 const d = metrics_mod.decodeOne(buffer[cursor.*..len.*]) catch {
                                     return error.InvalidArgument; // buffer do chamador corrompido
                                 };
@@ -208,12 +354,14 @@ fn textInputInner(
                             }
                         },
                         .left => {
+                            if (use_hist) hist.closeGroup();
                             if (cursor.* > 0) cursor.* = popCodepoint(buffer, cursor.*);
                             if (!extend) {
                                 if (anchor) |a| a.* = cursor.*;
                             }
                         },
                         .right => {
+                            if (use_hist) hist.closeGroup();
                             if (cursor.* < len.*) {
                                 const d = metrics_mod.decodeOne(buffer[cursor.*..len.*]) catch {
                                     return error.InvalidArgument;
@@ -225,24 +373,31 @@ fn textInputInner(
                             }
                         },
                         .home => {
+                            if (use_hist) hist.closeGroup();
                             cursor.* = 0;
                             if (!extend) {
                                 if (anchor) |a| a.* = cursor.*;
                             }
                         },
                         .end => {
+                            if (use_hist) hist.closeGroup();
                             cursor.* = len.*;
                             if (!extend) {
                                 if (anchor) |a| a.* = cursor.*;
                             }
                         },
-                        .enter => res.submitted = true,
+                        .enter => {
+                            if (use_hist) hist.closeGroup();
+                            res.submitted = true;
+                        },
                         .tab => {
+                            if (use_hist) hist.closeGroup();
                             // Tab nunca vira texto: agenda avanço sobre o
                             // registro completo (aplicado no beginFrame).
                             ctx.requestFocusAdvance(if (k.modifiers.shift) .prev else .next);
                         },
                         .escape => {
+                            if (use_hist) hist.closeGroup();
                             ctx.focus_owner = null;
                             if (anchor) |a| a.* = cursor.*;
                             res.focused = false;
@@ -571,6 +726,118 @@ test "textInputSelected Shift+setas, substitui e destaca" {
     const ru = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
     try stdt.testing.expect(!ru.focused and !ru.selected);
     try stdt.testing.expectEqual(@as(usize, 3), ctx.drawCommands().len); // caixa×2+texto, sem highlight/caret
+    ctx.endFrame();
+}
+
+test "textInputHistory undo agrupa, redo refaz, mutação limpa redo" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-hist");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var hist = TextHistory(8, 16){};
+
+    const H = struct {
+        fn call(
+            c: *context_mod.Context,
+            i: id_mod.Id,
+            b: types.Rect,
+            bf: []u8,
+            l: *usize,
+            cu: *usize,
+            a: *usize,
+            h: *@TypeOf(hist),
+            f: metrics_mod.FontMetrics,
+            s: style_mod.TextInputStyle,
+        ) !TextInputResult {
+            return textInputHistory(8, 16, c, i, b, bf, l, cu, a, h, f, s);
+        }
+    }.call;
+
+    // Foca e digita "ABC" numa rajada (um passo de undo).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'B' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'C' } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expectEqualStrings("ABC", buf[0..len]);
+    ctx.endFrame();
+
+    // Ctrl+Z desfaz a rajada inteira; Ctrl+Y refaz.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const ru = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(ru.undone and !ru.redone);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .y, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const rr = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(rr.redone and !rr.undone);
+    try stdt.testing.expectEqualStrings("ABC", buf[0..len]);
+    ctx.endFrame();
+
+    // Nova mutação limpa o redo: desfaz, digita, redo falha.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'Q' } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expectEqualStrings("Q", buf[0..len]);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .y, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const rn = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(!rn.redone);
+    try stdt.testing.expectEqualStrings("Q", buf[0..len]);
+    ctx.endFrame();
+
+    // Backspace é passo isolado: desfaz sozinho...
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{} } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    ctx.endFrame();
+    // ...Ctrl+Z restaura "Q"; Ctrl+Shift+Z (alias de redo) reapaga.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expectEqualStrings("Q", buf[0..len]);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true, .shift = true } } });
+    const rs = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(rs.redone);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    ctx.endFrame();
+
+    // Pilha vazia: undo é no-op; buffer maior que B rejeitado.
+    ctx.beginFrame();
+    var fresh = TextHistory(8, 16){};
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const re = try H(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &fresh, font, style);
+    try stdt.testing.expect(!re.undone);
+    var big: [17]u8 = undefined;
+    var biglen: usize = 0;
+    var bigcur: usize = 0;
+    var biganc: usize = 0;
+    try stdt.testing.expectError(
+        error.InvalidArgument,
+        textInputHistory(8, 16, &ctx, id, bounds, &big, &biglen, &bigcur, &biganc, &hist, font, style),
+    );
     ctx.endFrame();
 }
 
