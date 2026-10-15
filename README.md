@@ -45,7 +45,10 @@ src/
 ├── draw/        Draw lists + external renderer contract
 ├── layout/      Constraints, insets, stack placement
 ├── style/       Themes and widget styles
-├── widgets/     Button, checkbox, label, slider, text input
+├── widgets/     Button, checkbox, radio, switch, label, slider,
+                 text input, combo, scroll, tab bar, splitter,
+                 list view, tree view, table, menu, popup, modal,
+                 tooltip, progress
 ├── text/        UTF-8 metrics (fallback monospace measurement)
 ├── anim/        Optional easing, tweens, timers
 └── c-abi/       Optional C ABI (zyntra.h) + opaque handles
