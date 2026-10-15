@@ -41,6 +41,8 @@ pub const Key = enum(u32) {
     home = 16,
     end = 17,
     y = 18,
+    page_up = 19,
+    page_down = 20,
     _,
 };
 

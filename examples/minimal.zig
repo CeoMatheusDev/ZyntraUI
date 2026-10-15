@@ -268,6 +268,25 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m17 drag offset={d} dragging={}\n", .{ scrolled, scd.dragging });
 
+    // Teclado no scroll: press foca + PageDown desce 100 (130→200 clamp).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(400, 450) },
+    });
+    try ctx.pushEvent(.{ .key = .{ .key = .page_down, .pressed = true, .modifiers = .{} } });
+    const sck = try scroll_mod.beginScroll(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m16:sc"),
+        sc_bounds,
+        &scrolled,
+        300,
+        24,
+        sc_style,
+    );
+    try scroll_mod.endScroll(&ctx, sc_bounds, scrolled, 300, sc_style);
+    ctx.endFrame();
+    std.debug.print("m31 scroll kb offset={d} scrolled={}\n", .{ scrolled, sck.scrolled });
+
     // Frame 13: easing dirige um fade (0→1 em 1s, amostrado).
     const tw = try zyntra_ui.Tween.init(0, 1, 1.0, .quad_out);
     var timer = try zyntra_ui.AnimTimer.init(1.0, false);

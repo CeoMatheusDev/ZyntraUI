@@ -364,3 +364,9 @@ Pré-release instável: API pode mudar até a beta.
 - `widgets/slider`: focável (click foca, Tab circula); setas ajustam em
   `(max-min)/20`, `Home`/`End` saltam, tudo clampado. Drag segue só mouse.
 - Exemplo com Right; resto aditivo (acumula p/ 1.10.0).
+
+### Adicionado — Milestone 31 (teclado no scroll, compatível)
+- `widgets/scroll`: focável (click foca, Tab circula; filhos refocam);
+  `PageUp`/`PageDown` = ±vista, `Home`/`End` = extremos, clampados.
+- `event/event`: `Key` ganha `page_up`/`page_down` (enum com `_`).
+- Exemplo com PageDown; resto aditivo (acumula p/ próxima MINOR).

@@ -1,10 +1,12 @@
 //! ZyntraUI — container com scroll (widgets/scroll).
 //!
-//! Modelo M16+M17 (begin/end imediato, estado no chamador):
+//! Modelo M16+M17 (begin/end imediato, estado no chamador) + M31 teclado:
 //! - `beginScroll(ctx,id,bounds,scroll_y,content_h,speed,style)`:
 //!   `mouse_wheel` com hover (`dy > 0` sobe, `speed` px/unidade);
 //!   press no thumb captura e o arrasto posiciona absoluto;
 //!   tudo clampado em [0, max(0, content_h-bounds.h)].
+//! - Focável (click foca, Tab circula; filhos clicados refocam depois):
+//!   `PageUp`/`PageDown` = ±vista, `Home`/`End` = extremos.
 //! - Emite `clip(bounds)`; filhos entre begin/end saem clippados;
 //!   `endScroll` limpa o clip e desenha a scrollbar (só com overflow).
 //!   SEMPRE parear (mesmo sem filhos).
@@ -63,6 +65,13 @@ pub fn beginScroll(
     const hovered = if (ctx.mouse_pos) |p| bounds.contains(p) else false;
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
 
+    // Focável (Tab circula); click foca (filhos clicados refocam depois,
+    // na ordem de sondagem).
+    try ctx.registerFocusable(id);
+    if (fm.pressedInside(bounds)) {
+        ctx.focus_owner = id;
+    }
+
     var res = ScrollResult{
         .content = .{ .x = bounds.x, .y = bounds.y - scroll_y.*, .w = bounds.w, .h = @max(bounds.h, content_h) },
         .offset = scroll_y.*,
@@ -101,6 +110,37 @@ pub fn beginScroll(
             if (ev != .mouse_wheel) continue;
             scroll_y.* = std.math.clamp(scroll_y.* - ev.mouse_wheel.dy * speed, 0, max_offset);
             res.scrolled = true;
+        }
+        res.offset = scroll_y.*;
+        res.content.y = bounds.y - scroll_y.*;
+    }
+
+    // Teclado com foco (M31): PageUp/Down = ±vista, Home/End = extremos.
+    if (ctx.hasFocus(id)) {
+        for (ctx.pendingEvents()) |ev| {
+            if (ev != .key) continue;
+            const k = ev.key;
+            if (!k.pressed or k.modifiers.ctrl) continue;
+            switch (k.key) {
+                .page_up => {
+                    scroll_y.* = std.math.clamp(scroll_y.* - bounds.h, 0, max_offset);
+                    res.scrolled = true;
+                },
+                .page_down => {
+                    scroll_y.* = std.math.clamp(scroll_y.* + bounds.h, 0, max_offset);
+                    res.scrolled = true;
+                },
+                .home => {
+                    scroll_y.* = 0;
+                    res.scrolled = true;
+                },
+                .end => {
+                    scroll_y.* = max_offset;
+                    res.scrolled = true;
+                },
+                .tab => ctx.requestFocusAdvance(if (k.modifiers.shift) .prev else .next),
+                else => {},
+            }
         }
         res.offset = scroll_y.*;
         res.content.y = bounds.y - scroll_y.*;
@@ -253,6 +293,63 @@ test "scroll drag no thumb posiciona absoluto" {
     const r3 = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
     try stdt.testing.expect(!r3.dragging);
     try stdt.testing.expect(ctx.press_owner == null);
+    try endScroll(&ctx, bounds, off, 300, style);
+    ctx.endFrame();
+}
+
+test "scroll teclado: PageUp/Down, Home/End com foco" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().scrollStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 100);
+    const id = id_mod.Id.fromString("test:sc-kb");
+    var off: f32 = 0;
+
+    // Click foca; PageDown desce uma vista (100); PageUp volta.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(10, 10) },
+    });
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(10, 10) },
+    });
+    _ = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    try endScroll(&ctx, bounds, off, 300, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .page_down, .pressed = true, .modifiers = .{} } });
+    const r1 = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expect(r1.scrolled);
+    try stdt.testing.expectEqual(@as(f32, 100), off);
+    try endScroll(&ctx, bounds, off, 300, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .page_down, .pressed = true, .modifiers = .{} } });
+    _ = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expectEqual(@as(f32, 200), off); // clamp no max
+    try endScroll(&ctx, bounds, off, 300, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .page_up, .pressed = true, .modifiers = .{} } });
+    _ = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expectEqual(@as(f32, 100), off);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    _ = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expectEqual(@as(f32, 0), off);
+    ctx.endFrame();
+
+    // Sem foco: teclas ignoradas.
+    ctx.clearFocus();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    const r2 = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expect(!r2.scrolled);
+    try stdt.testing.expectEqual(@as(f32, 0), off);
     try endScroll(&ctx, bounds, off, 300, style);
     ctx.endFrame();
 }
