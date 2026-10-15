@@ -1,6 +1,6 @@
-//! ZyntraUI — slider horizontal (widgets/slider).
+//! ZyntraUI — slider horizontal/vertical (widgets/slider).
 //!
-//! Modelo M8 (drag com captura, mouse) + M30 (teclado):
+//! Modelo M8 (drag com captura, mouse) + M30 (teclado) + M51 (vertical):
 //! - `value: *f32` pertence ao chamador; `min < max` obrigatório e
 //!   `value` inicial deve ser finito (senão `InvalidArgument`).
 //! - Press dentro captura (`press_owner`); enquanto dono + botão
@@ -138,6 +138,124 @@ pub fn slider(
     return res;
 }
 
+/// Variante vertical do `slider` (M51): valor cresce para cima
+/// (topo = `max`, base = `min`); drag segue o mouse Y clampado.
+/// Teclado idêntico ao horizontal (`Up`/`Right` aumentam,
+/// `Down`/`Left` diminuem, `Home`/`End` saltam). Desenho em
+/// 4 comandos (trilha, preenchimento da base, handle, outline).
+/// Reaproveita `SliderStyle` sem mudanças.
+pub fn sliderVertical(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    value: *f32,
+    min: f32,
+    max: f32,
+    style: style_mod.SliderStyle,
+) context_mod.ContextError!SliderResult {
+    if (id.isNull()) return error.InvalidArgument;
+    if (!style.isValid()) return error.InvalidArgument;
+    if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
+    if (!std.math.isFinite(min) or !std.math.isFinite(max) or min >= max) {
+        return error.InvalidArgument;
+    }
+    if (!std.math.isFinite(value.*)) return error.InvalidArgument;
+    value.* = std.math.clamp(value.*, min, max);
+
+    const fm = input.FrameMouse.scan(ctx.pendingEvents());
+    const hovered = if (ctx.mouse_pos) |p| bounds.contains(p) else false;
+    var res = SliderResult{ .value = value.*, .hovered = hovered };
+    const entry = value.*;
+    const step = (max - min) / 20; // passo de teclado (M30)
+
+    // Focável (Tab circula); click foca.
+    try ctx.registerFocusable(id);
+    if (fm.pressedInside(bounds)) {
+        ctx.focus_owner = id;
+    }
+
+    if (ctx.press_owner == null and fm.pressedInside(bounds)) {
+        ctx.press_owner = id;
+    }
+    if (ctx.press_owner == id) {
+        if (ctx.mouse_down_left) {
+            res.dragging = true;
+            if (ctx.mouse_pos) |p| {
+                const t = std.math.clamp(1 - (p.y - bounds.y) / bounds.h, 0, 1);
+                value.* = min + t * (max - min);
+            }
+        }
+        if (fm.released_pos != null) {
+            ctx.press_owner = null;
+            res.dragging = false;
+        }
+    }
+    res.value = value.*;
+    res.changed = res.value != entry;
+
+    // Teclado com foco (mesmo mapa do horizontal).
+    if (ctx.hasFocus(id)) {
+        for (ctx.pendingEvents()) |ev| {
+            if (ev != .key) continue;
+            const k = ev.key;
+            if (!k.pressed or k.modifiers.ctrl) continue;
+            switch (k.key) {
+                .left, .down => {
+                    value.* = std.math.clamp(value.* - step, min, max);
+                },
+                .right, .up => {
+                    value.* = std.math.clamp(value.* + step, min, max);
+                },
+                .home => value.* = min,
+                .end => value.* = max,
+                .tab => ctx.requestFocusAdvance(if (k.modifiers.shift) .prev else .next),
+                else => {},
+            }
+        }
+        res.value = value.*;
+        res.changed = res.value != entry;
+    }
+
+    const t = (value.* - min) / (max - min);
+    const cx = bounds.x + bounds.w / 2;
+    const ypos = bounds.y + (1 - t) * bounds.h; // centro do handle
+    const track = types.Rect{
+        .x = cx - style.track_height / 2,
+        .y = bounds.y,
+        .w = style.track_height,
+        .h = bounds.h,
+    };
+    const handle = types.Rect{
+        .x = cx - style.handle_w / 2,
+        .y = ypos - style.handle_h / 2,
+        .w = style.handle_w,
+        .h = style.handle_h,
+    };
+    const filled = types.Rect{
+        .x = track.x,
+        .y = ypos,
+        .w = track.w,
+        .h = @max(0, bounds.y + bounds.h - ypos),
+    };
+    ctx.draw.rectFilled(ctx.allocator, track, style.track_bg) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidCommand => return error.InvalidCommand,
+    };
+    ctx.draw.rectFilled(ctx.allocator, filled, style.fill) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidCommand => return error.InvalidCommand,
+    };
+    ctx.draw.rectFilled(ctx.allocator, handle, style.handle_bg) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidCommand => return error.InvalidCommand,
+    };
+    ctx.draw.rectOutline(ctx.allocator, handle, style.border, @max(1.0, style.border_width)) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidCommand => return error.InvalidCommand,
+    };
+    return res;
+}
+
 test "slider arrasta entre frames, clampa e valida" {
     const stdt = @import("std");
     const gpa = stdt.testing.allocator;
@@ -251,6 +369,126 @@ test "slider teclado: setas, Home/End, Tab" {
     try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
     const r3 = try slider(&ctx, id, bounds, &v, 0, 100, style);
     try stdt.testing.expect(!r3.changed);
+    try stdt.testing.expectEqual(@as(f32, 100), v);
+    ctx.endFrame();
+}
+
+test "sliderVertical arrasta no eixo Y, topo é máximo" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().sliderStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 30, 200);
+    const id = id_mod.Id.fromString("test:sld-v");
+    var v: f32 = 50; // min=0 max=100
+
+    // Press no meio (y=100 → t=0.5): captura e posiciona.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(15, 100) },
+    });
+    const r0 = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(r0.dragging);
+    try stdt.testing.expectEqual(@as(f32, 50), v);
+    try stdt.testing.expectEqual(@as(usize, 4), ctx.drawCommands().len);
+    ctx.endFrame();
+
+    // Move para cima com botão pressionado: valor sobe.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(15, 50) } });
+    const r1 = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(r1.dragging);
+    try stdt.testing.expect(r1.changed);
+    try stdt.testing.expectEqual(@as(f32, 75), v);
+    ctx.endFrame();
+
+    // Arrastar acima do topo clampa no máximo.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(15, -9999) } });
+    _ = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expectEqual(@as(f32, 100), v);
+    ctx.endFrame();
+
+    // Arrastar abaixo da base clampa no mínimo; release encerra.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(15, 9999) } });
+    _ = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expectEqual(@as(f32, 0), v);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(15, 9999) },
+    });
+    const r2 = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(!r2.dragging);
+    try stdt.testing.expect(ctx.press_owner == null);
+    ctx.endFrame();
+
+    // Press fora não captura; contratos inválidos rejeitados.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(500, 500) },
+    });
+    const r3 = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(!r3.dragging and !r3.changed);
+    try stdt.testing.expectError(error.InvalidArgument, sliderVertical(&ctx, .null, bounds, &v, 0, 100, style));
+    try stdt.testing.expectError(error.InvalidArgument, sliderVertical(&ctx, id, bounds, &v, 100, 0, style));
+    var nan: f32 = std.math.nan(f32);
+    try stdt.testing.expectError(error.InvalidArgument, sliderVertical(&ctx, id, bounds, &nan, 0, 100, style));
+    ctx.endFrame();
+    // Solta o press fora (higiene de captura p/ próximos testes).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(500, 500) },
+    });
+    _ = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    ctx.endFrame();
+}
+
+test "sliderVertical teclado: Up/Down, Home/End" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().sliderStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 30, 200);
+    const id = id_mod.Id.fromString("test:sld-v-kb");
+    var v: f32 = 50; // step = 5
+
+    // Click foca; Up soma um passo.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(15, 100) },
+    });
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(15, 100) },
+    });
+    _ = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .up, .pressed = true, .modifiers = .{} } });
+    const r1 = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(r1.changed and !r1.dragging);
+    try stdt.testing.expectEqual(@as(f32, 55), v);
+    ctx.endFrame();
+
+    // Down volta; Home/End saltam.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expectEqual(@as(f32, 50), v);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    _ = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expectEqual(@as(f32, 0), v);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    const r2 = try sliderVertical(&ctx, id, bounds, &v, 0, 100, style);
+    try stdt.testing.expect(r2.changed);
     try stdt.testing.expectEqual(@as(f32, 100), v);
     ctx.endFrame();
 }

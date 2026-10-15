@@ -507,3 +507,10 @@ Pré-release instável: API pode mudar até a beta.
   ataque: sem crash nunca, `push` aceita sse `isValid`, finito
   <=> válido nos 3 eventos de mouse).
 - Sem mudança de comportamento; resto aditivo (acumula p/ MINOR).
+
+### Adicionado — Milestone 51 (slider vertical, compatível)
+- `widgets/slider.sliderVertical`: valor cresce para cima (topo =
+  `max`), drag no eixo Y com captura, mesmo teclado do horizontal
+  (`Up`/`Right` aumentam, `Down`/`Left` diminuem, `Home`/`End`
+  saltam); 4 draws espelhados; reaproveita `SliderStyle`.
+- `slider` clássico intacto; resto aditivo (acumula p/ MINOR).
