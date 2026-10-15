@@ -83,6 +83,8 @@ pub const Event = union(enum) {
     quit,
 
     /// Valida invariantes do evento (para dados de adaptadores).
+    /// Posições de mouse não-finitas são rejeitadas: NaN envenenaria
+    /// `mouse_pos` retido e cálculos de widgets (ex.: drag do slider).
     pub fn isValid(self: Event) bool {
         switch (self) {
             .text => |t| {
@@ -90,8 +92,15 @@ pub const Event = union(enum) {
                 if (t.codepoint >= 0xD800 and t.codepoint <= 0xDFFF) return false;
                 return true;
             },
+            .mouse_move => |m| {
+                return std.math.isFinite(m.pos.x) and std.math.isFinite(m.pos.y);
+            },
+            .mouse_button => |b| {
+                return std.math.isFinite(b.pos.x) and std.math.isFinite(b.pos.y);
+            },
             .mouse_wheel => |w| {
-                return std.math.isFinite(w.dx) and std.math.isFinite(w.dy);
+                return std.math.isFinite(w.dx) and std.math.isFinite(w.dy) and
+                    std.math.isFinite(w.pos.x) and std.math.isFinite(w.pos.y);
             },
             else => return true,
         }
@@ -145,6 +154,18 @@ test "Event.isValid rejeita codepoint inválido" {
         .mouse_wheel = .{ .dx = std.math.nan(f32), .dy = 0, .pos = .{} },
     };
     try stdt.testing.expect(!nan_wheel.isValid());
+    const nan_move: Event = .{ .mouse_move = .{ .pos = types.Vec2.init(std.math.inf(f32), 0) } };
+    try stdt.testing.expect(!nan_move.isValid());
+    const nan_button: Event = .{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(0, std.math.nan(f32)) },
+    };
+    try stdt.testing.expect(!nan_button.isValid());
+    const nan_wheel_pos: Event = .{
+        .mouse_wheel = .{ .dx = 0, .dy = 1, .pos = types.Vec2.init(0, std.math.inf(f32)) },
+    };
+    try stdt.testing.expect(!nan_wheel_pos.isValid());
+    const ok_move: Event = .{ .mouse_move = .{ .pos = types.Vec2.init(1, 2) } };
+    try stdt.testing.expect(ok_move.isValid());
 }
 
 test "EventQueue push/clear retém capacidade" {

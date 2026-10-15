@@ -495,3 +495,9 @@ Pré-release instável: API pode mudar até a beta.
   ReleaseFast ~1,46× e Debug ~1,83× na fase raster, pxsum bit-idêntico.
   Regra: abaixo de ~10% medido, reverte.
 - Resto aditivo (acumula p/ próxima MINOR).
+
+### Corrigido — Milestone 49 (NaN fora da fila, compatível)
+- `event/event.isValid`: posições de mouse não-finitas rejeitadas
+  (`mouse_move`, `mouse_button`, `pos` do wheel); NaN envenenaria
+  `mouse_pos` retido e cálculos (ex.: drag). Lixo externo vira
+  `InvalidEvent`, nunca estado.
