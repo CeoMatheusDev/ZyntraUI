@@ -5,6 +5,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.14.0] - 2026-10-15
+
+MINOR estável, 100% compatível: widgets e versionamento.
+
+- Versão pública sincronizada (M54): `version_*`/C-ABI saem de
+  1.0.0 congelado para a versão real; teste de sincronia + C
+  com MAJOR/MINOR/PATCH completos; fonte documentada.
+- `beginModalTitled` com texto na barra (M53); `Escape` dispensa
+  popup (M55, mesmo padrão do modal).
+- 93/93 testes, integração C, CI verde.
+
 ## [1.13.0] - 2026-10-15
 
 MINOR estável, 100% compatível: entrada e widgets.
