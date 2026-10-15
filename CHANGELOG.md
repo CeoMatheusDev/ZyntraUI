@@ -370,3 +370,8 @@ Pré-release instável: API pode mudar até a beta.
   `PageUp`/`PageDown` = ±vista, `Home`/`End` = extremos, clampados.
 - `event/event`: `Key` ganha `page_up`/`page_down` (enum com `_`).
 - Exemplo com PageDown; resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 32 (Ctrl+A, compatível)
+- `widgets/text_input`: `Ctrl+A` seleciona tudo (só com âncora; sem
+  âncora não há onde representar). Sem mutação, fora do histórico.
+- Exemplo + teste; resto aditivo (acumula p/ próxima MINOR).

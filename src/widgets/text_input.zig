@@ -10,6 +10,8 @@
 //!   seleção; digitar/backspace/`Delete` substituem a faixa; `Tab`,
 //!   `Enter`, `Escape` como antes.
 //! - Click dentro assume o foco; `Escape`/`clearFocus` liberam.
+//! - `Ctrl+A` seleciona tudo (só com âncora); `Ctrl+C/X/V` internos;
+//!   `Ctrl+Z/Y` undo/redo com histórico do chamador.
 //! Desenho: caixa com destaque + highlight da seleção + texto + caret.
 //! `id` não-nulo obrigatório.
 
@@ -498,6 +500,17 @@ fn textInputInner(
                             cursor.* = len.*;
                             if (!extend) {
                                 if (anchor) |a| a.* = cursor.*;
+                            }
+                        },
+                        .a => {
+                            // Ctrl+A seleciona tudo (só com âncora; sem
+                            // âncora não há onde representar a faixa).
+                            // Não toca no histórico (não muta).
+                            if (k.modifiers.ctrl and !k.modifiers.shift) {
+                                if (anchor) |a| {
+                                    a.* = 0;
+                                    cursor.* = len.*;
+                                }
                             }
                         },
                         .enter => {
@@ -1120,5 +1133,47 @@ test "text_input caret navega, insere no meio e deleta" {
     const rb = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
     try stdt.testing.expect(!rb.changed);
     try stdt.testing.expectEqualStrings("AC", buf[0..len]);
+    ctx.endFrame();
+}
+
+test "textInputSelected Ctrl+A seleciona tudo" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-alla");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'H' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'i' } });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    ctx.endFrame();
+
+    // Ctrl+A: âncora no 0, cursor no fim, nada muda no texto.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .a, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const r = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(r.selected);
+    try stdt.testing.expectEqual(@as(usize, 0), anchor);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    try stdt.testing.expectEqualStrings("Hi", buf[0..len]);
+    ctx.endFrame();
+
+    // 'a' sem Ctrl não seleciona (cai no else, sem efeito em tecla).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .a, .pressed = true, .modifiers = .{} } });
+    const r2 = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(r2.selected); // seleção anterior preservada
+    try stdt.testing.expectEqualStrings("Hi", buf[0..len]);
     ctx.endFrame();
 }
