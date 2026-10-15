@@ -11,7 +11,7 @@ Nona MINOR estável, 100% compatível: tooltip + modal.
 
 - `widgets/tooltip` com delay por frames (M26).
 - `widgets/modal` com dismiss (M27).
-- 64/64 testes, integração C, CI pendente.
+- 64/64 testes, integração C, CI verde.
 
 ## [1.8.0] - 2026-10-15
 
