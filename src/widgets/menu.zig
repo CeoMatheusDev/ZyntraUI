@@ -1,13 +1,12 @@
 //! ZyntraUI — menu dropdown (widgets/menu).
 //!
-//! Modelo M22 flat + M23 cascata mouse-driven:
+//! Modelo M22 flat + M23/M24 cascata (mouse + teclado por nível):
 //! - `menu(...)`: painel + clip, `active: *usize` unificando hover e
 //!   teclado (setas pulam desabilitados com wrap, `Home`/`End`),
 //!   click/`Enter` escolhem (one-shot), press fora/`Escape` dispensam.
-//! - `menuNested(..., child)`: press dentro do filho NÃO dispensa o pai.
-//!   `hovered_index` + `submenuBounds`/`menuRowRect` permitem ao chamador
-//!   abrir um submenu à direita do item sob o mouse.
-//! - Teclado continua por nível (foco não atravessa; documentado).
+//! - `menuNested(..., child)`: press dentro do filho NÃO dispensa o pai;
+//!   `Right` foca o filho, `Left` no filho pede o pai (`focus_parent`).
+//!   `hovered_index` + `submenuBounds`/`menuRowRect` posicionam o submenu.
 //! - Itens desabilitados: texto apagado, sem hover/escolha.
 //! `items` vazio → `InvalidArgument`. Labels UTF-8 validados no push.
 
@@ -32,6 +31,9 @@ pub const MenuResult = struct {
     /// Linha sob o mouse (mesmo desabilitada; `null` fora do menu).
     /// Chamadores usam para abrir submenu do item focado pelo mouse.
     hovered_index: ?usize = null,
+    /// `Left` pressionado com foco: pede foco ao pai. Só faz sentido em
+    /// submenu aninhado (o chamador foca o id pai); menu de topo ignora.
+    focus_parent: bool = false,
 };
 
 /// Filho aberto (submenu): press dentro dele não dispensa o pai.
@@ -78,9 +80,9 @@ pub fn menu(
     return menuInner(ctx, id, bounds, items, active, font, style, null);
 }
 
-/// Menu com submenu aberto (M23, aditivo): `child` suprime o dismiss do
-/// pai quando o press cai dentro do filho. Teclado continua por nível
-/// (foco não atravessa níveis nesta milestone — documentado).
+/// Menu com submenu aberto (M23+M24, aditivo): `child` suprime o
+/// dismiss do pai quando o press cai dentro do filho; `Right` com foco
+/// move o foco ao filho. Teclado atravessa um nível por vez.
 pub fn menuNested(
     ctx: *context_mod.Context,
     id: id_mod.Id,
@@ -187,6 +189,15 @@ fn menuInner(
                         .escape => {
                             ctx.focus_owner = null;
                             res.dismissed = true;
+                        },
+                        .right => {
+                            // Com submenu aberto, foca o filho (teclado
+                            // atravessa um nível; sem filho, no-op).
+                            if (child) |ch| ctx.focus_owner = ch.id;
+                        },
+                        .left => {
+                            // Pede foco ao pai; só aninhados usam.
+                            res.focus_parent = true;
                         },
                         else => {},
                     }
@@ -422,5 +433,61 @@ test "menu teclado circula, pula desabilitado, Enter escolhe" {
     try ctx.pushEvent(.{ .key = .{ .key = .escape, .pressed = true, .modifiers = .{} } });
     const re = try menu(&ctx, id, bounds, &items, &active, font, style);
     try stdt.testing.expect(re.dismissed and !ctx.hasFocus(id));
+    ctx.endFrame();
+}
+
+test "menuNested teclado atravessa um nível por vez" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().menuStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const pbounds = types.Rect.init(0, 0, 160, 50);
+    const pid = id_mod.Id.fromString("test:mk-p");
+    const sid = id_mod.Id.fromString("test:mk-s");
+    const items = [_]MenuItem{.{ .label = "File" }};
+    const sub = [_]MenuItem{.{ .label = "Only" }};
+    const sb = submenuBounds(pbounds, 0, 25, sub.len, 140);
+    var pactive: usize = 0;
+    var sactive: usize = 0;
+
+    // Foca o pai com click; Right move o foco ao filho.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(10, 10) },
+    });
+    _ = try menuNested(&ctx, pid, pbounds, &items, &pactive, font, style, .{ .id = sid, .bounds = sb });
+    try stdt.testing.expect(ctx.hasFocus(pid));
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    _ = try menuNested(&ctx, pid, pbounds, &items, &pactive, font, style, .{ .id = sid, .bounds = sb });
+    try stdt.testing.expect(ctx.hasFocus(sid));
+    // Filho foca e recebe Enter no mesmo frame seguinte.
+    _ = try menu(&ctx, sid, sb, &sub, &sactive, font, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    _ = try menuNested(&ctx, pid, pbounds, &items, &pactive, font, style, .{ .id = sid, .bounds = sb });
+    const rs = try menu(&ctx, sid, sb, &sub, &sactive, font, style);
+    try stdt.testing.expectEqual(@as(?usize, 0), rs.chosen);
+    ctx.endFrame();
+
+    // Left no filho pede o pai; chamador refoca.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    _ = try menuNested(&ctx, pid, pbounds, &items, &pactive, font, style, .{ .id = sid, .bounds = sb });
+    const rl = try menu(&ctx, sid, sb, &sub, &sactive, font, style);
+    try stdt.testing.expect(rl.focus_parent);
+    ctx.focus_owner = pid;
+    try stdt.testing.expect(ctx.hasFocus(pid));
+    ctx.endFrame();
+
+    // Right sem filho aberto é no-op (sem crash, sem roubo de foco).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    _ = try menu(&ctx, pid, pbounds, &items, &pactive, font, style);
+    try stdt.testing.expect(ctx.hasFocus(pid));
     ctx.endFrame();
 }

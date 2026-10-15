@@ -291,3 +291,8 @@ Pré-release instável: API pode mudar até a beta.
   o pai), `hovered_index` no resultado, `menuRowRect`/`submenuBounds`
   partilhando a geometria; teclado segue por nível (documentado).
 - Exemplo com cascata de 2 níveis; resto aditivo (rumo à 1.7.0).
+
+### Adicionado — Milestone 24 (teclado entre níveis, compatível)
+- `widgets/menu`: `Right` com foco move ao filho (`MenuChild.id`);
+  `Left` no filho pede o pai (`MenuResult.focus_parent`, chamador refoca).
+  Um nível por vez; resto aditivo (acumula p/ 1.8.0).

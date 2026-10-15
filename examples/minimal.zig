@@ -328,4 +328,50 @@ pub fn main() !void {
     const sm = try menu_mod.menu(&ctx, zyntra_ui.Id.fromString("examples/m23:s"), sb2, &sitems, &sactive, font, theme.menuStyle());
     ctx.endFrame();
     std.debug.print("m23 cascade parent_dismissed={} sub_chosen={?d}\n", .{ pm.dismissed, sm.chosen });
+
+    // Frame 17: Right foca o submenu; Enter escolhe nele.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(360, 330) },
+    });
+    _ = try menu_mod.menuNested(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m23:p"),
+        pb,
+        &pitems,
+        &pactive,
+        font,
+        theme.menuStyle(),
+        .{ .id = zyntra_ui.Id.fromString("examples/m23:s"), .bounds = sb2 },
+    );
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    _ = try menu_mod.menuNested(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m23:p"),
+        pb,
+        &pitems,
+        &pactive,
+        font,
+        theme.menuStyle(),
+        .{ .id = zyntra_ui.Id.fromString("examples/m23:s"), .bounds = sb2 },
+    );
+    _ = try menu_mod.menu(&ctx, zyntra_ui.Id.fromString("examples/m23:s"), sb2, &sitems, &sactive, font, theme.menuStyle());
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    _ = try menu_mod.menuNested(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m23:p"),
+        pb,
+        &pitems,
+        &pactive,
+        font,
+        theme.menuStyle(),
+        .{ .id = zyntra_ui.Id.fromString("examples/m23:s"), .bounds = sb2 },
+    );
+    const smk = try menu_mod.menu(&ctx, zyntra_ui.Id.fromString("examples/m23:s"), sb2, &sitems, &sactive, font, theme.menuStyle());
+    ctx.endFrame();
+    std.debug.print("m24 kb cross-level chosen={?d}\n", .{smk.chosen});
 }
