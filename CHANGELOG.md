@@ -5,6 +5,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.9.0] - 2026-10-15
+
+Nona MINOR estável, 100% compatível: tooltip + modal.
+
+- `widgets/tooltip` com delay por frames (M26).
+- `widgets/modal` com dismiss (M27).
+- 64/64 testes, integração C, CI pendente.
+
 ## [1.8.0] - 2026-10-15
 
 Oitava MINOR estável, 100% compatível: teclado na cascata + radio.
@@ -319,3 +327,10 @@ Pré-release instável: API pode mudar até a beta.
   do chamador saturado.
 - `style/style`: `TooltipStyle` + `Theme.tooltipStyle()`.
 - Exemplo visível no 2º frame; resto aditivo (rumo à 1.9.0).
+
+### Adicionado — Milestone 27 (modal, compatível)
+- `widgets/modal`: `beginModal`/`endModal` — dim na vista + painel +
+  clip; dismiss fora ou com `Escape`. Bloqueio por convenção (fundo não
+  sondado com modal aberto; sem flag global, sem invasão).
+- `style/style`: `ModalStyle` + `Theme.modalStyle()`.
+- Exemplo bloqueia botão e dispensa com Escape; resto aditivo (1.9.0).
