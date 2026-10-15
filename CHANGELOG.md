@@ -480,3 +480,10 @@ Pré-release instável: API pode mudar até a beta.
   fonte canônica `draw/renderer.commandBounds`; duplicata removida.
 - Teste de concordância na fronteira (linha y=101/t=2: culled nos
   dois caminhos + pixel intacto). Comportamento válido inalterado.
+
+### Melhorado — Milestone 48 (fillRect 1,3–1,8×, medido)
+- `software/raster.fillRect`: base da linha içada + ramos opaco/blend
+  separados (o ramo único matava a vetorização — medido). Ganho real:
+  ReleaseFast ~1,46× e Debug ~1,83× na fase raster, pxsum bit-idêntico.
+  Regra: abaixo de ~10% medido, reverte.
+- Resto aditivo (acumula p/ próxima MINOR).

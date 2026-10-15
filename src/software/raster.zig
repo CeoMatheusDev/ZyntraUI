@@ -106,11 +106,36 @@ pub const SoftwareFramebuffer = struct {
             x1 = @min(x1, @as(i64, @intFromFloat(@ceil(cp.x + cp.w))));
             y1 = @min(y1, @as(i64, @intFromFloat(@ceil(cp.y + cp.h))));
         }
+        if (c.a == 0) return; // transparente: no-op
+        if (c.a == 255) {
+            // Caminho rápido opaco (sequencial puro, vetorizável).
+            var y = y0;
+            while (y < y1) : (y += 1) {
+                var o = @as(usize, @intCast(y)) * @as(usize, self.w) * 4 + @as(usize, @intCast(x0)) * 4;
+                var x = x0;
+                while (x < x1) : (x += 1) {
+                    self.pixels[o] = c.r;
+                    self.pixels[o + 1] = c.g;
+                    self.pixels[o + 2] = c.b;
+                    self.pixels[o + 3] = c.a;
+                    o += 4;
+                }
+            }
+            return;
+        }
+        // Blending com base içada (mesma matemática de set()).
+        const sa: u32 = c.a;
+        const ia: u32 = 255 - sa;
         var y = y0;
         while (y < y1) : (y += 1) {
+            var o = @as(usize, @intCast(y)) * @as(usize, self.w) * 4 + @as(usize, @intCast(x0)) * 4;
             var x = x0;
             while (x < x1) : (x += 1) {
-                self.set(@intCast(x), @intCast(y), c);
+                self.pixels[o] = @intCast((@as(u32, c.r) * sa + @as(u32, self.pixels[o]) * ia + 127) / 255);
+                self.pixels[o + 1] = @intCast((@as(u32, c.g) * sa + @as(u32, self.pixels[o + 1]) * ia + 127) / 255);
+                self.pixels[o + 2] = @intCast((@as(u32, c.b) * sa + @as(u32, self.pixels[o + 2]) * ia + 127) / 255);
+                self.pixels[o + 3] = @intCast((sa * 255 + @as(u32, self.pixels[o + 3]) * ia + 127) / 255);
+                o += 4;
             }
         }
     }

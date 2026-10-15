@@ -37,6 +37,11 @@ Medianas de (466.6, 471.9, 483.1) ms e (6751, 6755, 6800) ms; fase 2 por
 subtração das baselines acima, mesma sessão. Referência sem otimização:
 ~1,9 ns/pixel preenchido em ReleaseFast. Não usar em produção.
 
+M48 (mesma carga): base da linha içada + ramos opaco/blend separados
+em `fillRect` — total 327 ms ReleaseFast (~308 ms fase 2, ~1,46×) e
+3820 ms Debug (~3538 ms fase 2, ~1,83×); pxsum bit-idêntico
+(`293316480`). Medido, não estimado; ganho abaixo de ~10% reverte.
+
 Lição registrada: sem `clear()`, o pxsum DIVERGIA entre modos (lixo do
 alocador — Debug preenche com `0xAA`). Com `clear`, pxsum idêntico
 (`293316480`, 6/6 execuções, ambos os modos). Framebuffer sem limpar tem
