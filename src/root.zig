@@ -33,6 +33,10 @@ pub const c_abi = struct {
     pub const api = @import("c-abi/api.zig");
 };
 
+pub const anim = struct {
+    pub const anim_mod = @import("anim/anim.zig");
+};
+
 pub const layout = struct {
     pub const layout_mod = @import("layout/layout.zig");
 };
@@ -77,6 +81,10 @@ pub const TextMetrics = text.metrics.TextMetrics;
 pub const ZyntraResult = c_abi.types.ZyntraResult;
 pub const ZyntraRect = c_abi.types.ZyntraRect;
 pub const ZyntraColor = c_abi.types.ZyntraColor;
+
+pub const Ease = anim.anim_mod.Ease;
+pub const Tween = anim.anim_mod.Tween;
+pub const AnimTimer = anim.anim_mod.AnimTimer;
 pub const Constraints = layout.layout_mod.Constraints;
 pub const EdgeInsets = layout.layout_mod.EdgeInsets;
 pub const StackPlacer = layout.layout_mod.StackPlacer;
@@ -120,6 +128,7 @@ test {
     _ = @import("draw/renderer.zig");
     _ = @import("c-abi/types.zig");
     _ = @import("c-abi/api.zig");
+    _ = @import("anim/anim.zig");
     _ = @import("widgets/input.zig");
     _ = @import("widgets/button.zig");
     _ = @import("widgets/checkbox.zig");

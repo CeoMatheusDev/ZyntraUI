@@ -127,3 +127,11 @@ Pré-release instável: API pode mudar até a beta.
 - `event/event`: `Key` ganha `delete`, `home`, `end` (enum já tinha `_`).
 - Quebra intencional de pré-release: assinatura de `textInput` mudou
   (chamadas antigas não compilam — migração: adicionar `&cursor`).
+
+### Adicionado — Milestone 11 (animações)
+- `anim/anim`: `Ease` (7 curvas, saturação documentada), `Tween`
+  (`from/to/duration/ease`, `valueAt`, `doneAt`), `AnimTimer`
+  (`tick/progress/done/reset`, loop com `@mod`), `lerpColor` por canal.
+  Puro, sem alloc, sem estado global; re-exportado (`Ease/Tween/AnimTimer`).
+- Exemplo amostra fade quad_out em 4 passos.
+- Compatibilidade: só adições.

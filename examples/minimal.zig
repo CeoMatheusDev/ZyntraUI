@@ -107,4 +107,13 @@ pub fn main() !void {
     _ = try text_input_mod.textInput(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, font, ti_style);
     ctx.endFrame();
     std.debug.print("m10 input text={s} cursor={d}\n", .{ name_buf[0..name_len], name_cursor });
+
+    // Frame 6: easing dirige um fade (0→1 em 1s, amostrado).
+    const tw = try zyntra_ui.Tween.init(0, 1, 1.0, .quad_out);
+    var timer = try zyntra_ui.AnimTimer.init(1.0, false);
+    var step: u32 = 0;
+    while (step < 4) : (step += 1) {
+        timer.tick(0.25);
+        std.debug.print("m11 t={d:.2} v={d:.3}\n", .{ timer.progress(), tw.valueAt(timer.elapsed) });
+    }
 }
