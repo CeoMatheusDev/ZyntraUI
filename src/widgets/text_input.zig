@@ -1,7 +1,6 @@
 //! ZyntraUI — campo de texto (widgets/text_input).
 //!
-//! Modelo M10 (foco + buffer do chamador, caret navegável):
-//! - `buffer`/`len`/`cursor`: buffer UTF-8 de tamanho fixo do CHAMADOR
+//! Modelo M10 (foco + buffer do chamador, caret navegável)://! - `buffer`/`len`/`cursor`: buffer UTF-8 de tamanho fixo do CHAMADOR
 //!   (zero alocação na lib); `len.*` = bytes usados, `cursor.*` = offset
 //!   de byte do caret (sempre fronteira UTF-8, 0..len).
 //! - Click dentro assume o foco (`focus_owner`); `Escape` ou
@@ -9,8 +8,9 @@
 //! - `.text` insere no cursor (memmove do sufixo); setas movem por
 //!   codepoint; `Home`/`End` saltam; backspace apaga antes, `Delete`
 //!   apaga no cursor. Buffer cheio: descarta com `overflowed=true`.
-//!   `Enter` → `submitted=true`.
-//! - Limitações documentadas: sem seleção, sem Tab-navigation (M11+).
+//!   `Enter` → `submitted=true`; `Tab`/`Shift+Tab` circulam o foco
+//!   entre focáveis registrados (aplicado no próximo `beginFrame`).
+//! - Limitações documentadas: sem seleção (M12+).
 //! Desenho: caixa (destaque quando focado) + texto + caret fina no fim
 //! quando focado. `id` não-nulo obrigatório.
 
@@ -84,6 +84,9 @@ pub fn textInput(
     var res = TextInputResult{ .len = len.* };
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
 
+    // Todo text-input é focável (registrado mesmo sem foco, para o Tab).
+    try ctx.registerFocusable(id);
+
     // Click dentro assume o foco (independe de captura de press).
     if (fm.pressedInside(bounds)) {
         ctx.focus_owner = id;
@@ -145,6 +148,11 @@ pub fn textInput(
                         .home => cursor.* = 0,
                         .end => cursor.* = len.*,
                         .enter => res.submitted = true,
+                        .tab => {
+                            // Tab nunca vira texto: agenda avanço sobre o
+                            // registro completo (aplicado no beginFrame).
+                            ctx.requestFocusAdvance(if (k.modifiers.shift) .prev else .next);
+                        },
                         .escape => {
                             ctx.focus_owner = null;
                             res.focused = false;
@@ -292,6 +300,64 @@ test "text_input foco, digita, backspace multibyte, submit, escape" {
     var badcur: usize = 50;
     var oklen: usize = 1;
     try stdt.testing.expectError(error.InvalidArgument, textInput(&ctx, id, bounds, &buf, &oklen, &badcur, font, style));
+    ctx.endFrame();
+}
+
+test "text_input Tab circula foco entre campos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const b1 = types.Rect.init(0, 0, 200, 30);
+    const b2 = types.Rect.init(0, 40, 200, 30);
+    const id1 = id_mod.Id.fromString("test:ti1");
+    const id2 = id_mod.Id.fromString("test:ti2");
+    var buf1: [8]u8 = undefined;
+    var len1: usize = 0;
+    var cur1: usize = 0;
+    var buf2: [8]u8 = undefined;
+    var len2: usize = 0;
+    var cur2: usize = 0;
+
+    // F1: click no campo 1 foca; ambos registrados.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    const f1a = try textInput(&ctx, id1, b1, &buf1, &len1, &cur1, font, style);
+    _ = try textInput(&ctx, id2, b2, &buf2, &len2, &cur2, font, style);
+    try stdt.testing.expect(f1a.focused);
+    try stdt.testing.expect(ctx.hasFocus(id1));
+    ctx.endFrame();
+
+    // F2: Tab no campo 1 agenda; aplicado no F3 → campo 2.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .tab, .pressed = true, .modifiers = .{} } });
+    _ = try textInput(&ctx, id1, b1, &buf1, &len1, &cur1, font, style);
+    _ = try textInput(&ctx, id2, b2, &buf2, &len2, &cur2, font, style);
+    try stdt.testing.expect(ctx.hasFocus(id1)); // ainda 1 neste frame
+    ctx.endFrame();
+    ctx.beginFrame();
+    const f3a = try textInput(&ctx, id1, b1, &buf1, &len1, &cur1, font, style);
+    const f3b = try textInput(&ctx, id2, b2, &buf2, &len2, &cur2, font, style);
+    try stdt.testing.expect(!f3a.focused and f3b.focused);
+    // Tab nunca virou texto em nenhum campo:
+    try stdt.testing.expectEqual(@as(usize, 0), len1);
+    try stdt.testing.expectEqual(@as(usize, 0), len2);
+    ctx.endFrame();
+
+    // F4: Shift+Tab no campo 2 volta ao 1 (aplicado no F5).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .tab, .pressed = true, .modifiers = .{ .shift = true } } });
+    _ = try textInput(&ctx, id1, b1, &buf1, &len1, &cur1, font, style);
+    _ = try textInput(&ctx, id2, b2, &buf2, &len2, &cur2, font, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    const f5a = try textInput(&ctx, id1, b1, &buf1, &len1, &cur1, font, style);
+    const f5b = try textInput(&ctx, id2, b2, &buf2, &len2, &cur2, font, style);
+    try stdt.testing.expect(f5a.focused and !f5b.focused);
     ctx.endFrame();
 }
 

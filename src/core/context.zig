@@ -48,6 +48,12 @@ pub const FrameState = enum {
     active,
 };
 
+/// Direção de avanço de foco (Tab / Shift+Tab).
+pub const FocusDirection = enum {
+    next,
+    prev,
+};
+
 /// Contexto raiz da GUI. Um por aplicação/janela na M1.
 pub const Context = struct {
     allocator: std.mem.Allocator,
@@ -69,6 +75,13 @@ pub const Context = struct {
     /// Click em widget focável assume o foco; `Escape` ou
     /// `clearFocus` liberam. Retido entre frames como o mouse.
     focus_owner: ?id_mod.Id = null,
+    /// Focáveis registrados no frame anterior, em ordem de registro
+    /// (ordem de chamada dos widgets). Recontruído a cada frame.
+    focusables: std.ArrayList(id_mod.Id),
+    /// Avanço de foco pendente (Tab), aplicado no próximo `beginFrame`
+    /// sobre o registro COMPLETO do frame anterior. Widgets nunca
+    /// avançam direto (registro do frame atual ainda incompleto).
+    pending_focus_advance: ?FocusDirection = null,
 
     const Self = @This();
 
@@ -91,30 +104,40 @@ pub const Context = struct {
             .state = .idle,
             .events = event_mod.EventQueue.initEmpty(),
             .draw = draw_mod.DrawList.initEmpty(),
+            .focusables = .empty,
         };
     }
 
     pub fn deinit(self: *Self) void {
         self.events.deinit(self.allocator);
         self.draw.deinit(self.allocator);
+        self.focusables.deinit(self.allocator);
         self.events = event_mod.EventQueue.initEmpty();
         self.draw = draw_mod.DrawList.initEmpty();
+        self.focusables = .empty;
         self.state = .idle;
         self.frame_index = 0;
         self.mouse_pos = null;
         self.mouse_down_left = false;
         self.press_owner = null;
         self.focus_owner = null;
+        self.pending_focus_advance = null;
     }
 
-    /// Inicia um novo frame: limpa eventos/draw do frame anterior
-    /// (retendo capacidade). Deve ser pareado com `endFrame`.
+    /// Inicia um novo frame: aplica avanço de foco pendente (sobre o
+    /// registro do frame anterior) e limpa eventos/draw/focáveis do
+    /// frame anterior (retendo capacidade). Deve ser pareado com `endFrame`.
     /// Precondição: nenhum frame ativo.
     pub fn beginFrame(self: *Self) void {
         std.debug.assert(self.state == .idle);
         self.state = .active;
+        if (self.pending_focus_advance) |dir| {
+            self.applyFocusAdvance(dir);
+            self.pending_focus_advance = null;
+        }
         self.events.clearRetainingCapacity();
         self.draw.clearRetainingCapacity();
+        self.focusables.clearRetainingCapacity();
     }
 
     /// Encerra o frame atual e avança `frame_index` com wrap seguro.
@@ -162,6 +185,45 @@ pub const Context = struct {
 
     pub fn hasFocus(self: *const Self, id: id_mod.Id) bool {
         return self.focus_owner == id;
+    }
+
+    /// Registra um id focável na ordem de chamada (deduplicado, O(n)
+    /// — n de focáveis por frame é pequeno). Widgets focáveis chamam
+    /// todo frame, mesmo sem foco.
+    pub fn registerFocusable(self: *Self, id: id_mod.Id) ContextError!void {
+        if (id.isNull()) return error.InvalidArgument;
+        for (self.focusables.items) |reg| {
+            if (reg == id) return;
+        }
+        self.focusables.append(self.allocator, id) catch return error.OutOfMemory;
+    }
+
+    /// Agenda avanço de foco para o próximo `beginFrame`. Chamado por
+    /// widgets ao ver Tab (nunca avançam direto).
+    pub fn requestFocusAdvance(self: *Self, dir: FocusDirection) void {
+        self.pending_focus_advance = dir;
+    }
+
+    fn applyFocusAdvance(self: *Self, dir: FocusDirection) void {
+        const regs = self.focusables.items;
+        if (regs.len == 0) return;
+        var idx: ?usize = null;
+        if (self.focus_owner) |cur| {
+            for (regs, 0..) |reg, i| {
+                if (reg == cur) {
+                    idx = i;
+                    break;
+                }
+            }
+        }
+        const next: usize = if (idx) |i| switch (dir) {
+            .next => (i + 1) % regs.len,
+            .prev => (i + regs.len - 1) % regs.len,
+        } else switch (dir) {
+            .next => 0,
+            .prev => regs.len - 1,
+        };
+        self.focus_owner = regs[next];
     }
 
     pub fn pendingEvents(self: *const Self) []const event_mod.Event {
@@ -288,4 +350,53 @@ test "Context M7: mouse retido entre frames + captura" {
     try std.testing.expect(!ctx.hasFocus(@import("id.zig").Id.fromString("z")));
     ctx.clearFocus();
     try std.testing.expect(ctx.focus_owner == null);
+}
+
+test "Context M12: registro de focáveis + avanço com wrap" {
+    const idz = @import("id.zig");
+    const allocator = std.testing.allocator;
+    var ctx = try Context.init(allocator, .{});
+    defer ctx.deinit();
+    const a = idz.Id.fromString("a");
+    const b = idz.Id.fromString("b");
+
+    // Registro vazio: avanço é no-op (e o pendente é consumido).
+    ctx.beginFrame();
+    ctx.requestFocusAdvance(.next);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try std.testing.expect(ctx.focus_owner == null);
+    try std.testing.expectError(error.InvalidArgument, ctx.registerFocusable(.null));
+    ctx.endFrame();
+
+    // Ciclo: no frame N registra + pede; beginFrame N+1 aplica.
+    // F1: registra [a,b], pede next. F2 aplica → a (sem foco prévio).
+    ctx.beginFrame();
+    try ctx.registerFocusable(a);
+    try ctx.registerFocusable(b);
+    try ctx.registerFocusable(a); // dedupe
+    try std.testing.expectEqual(@as(usize, 2), ctx.focusables.items.len);
+    ctx.requestFocusAdvance(.next);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try std.testing.expect(ctx.focus_owner == a);
+    try ctx.registerFocusable(a);
+    try ctx.registerFocusable(b);
+    ctx.requestFocusAdvance(.next);
+    ctx.endFrame();
+    ctx.beginFrame(); // → b
+    try std.testing.expect(ctx.focus_owner == b);
+    try ctx.registerFocusable(a);
+    try ctx.registerFocusable(b);
+    ctx.requestFocusAdvance(.next);
+    ctx.endFrame();
+    ctx.beginFrame(); // wrap → a
+    try std.testing.expect(ctx.focus_owner == a);
+    try ctx.registerFocusable(a);
+    try ctx.registerFocusable(b);
+    ctx.requestFocusAdvance(.prev); // Shift+Tab
+    ctx.endFrame();
+    ctx.beginFrame(); // → b
+    try std.testing.expect(ctx.focus_owner == b);
+    ctx.endFrame();
 }

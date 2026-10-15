@@ -108,7 +108,23 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m10 input text={s} cursor={d}\n", .{ name_buf[0..name_len], name_cursor });
 
-    // Frame 6: easing dirige um fade (0→1 em 1s, amostrado).
+    // Frame 6: segundo campo + Tab circula o foco 1 → 2.
+    const ti2_rect = placer.next(.{ .w = 240, .h = 30 });
+    var name2_buf: [32]u8 = undefined;
+    var name2_len: usize = 0;
+    var name2_cursor: usize = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .tab, .pressed = true, .modifiers = .{} } });
+    _ = try text_input_mod.textInput(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, font, ti_style);
+    _ = try text_input_mod.textInput(&ctx, zyntra_ui.Id.fromString("examples/m12:ti2"), ti2_rect, &name2_buf, &name2_len, &name2_cursor, font, ti_style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    const t1 = try text_input_mod.textInput(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, font, ti_style);
+    const t2 = try text_input_mod.textInput(&ctx, zyntra_ui.Id.fromString("examples/m12:ti2"), ti2_rect, &name2_buf, &name2_len, &name2_cursor, font, ti_style);
+    ctx.endFrame();
+    std.debug.print("m12 tab focus1={} focus2={}\n", .{ t1.focused, t2.focused });
+
+    // Frame 7: easing dirige um fade (0→1 em 1s, amostrado).
     const tw = try zyntra_ui.Tween.init(0, 1, 1.0, .quad_out);
     var timer = try zyntra_ui.AnimTimer.init(1.0, false);
     var step: u32 = 0;

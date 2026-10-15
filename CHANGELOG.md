@@ -147,3 +147,11 @@ Pré-release instável: API pode mudar até a beta.
   Puro, sem alloc, sem estado global; re-exportado (`Ease/Tween/AnimTimer`).
 - Exemplo amostra fade quad_out em 4 passos.
 - Compatibilidade: só adições.
+
+### Adicionado — Milestone 12 (travessia de foco por Tab)
+- `core/context`: registro de focáveis (`registerFocusable`, dedupe O(n),
+  reconstruído por frame), `FocusDirection`, `requestFocusAdvance` +
+  aplicação no `beginFrame` sobre o registro completo do frame anterior.
+- `widgets/text_input`: registra-se todo frame; `Tab`/`Shift+Tab` circulam
+  sem virar texto. Fecha o gap documentado desde a M9.
+- Exemplo com 2 campos + Tab; resto aditivo (rumo à 1.1.0).
