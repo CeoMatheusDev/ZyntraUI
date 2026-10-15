@@ -5,6 +5,13 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.10.0] - 2026-10-15
+
+Décima MINOR estável, 100% compatível: teclado nos widgets.
+
+- Button/checkbox focáveis + ativação (M29); slider com setas (M30).
+- 69/69 testes, integração C, CI verde.
+
 ## [1.9.1] - 2026-10-15
 
 PATCH estável, 100% compatível: endurecimento do rasterizador.
