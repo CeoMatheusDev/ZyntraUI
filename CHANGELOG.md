@@ -5,6 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.16.0] - 2026-10-15
+
+MINOR estável, 100% compatível: TreeView hierárquica + endurecimento.
+
+- `widgets/tree_view` (M59): árvore hierárquica com expand/collapse,
+  seleção por click/teclado, wheel, auto-scroll e scrollbar.
+- Colapsar nó no mesmo frame não abre mais OOB (M60, nunca publicado).
+- Fuzz de `pushText`/`textOf` com bytes arbitrários (M61).
+- 99/99 testes, integração C, CI verde.
+
 ## [1.15.0] - 2026-10-15
 
 MINOR estável, 100% compatível: widgets de organização de interfaces.
