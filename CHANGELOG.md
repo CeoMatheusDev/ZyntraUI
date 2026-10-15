@@ -195,3 +195,11 @@ Pré-release instável: API pode mudar até a beta.
   por codepoints, UTF-8 validado, `NoSpaceLeft` em `out` curto).
   `LineRange` em offsets `u32` (convenção de `DrawCommand.text`).
 - Resto aditivo (rumo à 1.2.0).
+
+### Adicionado — Milestone 16 (scroll container, compatível)
+- `widgets/scroll`: `beginScroll`/`endScroll` — `mouse_wheel` com hover,
+  offset `*f32` do chamador clampado, `clip` emitido para os filhos,
+  scrollbar proporcional no `endScroll` (só com overflow). Primeiro
+  consumidor de `mouse_wheel` e `DrawCommand.clip`.
+- `style/style`: `ScrollStyle` + `Theme.scrollStyle()`.
+- Exemplo com wheel → offset 96; resto aditivo (rumo à 1.3.0).

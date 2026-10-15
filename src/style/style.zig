@@ -73,6 +73,17 @@ pub const TextInputStyle = extern struct {
     }
 };
 
+/// Estilo de container com scroll.
+pub const ScrollStyle = extern struct {
+    bar_width: f32 = 8,
+    track: types.Color,
+    thumb: types.Color,
+
+    pub fn isValid(self: ScrollStyle) bool {
+        return std.math.isFinite(self.bar_width) and self.bar_width > 0;
+    }
+};
+
 /// Paleta mínima do tema.
 pub const Theme = extern struct {
     bg: types.Color,
@@ -148,6 +159,14 @@ pub const Theme = extern struct {
             .border_width = 1.0,
         };
     }
+
+    pub fn scrollStyle(self: Theme) ScrollStyle {
+        return .{
+            .bar_width = 8,
+            .track = self.surface,
+            .thumb = self.accent,
+        };
+    }
 };
 
 test "Theme defaults + derivados válidos" {
@@ -160,6 +179,7 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(dark.sliderStyle().isValid());
     try stdt.testing.expect(light.sliderStyle().isValid());
     try stdt.testing.expect(dark.textInputStyle().isValid());
+    try stdt.testing.expect(dark.scrollStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,

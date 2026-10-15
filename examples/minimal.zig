@@ -5,6 +5,7 @@ const checkbox_mod = @import("zyntra_ui").widgets.checkbox;
 const label_mod = @import("zyntra_ui").widgets.label;
 const slider_mod = @import("zyntra_ui").widgets.slider;
 const text_input_mod = @import("zyntra_ui").widgets.text_input;
+const scroll_mod = @import("zyntra_ui").widgets.scroll;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -165,7 +166,27 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m13 replace text={s}\n", .{name_buf[0..name_len]});
 
-    // Frame 9: easing dirige um fade (0→1 em 1s, amostrado).
+    // Frame 9: scroll com wheel sobre a vista (conteúdo 300px em 100px).
+    var scrolled: f32 = 0;
+    const sc_style = theme.scrollStyle();
+    const sc_bounds = zyntra_ui.Rect.init(300, 400, 200, 100);
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = -4, .pos = zyntra_ui.Vec2.init(400, 450) } });
+    const sc = try scroll_mod.beginScroll(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m16:sc"),
+        sc_bounds,
+        &scrolled,
+        300,
+        24,
+        sc_style,
+    );
+    // (filhos viriam aqui, posicionados em sc.content)
+    try scroll_mod.endScroll(&ctx, sc_bounds, scrolled, 300, sc_style);
+    ctx.endFrame();
+    std.debug.print("m16 scroll offset={d} max={d} draws={d}\n", .{ scrolled, sc.max_offset, ctx.drawCommands().len });
+
+    // Frame 10: easing dirige um fade (0→1 em 1s, amostrado).
     const tw = try zyntra_ui.Tween.init(0, 1, 1.0, .quad_out);
     var timer = try zyntra_ui.AnimTimer.init(1.0, false);
     var step: u32 = 0;
