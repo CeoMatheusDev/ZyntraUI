@@ -267,3 +267,38 @@ test "DrawList pushText copia, resolve e valida" {
     try stdt.testing.expectError(error.InvalidMetrics, dl.pushText(gpa, types.Vec2.init(0, 0), types.Color.rgb(0, 0, 0), .{ .size = 0 }, "A"));
     try stdt.testing.expectEqual(before, dl.len());
 }
+
+test "fuzz pushText/textOf: sem crash, UTF-8 coerente, offsets contidos" {
+    try std.testing.fuzz({}, fuzzPushText, .{});
+}
+
+fn fuzzPushText(_: void, smith: *std.testing.Smith) !void {
+    var fb: [40]u8 = undefined;
+    smith.bytes(&fb);
+    const bits: [2]f32 = @bitCast(fb[0..8].*);
+    const gpa = std.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    // Texto com bytes arbitrários (pode ser UTF-8 inválido).
+    // n em 0..31 para fb[9..9+n] nunca exceder os 40 bytes.
+    const n: usize = @as(usize, fb[8]) % 32;
+    const text = fb[9 .. 9 + n];
+    const pos = types.Vec2.init(bits[0], bits[1]);
+
+    // Sem crash nunca; válido entra e resolve idêntico, inválido é
+    // rejeitado sem enfileirar (contrato da M6 sob ataque).
+    const before = dl.len();
+    if (dl.pushText(gpa, pos, types.Color.rgb(1, 2, 3), font, text)) {
+        try std.testing.expectEqual(before + 1, dl.len());
+        const cmd = dl.items()[before];
+        try std.testing.expectEqualStrings(text, dl.textOf(cmd));
+        // Offsets dentro da arena.
+        try std.testing.expect(cmd.text.start + cmd.text.len <= dl.text_bytes.items.len);
+    } else |err| {
+        try std.testing.expect(err == error.InvalidUtf8 or err == error.InvalidMetrics or err == error.InvalidCommand or err == error.OutOfMemory);
+        try std.testing.expectEqual(before, dl.len());
+    }
+}

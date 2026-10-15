@@ -624,3 +624,10 @@ Pré-release instável: API pode mudar até a beta.
   hierarquia 3 níveis, ordem achatada, no-ops nas extremidades,
   scroll clampado, seleção válida após recolher, helpers puros.
 - Resto aditivo (acumula p/ MINOR).
+
+### Adicionado — Milestone 61 (fuzz no pushText, compatível)
+- `draw/commands`: fuzz com bytes arbitrários (contrato da M6 sob
+  ataque: sem crash nunca, texto válido entra e resolve idêntico
+  via `textOf`, inválido rejeitado sem enfileirar, offsets sempre
+  contidos na arena).
+- Sem mudança de comportamento; resto aditivo (acumula p/ MINOR).
