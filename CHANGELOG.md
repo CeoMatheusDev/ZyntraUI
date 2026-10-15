@@ -473,3 +473,10 @@ Pré-release instável: API pode mudar até a beta.
   (`TextHistory(2)` + 4 rajadas), menu todo-desabilitado (nunca escolhe)
   e `StackPlacer` horizontal (avanço + clamp).
 - Sem mudança de comportamento; resto aditivo (acumula p/ MINOR).
+
+### Corrigido — Milestone 47 (culling unificado, compatível)
+- Auditoria achou fórmulas de bounds divergentes p/ linhas entre
+  `render` (t/2 p/ lado) e `cull` (t p/ lado): `render` agora usa a
+  fonte canônica `draw/renderer.commandBounds`; duplicata removida.
+- Teste de concordância na fronteira (linha y=101/t=2: culled nos
+  dois caminhos + pixel intacto). Comportamento válido inalterado.

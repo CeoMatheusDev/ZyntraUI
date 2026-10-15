@@ -15,6 +15,7 @@
 const std = @import("std");
 const types = @import("../core/types.zig");
 const commands = @import("../draw/commands.zig");
+const renderer = @import("../draw/renderer.zig");
 
 pub const max_dimension: u32 = 8192;
 
@@ -208,27 +209,12 @@ pub const SoftwareStats = extern struct {
     skipped_text: u32 = 0,
 };
 
+/// Visibilidade via bounds canônicos (`draw/renderer.commandBounds`):
+/// fonte única de verdade p/ culling (antes duplicada com fórmula
+/// divergente p/ linhas). `null` = global (clear/clip-nulo).
 fn boundsVisible(cmd: commands.DrawCommand, viewport: types.Rect) bool {
-    switch (cmd) {
-        .clear => return true,
-        .rect_filled => |c| return overlaps(c.rect, viewport),
-        .rect_outline => |c| return overlaps(c.rect, viewport),
-        .line => |c| {
-            const x = @min(c.p0.x, c.p1.x) - c.thickness;
-            const y = @min(c.p0.y, c.p1.y) - c.thickness;
-            const w = @abs(c.p1.x - c.p0.x) + 2 * c.thickness;
-            const h = @abs(c.p1.y - c.p0.y) + 2 * c.thickness;
-            return overlaps(.{ .x = x, .y = y, .w = w, .h = h }, viewport);
-        },
-        .circle_filled => |c| return overlaps(.{
-            .x = c.center.x - c.radius,
-            .y = c.center.y - c.radius,
-            .w = c.radius * 2,
-            .h = c.radius * 2,
-        }, viewport),
-        .clip => return true, // estado, nunca "culled"
-        .text => |c| return overlaps(.{ .x = c.pos.x, .y = c.pos.y, .w = c.width, .h = c.size }, viewport),
-    }
+    const b = renderer.commandBounds(cmd) orelse return true;
+    return overlaps(b, viewport);
 }
 
 fn overlaps(a: types.Rect, b: types.Rect) bool {
@@ -484,4 +470,33 @@ test "raster blending source-over com arredondamento" {
     try stdt.testing.expectEqual([4]u8{ 192, 0, 0, 255 }, fb.get(0, 0));
     fb.fillRect(types.Rect.init(0, 0, 4, 4), null, types.Color.rgb(1, 2, 3));
     try stdt.testing.expectEqual([4]u8{ 1, 2, 3, 255 }, fb.get(0, 0));
+}
+
+test "render e cull concordam na fronteira (bounds canônicos)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 100, 100);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+    const vp = types.Rect.init(0, 0, 100, 100);
+    // Linha em y=101, espessura 2: bounds canônicos [100,102) não
+    // sobrepõem [0,100) (borda exclusiva) → cull. A fórmula antiga
+    // ([99,103)) a considerava visível: divergência eliminada.
+    const cmds = [_]commands.DrawCommand{
+        .{ .rect_filled = .{ .rect = types.Rect.init(10, 10, 20, 20), .color = types.Color.rgb(255, 0, 0) } },
+        .{ .line = .{
+            .p0 = types.Vec2.init(0, 101),
+            .p1 = types.Vec2.init(50, 101),
+            .color = types.Color.rgb(0, 255, 0),
+            .thickness = 2,
+        } },
+    };
+    const s = try render(&fb, &cmds, vp);
+    try stdt.testing.expectEqual(@as(u32, 1), s.drawn);
+    try stdt.testing.expectEqual(@as(u32, 1), s.culled);
+    const c = renderer.cull(&cmds, vp);
+    try stdt.testing.expectEqual(s.culled, c.culled);
+    try stdt.testing.expectEqual(s.submitted, c.submitted);
+    // E o pixel da linha inexistente confirma: nada desenhado fora.
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(10, 99));
 }
