@@ -15,6 +15,8 @@
 //! - `Ctrl+Backspace`/`Ctrl+Delete` apagam por palavra (só `' '` separa).
 //! - Rolagem horizontal automática (M42, sem estado): texto além da
 //!   área útil desloca para o caret, com clip pareado no overflow.
+//! - Seleção por mouse (M45): click posiciona o caret (captura o press);
+//!   arrasto estende a seleção; release solta. Válido nas 3 variantes.
 //! - `Ctrl+Backspace`/`Ctrl+Delete` apagam por palavra (só `' '` separa).
 //! Desenho: caixa com destaque + highlight da seleção + texto + caret.
 //! `id` não-nulo obrigatório.
@@ -196,6 +198,32 @@ fn wordEndFwd(buf: []const u8, len: usize, pos: usize) usize {
     return i;
 }
 
+/// Offset de byte do glifo cuja célula contém `x` (relativo à origem
+/// do texto). Multibyte-safe; fora da faixa retorna 0/len; bytes
+/// corrompidos param a varredura (defensivo).
+fn offsetAt(text: []const u8, font: metrics_mod.FontMetrics, x: f32) usize {
+    if (!std.math.isFinite(x) or x <= 0 or text.len == 0) return 0;
+    var acc: f32 = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        if (x < acc + font.advance / 2) return i;
+        const d = metrics_mod.decodeOne(text[i..]) catch return i;
+        acc += font.advance;
+        i += d.len;
+    }
+    return i;
+}
+
+/// Deslocamento horizontal para manter o caret visível (0 quando cabe).
+/// Puro e derivado — mesma fórmula do desenho (sem estado retido).
+fn visibleOffset(buf: []const u8, len: usize, cursor: usize, font: metrics_mod.FontMetrics, vis_w: f32) f32 {
+    if (vis_w <= 0 or len == 0) return 0;
+    const full = metrics_mod.measure(buf[0..len], font) catch return 0;
+    if (full.width <= vis_w) return 0;
+    const pre = metrics_mod.measure(buf[0..@min(cursor, len)], font) catch return 0;
+    return std.math.clamp(pre.width - vis_w, 0, full.width - vis_w);
+}
+
 /// Remove o último codepoint de `buf[0..len]`. Retorna o novo `len`.
 fn popCodepoint(buf: []u8, len: usize) usize {
     var i = len;
@@ -320,9 +348,39 @@ fn textInputInner(
     // Click dentro assume o foco (independe de captura de press).
     // Troca de foco quebra rajada de digitação do histórico.
     const had_focus = ctx.hasFocus(id);
+    // Offset de rolagem atual (p/ mapear o press; recalculado no desenho).
+    const xoff_hit = visibleOffset(buffer, len.*, cursor.*, font, bounds.w - 8);
     if (fm.pressedInside(bounds)) {
         ctx.focus_owner = id;
         if (use_hist and !had_focus) hist.closeGroup();
+        // Click posiciona o caret; captura p/ arrasto de seleção (M45).
+        if (ctx.press_owner == null) {
+            if (fm.pressed_pos) |pp| {
+                const at = offsetAt(buffer[0..len.*], font, pp.x - (bounds.x + 4) + xoff_hit);
+                cursor.* = at;
+                if (anchor) |a| a.* = at;
+            }
+            ctx.press_owner = id;
+        }
+    }
+    // Arrasto com dono + botão: cursor segue o mouse (âncora fica).
+    // Só com atividade de mouse NESTE frame (posição retida sozinha
+    // não move — senão o cursor repinaria a cada chamada).
+    var mouse_fresh = false;
+    for (ctx.pendingEvents()) |ev| {
+        switch (ev) {
+            .mouse_move, .mouse_button, .mouse_wheel => mouse_fresh = true,
+            else => {},
+        }
+    }
+    if (ctx.press_owner == id and ctx.mouse_down_left and mouse_fresh) {
+        if (ctx.mouse_pos) |mp| {
+            cursor.* = offsetAt(buffer[0..len.*], font, mp.x - (bounds.x + 4) + xoff_hit);
+        }
+    }
+    // Release do dono solta (vale p/ todas as variantes).
+    if (ctx.press_owner == id and fm.released_pos != null) {
+        ctx.press_owner = null;
     }
     const focused = ctx.hasFocus(id);
     res.focused = focused;
@@ -617,14 +675,11 @@ fn textInputInner(
     var xoff: f32 = 0;
     var clipped = false;
     if (vis_w > 0 and len.* > 0) {
-        const full = metrics_mod.measure(buffer[0..len.*], font) catch {
+        const full_w = (metrics_mod.measure(buffer[0..len.*], font) catch {
             return error.InvalidArgument;
-        };
-        if (full.width > vis_w) {
-            const pre = metrics_mod.measure(buffer[0..cursor.*], font) catch {
-                return error.InvalidArgument;
-            };
-            xoff = std.math.clamp(pre.width - vis_w, 0, full.width - vis_w);
+        }).width;
+        if (full_w > vis_w) {
+            xoff = visibleOffset(buffer, len.*, cursor.*, font, vis_w);
             ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = bounds, .null_rect = false } }) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 error.InvalidCommand => return error.InvalidCommand,
@@ -1362,5 +1417,74 @@ test "textInput rolagem segue o caret com clip pareado" {
     _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
     const cmds2 = ctx.drawCommands();
     try stdt.testing.expectEqual(@as(f32, 4), cmds2[4].line.p0.x);
+    ctx.endFrame();
+}
+
+test "textInput click posiciona, arrasto seleciona, release solta" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10); // advance=6
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-drag");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+
+    // Digita "ABCD" (foca com click em buffer vazio: caret fica no 0).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'B' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'C' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'D' } });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expectEqualStrings("ABCD", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 4), cursor);
+    ctx.endFrame();
+
+    // Solta o botão do click de foco (sem órfãos).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(ctx.press_owner == null);
+    ctx.endFrame();
+
+    // Click no meio ("C" em x=4+12..18): caret e âncora vão para 2.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(15, 15) },
+    });
+    const rc = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(!rc.selected);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    try stdt.testing.expectEqual(@as(usize, 2), anchor);
+    try stdt.testing.expect(ctx.press_owner == id);
+    ctx.endFrame();
+
+    // Arrasta até o fim com botão pressionado: seleciona [2,4).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(100, 15) } });
+    const rd = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(rd.selected);
+    try stdt.testing.expectEqual(@as(usize, 4), cursor);
+    try stdt.testing.expectEqual(@as(usize, 2), anchor);
+    ctx.endFrame();
+
+    // Release solta a captura (seleção permanece).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(100, 15) },
+    });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(ctx.press_owner == null);
+    try stdt.testing.expectEqualStrings("ABCD", buf[0..len]);
     ctx.endFrame();
 }

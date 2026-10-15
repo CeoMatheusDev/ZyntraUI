@@ -460,3 +460,10 @@ Pré-release instável: API pode mudar até a beta.
 - Teste de consistência Zig↔C (major/minor/patch + prerelease);
   C fixa major==1 (quebra alto em MAJOR, de propósito).
 - Resto aditivo (acumula p/ próxima MINOR).
+
+### Adicionado — Milestone 45 (seleção por mouse, compatível)
+- `widgets/text_input`: click posiciona o caret (captura o press),
+  arrasto estende a seleção, release solta; só com atividade de mouse
+  fresca no frame (posição retida sozinha não move); vale nas 3 variantes.
+- Helpers `offsetAt`/`visibleOffset` (o segundo reutilizado no desenho).
+- Resto aditivo (acumula p/ próxima MINOR).

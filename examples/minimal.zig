@@ -218,6 +218,12 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m20 clip={s} text={s}\n", .{ clip.buf[0..clip.len], name_buf[0..name_len] });
 
+    // Solta o press do frame m20 (captura retida bloquearia o modal).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = false, .pos = zyntra_ui.Vec2.init(ti_rect.x + 5, ti_rect.y + 5) } });
+    _ = try text_input_mod.textInputSelected(&ctx, zyntra_ui.Id.fromString("examples/m9:ti"), ti_rect, &name_buf, &name_len, &name_cursor, &sel_anchor, font, ti_style);
+    ctx.endFrame();
+
     // Ctrl+A seleciona tudo no campo (foco retido).
     ctx.beginFrame();
     try ctx.pushEvent(.{ .key = .{ .key = .a, .pressed = true, .modifiers = .{ .ctrl = true } } });
