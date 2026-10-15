@@ -528,4 +528,18 @@ pub fn main() !void {
     const cmb = try combo_mod.combo(&ctx, zyntra_ui.Id.fromString("examples/m36:c"), cbounds, &copts, &csel, &copen, font, theme.buttonStyle(), theme.menuStyle());
     ctx.endFrame();
     std.debug.print("m36 combo selected={d} open={} changed={}\n", .{ csel, copen, cmb.changed });
+
+    // Label multilinha: "aaa bbb\ncc" em largura 20 → 3 textos.
+    ctx.beginFrame();
+    const lw = try label_mod.labelWrapped(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m37:lbl"),
+        zyntra_ui.Rect.init(16, 500, 20, 200),
+        "aaa bbb\ncc",
+        theme.text,
+        font,
+        false,
+    );
+    ctx.endFrame();
+    std.debug.print("m37 wrapped draws={d} truncated={} lines={d}\n", .{ ctx.drawCommands().len, lw.truncated, lw.metrics.lines });
 }

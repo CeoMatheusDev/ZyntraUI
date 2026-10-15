@@ -411,3 +411,9 @@ Pré-release instável: API pode mudar até a beta.
   pilha (teto 256, zero alloc).
 - Exemplo abre e escolhe item 1 (após soltar captura do scroll, como
   app real); resto aditivo (acumula p/ 1.11.0).
+
+### Adicionado — Milestone 37 (label multilinha, compatível)
+- `widgets/label.labelWrapped`: fatia com `text/wrap` em `bounds.w`,
+  1 comando por linha não-vazia (máx. 64, trunca), `bounds.w == 0`
+  rejeitado; `label` clássico intacto.
+- Exemplo com 3 linhas; resto aditivo (acumula p/ 1.11.0).
