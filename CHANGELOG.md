@@ -5,6 +5,13 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.3.0] - 2026-10-15
+
+Terceira MINOR estável, 100% compatível: scroll completo.
+
+- `widgets/scroll` (M16+M17): wheel, clip, scrollbar, drag no thumb.
+- 51/51 testes, integração C, CI verde.
+
 ## [1.2.0] - 2026-10-15
 
 Segunda MINOR estável, 100% compatível: rasterizador de referência +
