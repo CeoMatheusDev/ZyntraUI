@@ -6,7 +6,7 @@
 
 A work-in-progress GUI toolkit designed for lightweight, responsive native interfaces, written in Zig.
 
-[![Status](https://img.shields.io/badge/status-planning-orange)](https://github.com/CeoMatheusDev/ZyntraUI)
+[![Status](https://img.shields.io/badge/status-rc-blue)](https://github.com/CeoMatheusDev/ZyntraUI)
 [![Language](https://img.shields.io/badge/language-Zig-f7a41d)](https://ziglang.org/)
 [![Contributions](https://img.shields.io/badge/contributions-welcome-brightgreen)](https://github.com/CeoMatheusDev/ZyntraUI/issues)
 
@@ -21,7 +21,10 @@ A work-in-progress GUI toolkit designed for lightweight, responsive native inter
 The project aims to favor understandable, low-level implementations over heavyweight abstractions. Its API, rendering architecture, and platform support have **not yet been finalized**.
 
 > [!IMPORTANT]
-> **Project status: Planning.** ZyntraUI is not implemented or ready for use. The goals below describe intended directions, not currently available features.
+> **Project status: release candidate (1.0.0-rc.1).** The core is implemented
+> and tested (see CHANGELOG.md), but the API may still change until 1.0.0.
+> ZyntraUI has no built-in GPU renderer or windowing: you feed normalized
+> events in and consume draw commands with an external backend.
 
 ## Design goals
 
@@ -32,37 +35,66 @@ The project aims to favor understandable, low-level implementations over heavywe
 - **Modern UI:** aim for flexible layouts, consistent styling, and polished interactive components.
 - **Transparency:** keep the internals understandable, inspectable, and easy to extend.
 
-## Architecture (proposed)
-
-The following is a conceptual breakdown, **not an existing directory structure**:
+## Architecture (current layout)
 
 ```text
-ZyntraUI
-├── Core          Application lifecycle, events, memory
-├── Platform      Windowing and input integration
-├── Graphics      Drawing and rendering abstraction
-├── Layout        Measurement and positioning
-├── Widgets       Reusable UI components
-└── Styling       Themes and visual properties
+src/
+├── root.zig      Public API (the only supported @import)
+├── core/         Context, types, stable Ids
+├── event/        Normalized input events
+├── draw/        Draw lists + external renderer contract
+├── layout/      Constraints, insets, stack placement
+├── style/       Themes and widget styles
+├── widgets/     Button, checkbox, label, slider, text input
+├── text/        UTF-8 metrics (fallback monospace measurement)
+├── anim/        Optional easing, tweens, timers
+└── c-abi/       Optional C ABI (zyntra.h) + opaque handles
 ```
 
-Decisions such as immediate-mode versus retained-mode UI, supported operating systems, graphics backends, and public API design remain open.
+Model: retained core (explicit `Context`, per-frame draw lists) with an
+ergonomic builder-style API. No GPU renderer, windowing, audio, or
+networking by design — see `docs/` for contracts.
 
 ## Roadmap
 
-- [ ] Define architecture and public API principles
-- [ ] Prototype window creation and event processing
-- [ ] Establish rendering and drawing primitives
-- [ ] Implement layout and input handling
-- [ ] Build an initial set of widgets
-- [ ] Add examples, tests, and documentation
-- [ ] Publish an initial development release
-
-This roadmap is provisional and may change as the design evolves.
+- [x] Architecture and public API principles
+- [x] Event processing (normalized; windowing stays external)
+- [x] Rendering and drawing primitives (backend-external contract)
+- [x] Layout and input handling
+- [x] Initial widget set (button, checkbox, label, slider, text input)
+- [x] Examples, tests, and documentation
+- [x] Pre-releases (alpha, beta)
+- [ ] 1.0.0 stable (API freeze + release review)
 
 ## Getting started
 
-Installation instructions and working examples will be added once the first usable implementation exists.
+Requires Zig 0.17.0. Add the dependency:
+
+```sh
+zig fetch --save https://github.com/CeoMatheusDev/ZyntraUI/archive/refs/tags/v1.0.0-rc.1.tar.gz
+```
+
+The snippet below was compiled and run against this tag (`snippet ok`):
+
+```zig
+const zyntra_ui = @import("zyntra_ui");
+
+var ctx = try zyntra_ui.Context.init(allocator, .{
+    .viewport = zyntra_ui.Rect.init(0, 0, 800, 600),
+});
+defer ctx.deinit();
+
+ctx.beginFrame();
+try ctx.draw.rectFilled(
+    ctx.allocator,
+    zyntra_ui.Rect.init(10, 10, 100, 40),
+    zyntra_ui.Color.rgb(70, 110, 180),
+);
+ctx.endFrame();
+```
+
+Run `zig build run-example` for the full demo (widgets, layout, text,
+animations). C consumers: see `src/c-abi/zyntra.h` and `docs/C_ABI.md`.
 
 ## Contributing
 

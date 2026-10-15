@@ -30,6 +30,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `style/style`: `SliderStyle` + `Theme.sliderStyle()` validados.
 - Exemplo com drag em 2 frames; resto aditivo.
 
+## [1.0.0-rc.1] - 2026-10-15
+
+Release candidate: API em congelamento (só bugfixes até a 1.0.0).
+README com status real, arquitetura atual e getting-started verificado
+(snippet compilado contra a tag). CI verde.
+
 ## [1.0.0-beta.2] - 2026-10-14
 
 Terceira pré-release: caret navegável no text-input (`Key` com
