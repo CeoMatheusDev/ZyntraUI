@@ -5,6 +5,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.7.0] - 2026-10-15
+
+Sétima MINOR estável, 100% compatível: cascata de menus.
+
+- `widgets/menu` aninhável (M23): `menuNested`, `hovered_index`, helpers.
+- 60/60 testes, integração C, CI verde.
+
+
 ## [1.6.0] - 2026-10-15
 
 Sexta MINOR estável, 100% compatível: endurecimento + menu.
@@ -277,3 +285,9 @@ Pré-release instável: API pode mudar até a beta.
   cascata (documentado). Itens UTF-8 validados no push.
 - `style/style`: `MenuStyle` + `Theme.menuStyle()`.
 - Exemplo escolhe item 1; resto aditivo (rumo à 1.6.0).
+
+### Adicionado — Milestone 23 (cascata mouse-driven, compatível)
+- `widgets/menu`: `MenuChild` + `menuNested` (press no filho não dispensa
+  o pai), `hovered_index` no resultado, `menuRowRect`/`submenuBounds`
+  partilhando a geometria; teclado segue por nível (documentado).
+- Exemplo com cascata de 2 níveis; resto aditivo (rumo à 1.7.0).

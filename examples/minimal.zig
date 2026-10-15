@@ -302,4 +302,30 @@ pub fn main() !void {
     );
     ctx.endFrame();
     std.debug.print("m22 menu chosen={?d} active={d}\n", .{ mm.chosen, mactive });
+
+    // Frame 16: cascata — hover no pai abre submenu; click escolhe nele.
+    const pitems = [_]zyntra_ui.widgets.menu.MenuItem{.{ .label = "File" }};
+    const sitems = [_]zyntra_ui.widgets.menu.MenuItem{ .{ .label = "New" }, .{ .label = "Open" } };
+    var pactive: usize = 0;
+    var sactive: usize = 0;
+    const pb = zyntra_ui.Rect.init(350, 320, 160, 40);
+    const sbih: f32 = 25;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(520, 350) },
+    });
+    const pm = try menu_mod.menuNested(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m23:p"),
+        pb,
+        &pitems,
+        &pactive,
+        font,
+        theme.menuStyle(),
+        .{ .id = zyntra_ui.Id.fromString("examples/m23:s"), .bounds = zyntra_ui.widgets.menu.submenuBounds(pb, 0, sbih, sitems.len, 140) },
+    );
+    const sb2 = zyntra_ui.widgets.menu.submenuBounds(pb, 0, sbih, sitems.len, 140);
+    const sm = try menu_mod.menu(&ctx, zyntra_ui.Id.fromString("examples/m23:s"), sb2, &sitems, &sactive, font, theme.menuStyle());
+    ctx.endFrame();
+    std.debug.print("m23 cascade parent_dismissed={} sub_chosen={?d}\n", .{ pm.dismissed, sm.chosen });
 }

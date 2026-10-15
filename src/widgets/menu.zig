@@ -1,14 +1,13 @@
 //! ZyntraUI — menu dropdown (widgets/menu).
 //!
-//! Modelo M22 (flat; SEM cascata — submenu fica para milestone futura):
-//! - `menu(ctx,id,bounds,items,active,font,style)`: painel + clip,
-//!   um item por linha (`item_h` derivado da fonte + padding).
-//! - `active: *usize` do chamador = índice sob interação (hover ajusta,
-//!   setas movem pulando desabilitados com wrap, `Home`/`End` saltam).
-//! - Click/Enter em item habilitado → `chosen` (one-shot; o chamador
-//!   fecha). Press fora ou `Escape` → `dismissed`.
-//! - Foco: click dentro foca (teclado só com foco); `Tab` não circula
-//!   (menu não se registra como focável — dismiss fecha antes).
+//! Modelo M22 flat + M23 cascata mouse-driven:
+//! - `menu(...)`: painel + clip, `active: *usize` unificando hover e
+//!   teclado (setas pulam desabilitados com wrap, `Home`/`End`),
+//!   click/`Enter` escolhem (one-shot), press fora/`Escape` dispensam.
+//! - `menuNested(..., child)`: press dentro do filho NÃO dispensa o pai.
+//!   `hovered_index` + `submenuBounds`/`menuRowRect` permitem ao chamador
+//!   abrir um submenu à direita do item sob o mouse.
+//! - Teclado continua por nível (foco não atravessa; documentado).
 //! - Itens desabilitados: texto apagado, sem hover/escolha.
 //! `items` vazio → `InvalidArgument`. Labels UTF-8 validados no push.
 
@@ -30,6 +29,15 @@ pub const MenuResult = struct {
     chosen: ?usize = null,
     dismissed: bool = false,
     hovered: bool = false,
+    /// Linha sob o mouse (mesmo desabilitada; `null` fora do menu).
+    /// Chamadores usam para abrir submenu do item focado pelo mouse.
+    hovered_index: ?usize = null,
+};
+
+/// Filho aberto (submenu): press dentro dele não dispensa o pai.
+pub const MenuChild = struct {
+    id: id_mod.Id,
+    bounds: types.Rect,
 };
 
 fn itemHeight(font: metrics_mod.FontMetrics) f32 {
@@ -67,6 +75,55 @@ pub fn menu(
     font: metrics_mod.FontMetrics,
     style: style_mod.MenuStyle,
 ) context_mod.ContextError!MenuResult {
+    return menuInner(ctx, id, bounds, items, active, font, style, null);
+}
+
+/// Menu com submenu aberto (M23, aditivo): `child` suprime o dismiss do
+/// pai quando o press cai dentro do filho. Teclado continua por nível
+/// (foco não atravessa níveis nesta milestone — documentado).
+pub fn menuNested(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    items: []const MenuItem,
+    active: *usize,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.MenuStyle,
+    child: ?MenuChild,
+) context_mod.ContextError!MenuResult {
+    return menuInner(ctx, id, bounds, items, active, font, style, child);
+}
+
+/// Linha `index` dentro de `bounds` (mesma geometria do desenho).
+pub fn menuRowRect(bounds: types.Rect, index: usize, item_h: f32) types.Rect {
+    return .{
+        .x = bounds.x,
+        .y = bounds.y + @as(f32, @floatFromInt(index)) * item_h,
+        .w = bounds.w,
+        .h = item_h,
+    };
+}
+
+/// Bounds do submenu ancorado à direita da linha `index`.
+pub fn submenuBounds(parent: types.Rect, index: usize, item_h: f32, count: usize, width: f32) types.Rect {
+    return .{
+        .x = parent.x + parent.w,
+        .y = parent.y + @as(f32, @floatFromInt(index)) * item_h,
+        .w = width,
+        .h = @as(f32, @floatFromInt(count)) * item_h,
+    };
+}
+
+fn menuInner(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    items: []const MenuItem,
+    active: *usize,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.MenuStyle,
+    child: ?MenuChild,
+) context_mod.ContextError!MenuResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
@@ -87,12 +144,16 @@ pub fn menu(
     var res = MenuResult{ .hovered = hovered };
 
     const ih = itemHeight(font);
+    // Linha sob o mouse (qualquer uma, p/ hovered_index + submenu).
+    const row_at_mouse: ?usize = if (ctx.mouse_pos) |p| blk: {
+        if (!bounds.contains(p)) break :blk null;
+        const idx: usize = @intFromFloat(@min(@floor((p.y - bounds.y) / ih), @as(f32, @floatFromInt(items.len - 1))));
+        break :blk if (idx < items.len) idx else null;
+    } else null;
+    res.hovered_index = row_at_mouse;
     // Hover ajusta o ativo (só habilitados).
-    if (ctx.mouse_pos) |p| {
-        if (bounds.contains(p)) {
-            const idx: usize = @intFromFloat(@min(@floor((p.y - bounds.y) / ih), @as(f32, @floatFromInt(items.len - 1))));
-            if (idx < items.len and items[idx].enabled) active.* = idx;
-        }
+    if (row_at_mouse) |idx| {
+        if (items[idx].enabled) active.* = idx;
     }
 
     if (focused) {
@@ -134,7 +195,8 @@ pub fn menu(
             }
         }
     }
-    // Click em item habilitado escolhe (one-shot).
+    // Click em item habilitado escolhe (one-shot); fora dispensa,
+    // exceto dentro do filho aberto (cascata).
     if (fm.pressed_pos) |p| {
         if (bounds.contains(p)) {
             const idx: usize = @intFromFloat(@min(@floor((p.y - bounds.y) / ih), @as(f32, @floatFromInt(items.len - 1))));
@@ -142,7 +204,7 @@ pub fn menu(
                 active.* = idx;
                 res.chosen = idx;
             }
-        } else {
+        } else if (child == null or !child.?.bounds.contains(p)) {
             res.dismissed = true;
         }
     }
@@ -245,6 +307,68 @@ test "menu hover escolhe, fora dispensa, vazio rejeita" {
     const empty = [_]MenuItem{};
     try stdt.testing.expectError(error.InvalidArgument, menu(&ctx, .null, bounds, &items, &active, font, style));
     try stdt.testing.expectError(error.InvalidArgument, menu(&ctx, id, bounds, &empty, &active, font, style));
+    ctx.endFrame();
+}
+
+test "menuNested cascata: hovered_index, filho não dispensa, escolhe" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10); // ih=25
+    const style = style_mod.Theme.darkDefault().menuStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const pbounds = types.Rect.init(0, 0, 160, 50);
+    const pid = id_mod.Id.fromString("test:menu-p");
+    const sid = id_mod.Id.fromString("test:menu-s");
+    const items = [_]MenuItem{.{ .label = "File" }};
+    const sub = [_]MenuItem{ .{ .label = "New" }, .{ .label = "Open" } };
+    var pactive: usize = 0;
+    var sactive: usize = 0;
+
+    // Geometria partilhada: linha 0 + submenu à direita (item_h=25 aqui).
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 160, 25), menuRowRect(pbounds, 0, 25));
+    const sb = submenuBounds(pbounds, 0, 25, sub.len, 140);
+    try stdt.testing.expectEqual(types.Rect.init(160, 0, 140, 50), sb);
+
+    // Hover no pai expõe hovered_index; submenu abre e recebe click
+    // sem dispensar o pai (menuNested com child).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(10, 10) } });
+    const rp = try menuNested(
+        &ctx,
+        pid,
+        pbounds,
+        &items,
+        &pactive,
+        font,
+        style,
+        .{ .id = sid, .bounds = sb },
+    );
+    try stdt.testing.expectEqual(@as(?usize, 0), rp.hovered_index);
+    try stdt.testing.expect(!rp.dismissed);
+    const rs = try menu(&ctx, sid, sb, &sub, &sactive, font, style);
+    try stdt.testing.expect(!rs.dismissed);
+    ctx.endFrame();
+
+    // Click no filho ("Open", y=30 → idx 1): escolhe sem dispensar o pai.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(170, 30) },
+    });
+    const rp2 = try menuNested(&ctx, pid, pbounds, &items, &pactive, font, style, .{ .id = sid, .bounds = sb });
+    const rs2 = try menu(&ctx, sid, sb, &sub, &sactive, font, style);
+    try stdt.testing.expectEqual(@as(?usize, 1), rs2.chosen);
+    try stdt.testing.expect(!rp2.dismissed);
+    ctx.endFrame();
+
+    // Press longe de ambos dispensa os dois.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(500, 500) },
+    });
+    const rp3 = try menuNested(&ctx, pid, pbounds, &items, &pactive, font, style, .{ .id = sid, .bounds = sb });
+    const rs3 = try menu(&ctx, sid, sb, &sub, &sactive, font, style);
+    try stdt.testing.expect(rp3.dismissed and rs3.dismissed);
     ctx.endFrame();
 }
 
