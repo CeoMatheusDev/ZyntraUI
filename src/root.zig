@@ -65,6 +65,7 @@ pub const widgets = struct {
     pub const modal = @import("widgets/modal.zig");
     pub const combo = @import("widgets/combo.zig");
     pub const tab_bar = @import("widgets/tab_bar.zig");
+    pub const splitter = @import("widgets/splitter.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -120,6 +121,7 @@ pub const MenuStyle = style.style_mod.MenuStyle;
 pub const RadioStyle = style.style_mod.RadioStyle;
 pub const TooltipStyle = style.style_mod.TooltipStyle;
 pub const ModalStyle = style.style_mod.ModalStyle;
+pub const SplitterStyle = style.style_mod.SplitterStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -138,6 +140,9 @@ pub const TooltipResult = widgets.tooltip.TooltipResult;
 pub const ModalResult = widgets.modal.ModalResult;
 pub const ModalDragState = widgets.modal.ModalDragState;
 pub const ComboResult = widgets.combo.ComboResult;
+pub const TabBarResult = widgets.tab_bar.TabBarResult;
+pub const SplitterResult = widgets.splitter.SplitterResult;
+pub const SplitterOrientation = widgets.splitter.SplitterOrientation;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -183,4 +188,5 @@ test {
     _ = @import("widgets/modal.zig");
     _ = @import("widgets/combo.zig");
     _ = @import("widgets/tab_bar.zig");
+    _ = @import("widgets/splitter.zig");
 }

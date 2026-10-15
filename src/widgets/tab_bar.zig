@@ -6,6 +6,8 @@
 //! - Teclado: `Left`/`Right` navegam, `Home`/`End` saltam, `Tab` circula.
 //! - Click na aba seleciona; `Tab` no teclado circula foco.
 //! - Desenho: 1 comando por aba (fundo) + 1 outline + 1 texto = 3*N + 2.
+//! - `endTabBar(ctx)` é NO-OP (sem estado retido/draws); existe para
+//!   simetria de pareamento — chamada segura com ou sem barra aberta.
 //! `id` não-nulo obrigatório.
 
 const std = @import("std");
@@ -183,9 +185,11 @@ pub fn beginTabBar(
     return res;
 }
 
-pub fn endTabBar(_: *context_mod.Context) void {
-    // Sem estado retido; existe para simetria com outros widgets
-}
+/// Fim da barra de abas (M56): NO-OP — sem estado retido, sem draws.
+/// Existe apenas para simetria de pareamento com outros widgets
+/// (`beginPopup`/`endPopup`, `beginModal`/`endModal`); chamada segura
+/// quando há barra aberta ou não.
+pub fn endTabBar(_: *context_mod.Context) void {}
 
 test "TabBar click seleciona, teclado navega, clamp ativo" {
     const stdt = @import("std");

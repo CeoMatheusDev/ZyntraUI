@@ -156,6 +156,20 @@ pub const TabBarStyle = extern struct {
     }
 };
 
+/// Estilo de splitter arrastável (M57).
+pub const SplitterStyle = extern struct {
+    bg: types.Color,
+    bg_hover: types.Color,
+    bg_drag: types.Color,
+    handle_w: f32 = 8.0,
+    handle_h: f32 = 8.0,
+
+    pub fn isValid(self: SplitterStyle) bool {
+        return std.math.isFinite(self.handle_w) and self.handle_w >= 0 and
+            std.math.isFinite(self.handle_h) and self.handle_h >= 0;
+    }
+};
+
 /// Estilo de menu dropdown.
 pub const MenuStyle = extern struct {
     bg: types.Color,
@@ -335,6 +349,16 @@ pub const Theme = extern struct {
             .border_width = 1.0,
             .padding_x = 12.0,
             .padding_y = 6.0,
+        };
+    }
+
+    pub fn splitterStyle(self: Theme) SplitterStyle {
+        return .{
+            .bg = self.bg,
+            .bg_hover = types.Color.rgb(80, 80, 90),
+            .bg_drag = self.accent,
+            .handle_w = 8.0,
+            .handle_h = 8.0,
         };
     }
 };

@@ -577,3 +577,12 @@ Pré-release instável: API pode mudar até a beta.
 - `style/style.TabBarStyle` e derivação do tema; `root` exporta
   `tab_bar`; `endTabBar` existe para simetria (sem estado retido).
 - Resto aditivo (acumula p/ MINOR).
+
+### Adicionado — Milestone 57 (Splitter, compatível)
+- `widgets/splitter.beginSplitter`/`endSplitter`: divisor arrastável
+  (`pos: *f32` no chamador); mouse drag com captura, clamp, teclado
+  (setas 8 px, Home/End, Tab); helpers puros `splitterHandleRect`/
+  `splitterClampPos`; `SplitterOrientation` + `SplitterStyle` +
+  `Theme.splitterStyle()`; 2 draws (fundo + handle); `endSplitter`
+  NO-OP documentado; clássicos intactos.
+- Resto aditivo (acumula p/ MINOR).
