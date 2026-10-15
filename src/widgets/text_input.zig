@@ -586,14 +586,24 @@ fn textInputInner(
                         },
                         .left => {
                             if (use_hist) hist.closeGroup();
-                            if (cursor.* > 0) cursor.* = popCodepoint(buffer, cursor.*);
+                            // Ctrl+Left pula para o início da palavra anterior
+                            // (com Shift, estende a seleção — `extend`).
+                            if (k.modifiers.ctrl) {
+                                cursor.* = wordStartBack(buffer, cursor.*);
+                            } else if (cursor.* > 0) {
+                                cursor.* = popCodepoint(buffer, cursor.*);
+                            }
                             if (!extend) {
                                 if (anchor) |a| a.* = cursor.*;
                             }
                         },
                         .right => {
                             if (use_hist) hist.closeGroup();
-                            if (cursor.* < len.*) {
+                            // Ctrl+Right pula para o fim da próxima palavra
+                            // (com Shift, estende a seleção — `extend`).
+                            if (k.modifiers.ctrl) {
+                                cursor.* = wordEndFwd(buffer, len.*, cursor.*);
+                            } else if (cursor.* < len.*) {
                                 const d = metrics_mod.decodeOne(buffer[cursor.*..len.*]) catch {
                                     return error.InvalidArgument;
                                 };
@@ -1377,6 +1387,74 @@ test "textInput Ctrl+Backspace/Delete por palavra" {
     const r3 = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
     try stdt.testing.expect(!r3.changed);
     try stdt.testing.expectEqualStrings("foo ", buf[0..len]);
+    ctx.endFrame();
+}
+
+test "textInput Ctrl+Left/Right navega por palavra" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-wordnav");
+    var buf: [32]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var hist = TextHistory(8, 32){};
+
+    // Digita "foo bar" (cursor no fim, sem seleção).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    for ("foo bar") |ch| try ctx.pushEvent(.{ .text = .{ .codepoint = ch } });
+    _ = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expectEqual(@as(usize, 7), cursor);
+    ctx.endFrame();
+
+    // Ctrl+Left: fim → início de "bar"; navegação não muta.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const r1 = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(!r1.changed);
+    try stdt.testing.expectEqual(@as(usize, 4), cursor);
+    try stdt.testing.expectEqualStrings("foo bar", buf[0..len]);
+    ctx.endFrame();
+
+    // Ctrl+Shift+Left estende a seleção por palavra (âncora fica em 4).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{ .ctrl = true, .shift = true } } });
+    const r2 = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(!r2.changed);
+    try stdt.testing.expectEqual(@as(usize, 0), cursor);
+    try stdt.testing.expect(r2.selected);
+    try stdt.testing.expectEqual(@as(usize, 4), anchor);
+    ctx.endFrame();
+
+    // End limpa a seleção; Ctrl+Right no fim é no-op.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const r3 = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expect(!r3.changed and !r3.selected);
+    try stdt.testing.expectEqual(@as(usize, 7), cursor);
+    ctx.endFrame();
+
+    // Home + Ctrl+Right pula para o fim de "foo", depois de "bar".
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expectEqual(@as(usize, 3), cursor);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try textInputHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
+    try stdt.testing.expectEqual(@as(usize, 7), cursor);
+    try stdt.testing.expectEqualStrings("foo bar", buf[0..len]);
     ctx.endFrame();
 }
 

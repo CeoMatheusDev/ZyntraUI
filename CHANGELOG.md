@@ -514,3 +514,10 @@ Pré-release instável: API pode mudar até a beta.
   (`Up`/`Right` aumentam, `Down`/`Left` diminuem, `Home`/`End`
   saltam); 4 draws espelhados; reaproveita `SliderStyle`.
 - `slider` clássico intacto; resto aditivo (acumula p/ MINOR).
+
+### Adicionado — Milestone 52 (navegação por palavra, compatível)
+- `widgets/text_input`: `Ctrl+Left`/`Ctrl+Right` pulam por palavra
+  (reaproveita `wordStartBack`/`wordEndFwd` da M34; com `Shift`,
+  estende a seleção; sem mutação, fora do histórico). Vale nas
+  3 variantes (código partilhado).
+- Resto aditivo (acumula p/ MINOR).
