@@ -84,6 +84,29 @@ pub const ScrollStyle = extern struct {
     }
 };
 
+/// Estilo de popup flutuante.
+pub const PopupStyle = extern struct {
+    bg: types.Color,
+    border: types.Color,
+    border_width: f32 = 1.0,
+
+    pub fn isValid(self: PopupStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0;
+    }
+};
+
+/// Estilo de barra de progresso.
+pub const ProgressStyle = extern struct {
+    bg: types.Color,
+    fill: types.Color,
+    border: types.Color,
+    border_width: f32 = 1.0,
+
+    pub fn isValid(self: ProgressStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0;
+    }
+};
+
 /// Paleta mínima do tema.
 pub const Theme = extern struct {
     bg: types.Color,
@@ -167,6 +190,23 @@ pub const Theme = extern struct {
             .thumb = self.accent,
         };
     }
+
+    pub fn popupStyle(self: Theme) PopupStyle {
+        return .{
+            .bg = self.surface,
+            .border = self.border,
+            .border_width = 1.0,
+        };
+    }
+
+    pub fn progressStyle(self: Theme) ProgressStyle {
+        return .{
+            .bg = self.surface,
+            .fill = self.accent,
+            .border = self.border,
+            .border_width = 1.0,
+        };
+    }
 };
 
 test "Theme defaults + derivados válidos" {
@@ -180,6 +220,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(light.sliderStyle().isValid());
     try stdt.testing.expect(dark.textInputStyle().isValid());
     try stdt.testing.expect(dark.scrollStyle().isValid());
+    try stdt.testing.expect(dark.popupStyle().isValid());
+    try stdt.testing.expect(dark.progressStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,

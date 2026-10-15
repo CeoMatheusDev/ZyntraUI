@@ -57,6 +57,8 @@ pub const widgets = struct {
     pub const slider = @import("widgets/slider.zig");
     pub const text_input = @import("widgets/text_input.zig");
     pub const scroll = @import("widgets/scroll.zig");
+    pub const popup = @import("widgets/popup.zig");
+    pub const progress = @import("widgets/progress.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -106,6 +108,8 @@ pub const CheckboxStyle = style.style_mod.CheckboxStyle;
 pub const SliderStyle = style.style_mod.SliderStyle;
 pub const TextInputStyle = style.style_mod.TextInputStyle;
 pub const ScrollStyle = style.style_mod.ScrollStyle;
+pub const PopupStyle = style.style_mod.PopupStyle;
+pub const ProgressStyle = style.style_mod.ProgressStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -113,6 +117,7 @@ pub const LabelResult = widgets.label.LabelResult;
 pub const SliderResult = widgets.slider.SliderResult;
 pub const TextInputResult = widgets.text_input.TextInputResult;
 pub const ScrollResult = widgets.scroll.ScrollResult;
+pub const PopupResult = widgets.popup.PopupResult;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -150,4 +155,6 @@ test {
     _ = @import("widgets/slider.zig");
     _ = @import("widgets/text_input.zig");
     _ = @import("widgets/scroll.zig");
+    _ = @import("widgets/popup.zig");
+    _ = @import("widgets/progress.zig");
 }

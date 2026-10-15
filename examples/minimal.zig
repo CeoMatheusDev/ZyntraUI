@@ -6,6 +6,8 @@ const label_mod = @import("zyntra_ui").widgets.label;
 const slider_mod = @import("zyntra_ui").widgets.slider;
 const text_input_mod = @import("zyntra_ui").widgets.text_input;
 const scroll_mod = @import("zyntra_ui").widgets.scroll;
+const popup_mod = @import("zyntra_ui").widgets.popup;
+const progress_mod = @import("zyntra_ui").widgets.progress;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -231,4 +233,24 @@ pub fn main() !void {
         timer.tick(0.25);
         std.debug.print("m11 t={d:.2} v={d:.3}\n", .{ timer.progress(), tw.valueAt(timer.elapsed) });
     }
+
+    // Frame 11: popup aberto + press fora dispensa; progresso a 75%.
+    var open = true;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(700, 550) },
+    });
+    if (open) {
+        const pop = try popup_mod.beginPopup(
+            &ctx,
+            zyntra_ui.Id.fromString("examples/m18:pop"),
+            zyntra_ui.Rect.init(300, 200, 160, 120),
+            theme.popupStyle(),
+        );
+        if (pop.dismissed) open = false;
+        try popup_mod.endPopup(&ctx);
+    }
+    try progress_mod.progress(&ctx, zyntra_ui.Rect.init(16, 560, 200, 16), 0.75, theme.progressStyle());
+    ctx.endFrame();
+    std.debug.print("m18 popup open={} draws={d}\n", .{ open, ctx.drawCommands().len });
 }
