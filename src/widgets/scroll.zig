@@ -1,23 +1,23 @@
 //! ZyntraUI — container com scroll (widgets/scroll).
 //!
-//! Modelo M16 (begin/end imediato, estado no chamador):
+//! Modelo M16+M17 (begin/end imediato, estado no chamador):
 //! - `beginScroll(ctx,id,bounds,scroll_y,content_h,speed,style)`:
-//!   consome `mouse_wheel` com o mouse em `bounds` (`dy > 0` sobe,
-//!   `speed` px por unidade, clamp em [0, max(0, content_h-bounds.h)]);
-//!   emite `clip(bounds)` e retorna a área de conteúdo deslocada.
-//! - Filhos desenhados entre begin/end saem clippados; `endScroll(ctx)`
-//!   emite o clip-clear. SEMPRE parear (mesmo sem filhos).
-//! - `scroll_y: *f32` pertence ao chamador (como slider); normalizado
-//!   (clamp + NaN rejeitado com `InvalidArgument`) a cada chamada.
-//! - Scrollbar (trilha + thumb proporcional) desenhada no `endScroll`
-//!   quando `content_h > bounds.h`; sem conteúdo excedente, sem barra.
-//! `id` não-nulo (futura captura de drag no thumb, M17+).
+//!   `mouse_wheel` com hover (`dy > 0` sobe, `speed` px/unidade);
+//!   press no thumb captura e o arrasto posiciona absoluto;
+//!   tudo clampado em [0, max(0, content_h-bounds.h)].
+//! - Emite `clip(bounds)`; filhos entre begin/end saem clippados;
+//!   `endScroll` limpa o clip e desenha a scrollbar (só com overflow).
+//!   SEMPRE parear (mesmo sem filhos).
+//! - `scroll_y: *f32` do chamador, normalizado a cada chamada
+//!   (NaN rejeitado). Geometria do thumb partilhada hit-test/desenho.
+//! `id` não-nulo (dono da captura de drag).
 
 const std = @import("std");
 const types = @import("../core/types.zig");
 const context_mod = @import("../core/context.zig");
 const id_mod = @import("../core/id.zig");
 const style_mod = @import("../style/style.zig");
+const input = @import("input.zig");
 
 pub const ScrollResult = struct {
     /// Área onde os filhos devem ser posicionados (origem deslocada).
@@ -26,7 +26,21 @@ pub const ScrollResult = struct {
     max_offset: f32 = 0,
     hovered: bool = false,
     scrolled: bool = false,
+    dragging: bool = false,
 };
+
+/// Geometria do thumb (`null` sem overflow). Partilhada entre hit-test
+/// (begin) e desenho (end) para nunca divergirem.
+fn thumbRect(bounds: types.Rect, scroll_y: f32, content_h: f32, style: style_mod.ScrollStyle) ?types.Rect {
+    const max_offset = @max(0, content_h - bounds.h);
+    if (max_offset <= 0) return null;
+    const bw = @min(style.bar_width, bounds.w);
+    const frac = bounds.h / content_h;
+    const thumb_h = @max(bw, bounds.h * frac);
+    const travel = bounds.h - thumb_h;
+    const ty = bounds.y + (if (max_offset > 0) travel * (scroll_y / max_offset) else 0);
+    return .{ .x = bounds.x + bounds.w - bw, .y = ty, .w = bw, .h = thumb_h };
+}
 
 pub fn beginScroll(
     ctx: *context_mod.Context,
@@ -47,6 +61,7 @@ pub fn beginScroll(
     const max_offset = @max(0, content_h - bounds.h);
     scroll_y.* = std.math.clamp(scroll_y.*, 0, max_offset);
     const hovered = if (ctx.mouse_pos) |p| bounds.contains(p) else false;
+    const fm = input.FrameMouse.scan(ctx.pendingEvents());
 
     var res = ScrollResult{
         .content = .{ .x = bounds.x, .y = bounds.y - scroll_y.*, .w = bounds.w, .h = @max(bounds.h, content_h) },
@@ -54,7 +69,34 @@ pub fn beginScroll(
         .max_offset = max_offset,
         .hovered = hovered,
     };
-    if (hovered) {
+
+    // Drag no thumb: press captura; posição absoluta do mouse dita o
+    // offset (pulo direto, não relativo ao grab). Release encerra.
+    const thumb = thumbRect(bounds, scroll_y.*, content_h, style);
+    if (thumb) |tr| {
+        if (ctx.press_owner == null and fm.pressed_pos != null and tr.contains(fm.pressed_pos.?)) {
+            ctx.press_owner = id;
+        }
+    }
+    if (ctx.press_owner == id) {
+        res.dragging = ctx.mouse_down_left;
+        if (thumbRect(bounds, scroll_y.*, content_h, style)) |tr| {
+            // Recomputa a cada chamada (thumb move com o offset).
+            const travel = bounds.h - tr.h;
+            if (travel > 0) {
+                if (ctx.mouse_pos) |p| {
+                    const t = std.math.clamp((p.y - bounds.y - tr.h / 2) / travel, 0, 1);
+                    scroll_y.* = t * max_offset;
+                }
+            }
+        }
+        if (fm.released_pos != null) {
+            ctx.press_owner = null;
+            res.dragging = false;
+        }
+        res.offset = scroll_y.*;
+        res.content.y = bounds.y - scroll_y.*;
+    } else if (hovered) {
         for (ctx.pendingEvents()) |ev| {
             if (ev != .mouse_wheel) continue;
             scroll_y.* = std.math.clamp(scroll_y.* - ev.mouse_wheel.dy * speed, 0, max_offset);
@@ -85,19 +127,14 @@ pub fn endScroll(
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
-    const max_offset = @max(0, content_h - bounds.h);
-    if (max_offset <= 0) return;
-    const bw = @min(style.bar_width, bounds.w);
+    const tr = thumbRect(bounds, scroll_y, content_h, style) orelse return;
+    const bw = tr.w;
     const track = types.Rect{ .x = bounds.x + bounds.w - bw, .y = bounds.y, .w = bw, .h = bounds.h };
-    const frac = bounds.h / content_h;
-    const thumb_h = @max(bw, bounds.h * frac);
-    const travel = bounds.h - thumb_h;
-    const ty = bounds.y + (if (max_offset > 0) travel * (scroll_y / max_offset) else 0);
     ctx.draw.rectFilled(ctx.allocator, track, style.track) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
-    ctx.draw.rectFilled(ctx.allocator, .{ .x = track.x, .y = ty, .w = bw, .h = thumb_h }, style.thumb) catch |err| switch (err) {
+    ctx.draw.rectFilled(ctx.allocator, tr, style.thumb) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
@@ -163,5 +200,59 @@ test "scroll roda, clampa e emite clip" {
     try stdt.testing.expectError(error.InvalidArgument, beginScroll(&ctx, id, bounds, &nan, 300, 24, style));
     try stdt.testing.expectError(error.InvalidArgument, beginScroll(&ctx, id, bounds, &off, -1, 24, style));
     try stdt.testing.expectError(error.InvalidArgument, beginScroll(&ctx, id, bounds, &off, 300, 0, style));
+    ctx.endFrame();
+}
+
+test "scroll drag no thumb posiciona absoluto" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().scrollStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    // bounds 200×100, conteúdo 300: thumb h=33.33 em y=0..33.33, x=192..200.
+    const bounds = types.Rect.init(0, 0, 200, 100);
+    const id = id_mod.Id.fromString("test:sc-drag");
+    var off: f32 = 0;
+
+    // Press no thumb captura (sem mover ainda).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(196, 10) },
+    });
+    const r0 = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expect(r0.dragging);
+    try stdt.testing.expect(ctx.press_owner == id);
+    try endScroll(&ctx, bounds, off, 300, style);
+    ctx.endFrame();
+
+    // Move com botão pressionado: y=60 → t=(60-16.67)/66.67=0.65 → 130.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(196, 60) } });
+    const r1 = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expect(r1.dragging);
+    try stdt.testing.expectApproxEqAbs(@as(f32, 130), off, 0.01);
+    try endScroll(&ctx, bounds, off, 300, style);
+    ctx.endFrame();
+
+    // Release encerra a captura.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(196, 60) },
+    });
+    const r2 = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expect(!r2.dragging);
+    try stdt.testing.expect(ctx.press_owner == null);
+    try endScroll(&ctx, bounds, off, 300, style);
+    ctx.endFrame();
+
+    // Press na trilha fora do thumb não captura.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(196, 95) },
+    });
+    const r3 = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expect(!r3.dragging);
+    try stdt.testing.expect(ctx.press_owner == null);
+    try endScroll(&ctx, bounds, off, 300, style);
     ctx.endFrame();
 }

@@ -203,3 +203,9 @@ Pré-release instável: API pode mudar até a beta.
   consumidor de `mouse_wheel` e `DrawCommand.clip`.
 - `style/style`: `ScrollStyle` + `Theme.scrollStyle()`.
 - Exemplo com wheel → offset 96; resto aditivo (rumo à 1.3.0).
+
+### Alterado — Milestone 17 (drag no thumb, compatível)
+- `widgets/scroll`: press no thumb captura (`press_owner`), arrasto
+  posiciona absoluto (pulo, não relativo), release encerra; geometria do
+  thumb partilhada entre hit-test e desenho (`thumbRect`); wheel segue
+  quando sem drag. `ScrollResult.dragging`. Resto aditivo (rumo à 1.3.0).

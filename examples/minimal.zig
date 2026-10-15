@@ -109,6 +109,12 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print("m8 slider value={d} dragging={}\n", .{ volume, sld.dragging });
 
+    // Solta o botão sondando o slider (captura órfã bloqueia outros).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = false, .pos = zyntra_ui.Vec2.init(sld_rect.x + 180, sld_rect.y + 15) } });
+    _ = try slider_mod.slider(&ctx, zyntra_ui.Id.fromString("examples/m8:sld"), sld_rect, &volume, 0, 100, sld_style);
+    ctx.endFrame();
+
     // Frame 4: click no input + digita "Oi" + Enter.
     var name_cursor: usize = 0;
     ctx.beginFrame();
@@ -185,6 +191,37 @@ pub fn main() !void {
     try scroll_mod.endScroll(&ctx, sc_bounds, scrolled, 300, sc_style);
     ctx.endFrame();
     std.debug.print("m16 scroll offset={d} max={d} draws={d}\n", .{ scrolled, sc.max_offset, ctx.drawCommands().len });
+
+    // Frame 10: press no thumb + arrasto (thumb em y≈432..465).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(496, 440) },
+    });
+    _ = try scroll_mod.beginScroll(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m16:sc"),
+        sc_bounds,
+        &scrolled,
+        300,
+        24,
+        sc_style,
+    );
+    try scroll_mod.endScroll(&ctx, sc_bounds, scrolled, 300, sc_style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = zyntra_ui.Vec2.init(496, 460) } });
+    const scd = try scroll_mod.beginScroll(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m16:sc"),
+        sc_bounds,
+        &scrolled,
+        300,
+        24,
+        sc_style,
+    );
+    try scroll_mod.endScroll(&ctx, sc_bounds, scrolled, 300, sc_style);
+    ctx.endFrame();
+    std.debug.print("m17 drag offset={d} dragging={}\n", .{ scrolled, scd.dragging });
 
     // Frame 10: easing dirige um fade (0→1 em 1s, amostrado).
     const tw = try zyntra_ui.Tween.init(0, 1, 1.0, .quad_out);
