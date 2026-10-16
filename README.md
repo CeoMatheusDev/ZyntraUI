@@ -98,7 +98,9 @@ ctx.endFrame();
 ```
 
 Run `zig build run-example` for the full demo (widgets, layout, text,
-animations). C consumers: see `src/c-abi/zyntra.h` and `docs/C_ABI.md`.
+animations). Run `zig build run-app` for the integrated mini-app
+(toolbar + tabbar + table + statusbar composed across shared frames).
+C consumers: see `src/c-abi/zyntra.h` and `docs/C_ABI.md`.
 
 ## Contributing
 

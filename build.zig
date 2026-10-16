@@ -41,6 +41,26 @@ pub fn build(b: *std.Build) void {
     run_example.dependOn(&run_example_cmd.step);
     run_example_cmd.step.dependOn(b.getInstallStep());
 
+    // Exemplo integrado executável (M69: mini-app compondo toolbar,
+    // tabbar, table e statusbar em frames compartilhados).
+    const app_exe = b.addExecutable(.{
+        .name = "zyntra-app",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/app.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zyntra_ui", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(app_exe);
+
+    const run_app = b.step("run-app", "Executa o exemplo integrado (mini-app)");
+    const run_app_cmd = b.addRunArtifact(app_exe);
+    run_app.dependOn(&run_app_cmd.step);
+    run_app_cmd.step.dependOn(b.getInstallStep());
+
     // Benchmark da pipeline por frame (medir por fora; ver examples/bench.zig).
     const bench_exe = b.addExecutable(.{
         .name = "zyntra-bench",

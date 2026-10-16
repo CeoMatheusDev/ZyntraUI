@@ -5,6 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `examples/app.zig` + `zig build run-app` (M69): mini-app de tarefas
+  integrando Toolbar + TabBar + Table + StatusBar (com button/label/
+  separator) em frames compartilhados, com estado todo no chamador.
+  Demonstra adicionar via toolbar, filtrar por aba, selecionar linha,
+  alternar estado, filtro vazio com placeholder (sem tabela vazia) e
+  resumo na statusbar. Só APIs públicas, sem framework de aplicação,
+  sem renderer/GPU, sem dependências novas.
+
 ## [1.21.0] - 2026-10-16
 
 MINOR estável, 100% compatível: chrome de aplicação por composição.
