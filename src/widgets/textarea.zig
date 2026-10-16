@@ -157,11 +157,16 @@ fn insertBytes(buf: []u8, len: *usize, at: usize, bytes: []const u8) bool {
 }
 
 /// Linha sob `y` (clampada a `[0, nlines)`); `rel <= 0` → primeira.
+/// Nunca converte `f32 → usize` fora da faixa: `y` finito extremo
+/// (ex.: arrasto longe da área) satura na última linha em vez de
+/// estourar `@intFromFloat`.
 fn lineAtY(y: f32, top: f32, line_h: f32, nlines: usize) usize {
     if (line_h <= 0 or nlines == 0) return 0;
     const rel = y - top;
-    if (rel <= 0) return 0;
-    const idx: usize = @intFromFloat(@floor(rel / line_h));
+    if (!std.math.isFinite(rel) or rel <= 0) return 0;
+    const f = @floor(rel / line_h);
+    if (f >= @as(f32, @floatFromInt(nlines))) return nlines - 1;
+    const idx: usize = @intFromFloat(f);
     return @min(idx, nlines - 1);
 }
 
@@ -762,5 +767,239 @@ test "TextArea multibyte: Backspace/Delete por codepoint" {
     try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{} } });
     _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
     try stdt.testing.expectEqualStrings("A", buf[0..len]);
+    ctx.endFrame();
+}
+
+test "TextArea buffer cheio e capacidade zero: overflow sem corrupção" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 120, 40);
+    const id = id_mod.Id.fromString("test:ta-full");
+    var buf: [3]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+
+    // Enche o buffer "abc".
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'a' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'b' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'c' } });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqualStrings("abc", buf[0..len]);
+    ctx.endFrame();
+
+    // Digitar além da capacidade: overflow, estado intacto.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'd' } });
+    const rf = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(rf.overflowed and !rf.changed);
+    try stdt.testing.expectEqualStrings("abc", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 3), cursor);
+    // Enter também não cabe.
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    const re = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(re.overflowed and !re.changed);
+    try stdt.testing.expectEqualStrings("abc", buf[0..len]);
+    ctx.endFrame();
+
+    // Backspace libera espaço e a inserção volta a funcionar.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'z' } });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqualStrings("abz", buf[0..len]);
+    ctx.endFrame();
+
+    // Capacidade zero: qualquer inserção é overflow.
+    var zlen: usize = 0;
+    var zcur: usize = 0;
+    var zanch: usize = 0;
+    var zscr: f32 = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'x' } });
+    const rz = try textArea(&ctx, id, bounds, &.{}, &zlen, &zcur, &zanch, &zscr, font, style);
+    try stdt.testing.expect(rz.overflowed and zlen == 0);
+    ctx.endFrame();
+}
+
+test "TextArea coluna clampa em linha curta; Delete sobre '\\n' junta" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 60);
+    const id = id_mod.Id.fromString("test:ta-clamp");
+    var buf: [32]u8 = undefined;
+    const text = "longer\nl3";
+    @memcpy(buf[0..text.len], text);
+    var len: usize = text.len;
+    var cursor: usize = 6; // fim de "longer"
+    var anchor: usize = 6;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    ctx.endFrame();
+
+    // Down para "l3" (col 2 < 6): clampa na coluna 2 → offset 7 + 2 = 9.
+    cursor = 6;
+    anchor = 6;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqual(@as(usize, 9), cursor);
+    ctx.endFrame();
+
+    // Up de volta: coluna 2 em "longer" → offset 2.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .up, .pressed = true, .modifiers = .{} } });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    ctx.endFrame();
+
+    // Delete sobre o '\n' (offset 6) junta as linhas.
+    cursor = 6;
+    anchor = 6;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .delete, .pressed = true, .modifiers = .{} } });
+    const rd = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(rd.changed);
+    try stdt.testing.expectEqualStrings("longerl3", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 8), len);
+    ctx.endFrame();
+}
+
+test "TextArea seleção multilinha apaga faixa; scroll clampa nos limites" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 60, 20); // view pequena → rolagem
+    const id = id_mod.Id.fromString("test:ta-mlsel");
+    var buf: [32]u8 = undefined;
+    const text = "aa\nbb\ncc\ndd\nee";
+    @memcpy(buf[0..text.len], text);
+    var len: usize = text.len;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+
+    // Rolagem: acima do máximo e abaixo do zero são clampadas.
+    scroll = 9999;
+    ctx.beginFrame();
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectApproxEqAbs(textAreaMaxScroll(&buf, len, bounds.h - 8, font), scroll, 0.001);
+    ctx.endFrame();
+    scroll = -5;
+    ctx.beginFrame();
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqual(@as(f32, 0), scroll);
+    ctx.endFrame();
+
+    // Foca e seleciona 2 linhas (offset 0 → início da 2ª linha = 6).
+    scroll = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{ .shift = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{ .shift = true } } });
+    const rs = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(rs.selected and anchor == 0 and cursor == 6);
+    ctx.endFrame();
+
+    // Backspace apaga a faixa multilinha → resta "cc\ndd\nee".
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{} } });
+    const rd = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(rd.changed and !rd.selected);
+    try stdt.testing.expectEqualStrings("cc\ndd\nee", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 0), cursor);
+    ctx.endFrame();
+
+    // Contratos inválidos não corrompem o estado (len/cursor intactos).
+    ctx.beginFrame();
+    var bad_cur: usize = len + 1;
+    try stdt.testing.expectError(error.InvalidArgument, textArea(&ctx, id, bounds, &buf, &len, &bad_cur, &anchor, &scroll, font, style));
+    var bad_anchor: usize = len + 1;
+    try stdt.testing.expectError(error.InvalidArgument, textArea(&ctx, id, bounds, &buf, &len, &cursor, &bad_anchor, &scroll, font, style));
+    var bad_scroll: f32 = std.math.nan(f32);
+    try stdt.testing.expectError(error.InvalidArgument, textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &bad_scroll, font, style));
+    try stdt.testing.expectEqualStrings("cc\ndd\nee", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 0), cursor);
+    ctx.endFrame();
+}
+
+test "TextArea arrasto fora da área clampa; y extremo não estoura" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 60, 20);
+    const id = id_mod.Id.fromString("test:ta-drag");
+    var buf: [32]u8 = undefined;
+    const text = "l0\nl1\nl2\nl3";
+    @memcpy(buf[0..text.len], text);
+    var len: usize = text.len;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+
+    // Press no topo (âncora na linha 0).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqual(@as(usize, 0), anchor);
+    ctx.endFrame();
+
+    // Arrasta bem abaixo da área visível: cursor clampa na última linha.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(5, 1000) } });
+    const rd = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(rd.selected);
+    try stdt.testing.expect(cursor <= len);
+    try stdt.testing.expectEqual(@as(usize, 9), cursor); // início da linha 3
+    ctx.endFrame();
+
+    // y finito absurdo (1e30): não deve estourar @intFromFloat; clampa.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(5, 1e30) } });
+    const rx = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(rx.selected and cursor <= len);
+    try stdt.testing.expectEqual(@as(usize, 9), cursor);
+    ctx.endFrame();
+
+    // Arrasta acima do topo: cursor clampa na primeira linha (offset 0).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(5, -1000) } });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqual(@as(usize, 0), cursor);
     ctx.endFrame();
 }
