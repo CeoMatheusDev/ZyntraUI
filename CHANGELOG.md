@@ -22,12 +22,23 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   README `Getting started` mostra a fiação do módulo no `build.zig`
   do consumidor (`b.dependency` + `addImport`), verificada de verdade
   contra o tarball publicado.
-- `widgets/table`: endurecimento de contratos (sem mudar API válida) —
-  `scroll_offset` e `bounds` não-finitos agora retornam `InvalidArgument`
-  na entrada em vez de coerção silenciosa/erro interno; cobertura nova:
-  tabela de 1 linha, teclado nos limites, clamp de scroll mínimo/máximo,
-  wheel finito extremo, seleção após encolher linhas, área pequena com
-  clip e click na última linha.
+
+## [1.21.1] - 2026-10-16
+
+PATCH estável, 100% compatível: correções de comportamento inválido.
+
+- `widgets/tree_view` (M72): nós aninhados desenhavam o rótulo errado
+  (índice relativo ao pai aplicado ao array da raiz) e podiam ler fora
+  dos limites quando o índice do filho excedia o tamanho da raiz;
+  alternar expansão por (profundidade, índice) podia atingir o nó
+  errado sob outro pai. `FlatNode` agora guarda ponteiro direto ao
+  item: rótulo sempre do próprio nó, toggle sempre exato. API pública
+  inalterada. Afeta todas as versões com TreeView (desde 1.16.0).
+- `widgets/table` (M71): `scroll_offset` e `bounds` não-finitos agora
+  retornam `InvalidArgument` na entrada em vez de coerção silenciosa/
+  erro interno; cobertura nova (1 linha, limites, wheel extremo,
+  encolher linhas, área pequena, última linha).
+- 129/129 testes, integração C, CI verde.
 
 ## [1.21.0] - 2026-10-16
 
