@@ -292,6 +292,20 @@ pub const ProgressStyle = extern struct {
     }
 };
 
+/// Estilo de separador estático (M66).
+pub const SeparatorStyle = extern struct {
+    color: types.Color,
+    /// Espessura da linha em px (> 0).
+    thickness: f32 = 1.0,
+    /// Vão (px) entre o rótulo e cada segmento da linha (>= 0).
+    label_gap: f32 = 6.0,
+
+    pub fn isValid(self: SeparatorStyle) bool {
+        return std.math.isFinite(self.thickness) and self.thickness > 0 and
+            std.math.isFinite(self.label_gap) and self.label_gap >= 0;
+    }
+};
+
 /// Paleta mínima do tema.
 pub const Theme = extern struct {
     bg: types.Color,
@@ -413,6 +427,14 @@ pub const Theme = extern struct {
             .fill = self.accent,
             .border = self.border,
             .border_width = 1.0,
+        };
+    }
+
+    pub fn separatorStyle(self: Theme) SeparatorStyle {
+        return .{
+            .color = self.border,
+            .thickness = 1.0,
+            .label_gap = 6.0,
         };
     }
 
@@ -548,6 +570,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(dark.spinnerStyle().isValid());
     try stdt.testing.expect(light.spinnerStyle().isValid());
     try stdt.testing.expect(dark.progressStyle().isValid());
+    try stdt.testing.expect(dark.separatorStyle().isValid());
+    try stdt.testing.expect(light.separatorStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,

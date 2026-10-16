@@ -74,6 +74,7 @@ pub const widgets = struct {
     pub const @"switch" = @import("widgets/switch.zig");
     pub const spinner = @import("widgets/spinner.zig");
     pub const textarea = @import("widgets/textarea.zig");
+    pub const separator = @import("widgets/separator.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -135,6 +136,8 @@ pub const TreeViewStyle = style.style_mod.TreeViewStyle;
 pub const TableStyle = style.style_mod.TableStyle;
 pub const SwitchStyle = style.style_mod.SwitchStyle;
 pub const SpinnerStyle = style.style_mod.SpinnerStyle;
+pub const SeparatorStyle = style.style_mod.SeparatorStyle;
+pub const SeparatorOrientation = widgets.separator.SeparatorOrientation;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -216,4 +219,5 @@ test {
     _ = @import("widgets/switch.zig");
     _ = @import("widgets/spinner.zig");
     _ = @import("widgets/textarea.zig");
+    _ = @import("widgets/separator.zig");
 }

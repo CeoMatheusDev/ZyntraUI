@@ -16,6 +16,7 @@ const combo_mod = @import("zyntra_ui").widgets.combo;
 const switch_mod = @import("zyntra_ui").widgets.@"switch";
 const spinner_mod = @import("zyntra_ui").widgets.spinner;
 const textarea_mod = @import("zyntra_ui").widgets.textarea;
+const separator_mod = @import("zyntra_ui").widgets.separator;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -616,4 +617,14 @@ pub fn main() !void {
     const tares = try textarea_mod.textArea(&ctx, zyntra_ui.Id.fromString("examples/m65:ta"), ta_bounds, &ta_buf, &ta_len, &ta_cursor, &ta_anchor, &ta_scroll, font, ta_style);
     ctx.endFrame();
     std.debug.print("m65 textarea text=\"{s}\" lines={d} focused={}\n", .{ ta_buf[0..ta_len], textarea_mod.textAreaLineCount(&ta_buf, ta_len), tares.focused });
+
+    // Separator (M66): divisor estático (horizontal/vertical + rótulo).
+    const sep_style = theme.separatorStyle();
+    ctx.beginFrame();
+    try separator_mod.separator(&ctx, zyntra_ui.Rect.init(16, 700, 240, 1), .horizontal, sep_style);
+    try separator_mod.separatorLabeled(&ctx, zyntra_ui.Rect.init(16, 716, 240, 16), .horizontal, "OU", font, theme.text, sep_style);
+    try separator_mod.separator(&ctx, zyntra_ui.Rect.init(290, 700, 1, 32), .vertical, sep_style);
+    const sep_draws = ctx.drawCommands().len;
+    ctx.endFrame();
+    std.debug.print("m66 separator draws={d}\n", .{sep_draws});
 }

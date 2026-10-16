@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `widgets/separator` (M66): divisor estático (display puro, sem `id`/
+  estado). `separator` (linha horizontal/vertical, 1 comando) e
+  `separatorLabeled` (linha horizontal com rótulo centralizado: 2
+  segmentos + 1 texto; rótulo vazio degrada para linha simples).
+  `SeparatorStyle` + `Theme.separatorStyle()`; `separatorLineRect` puro
+  para layout.
+
 ## [1.19.0] - 2026-10-15
 
 MINOR estável, 100% compatível: widgets de entrada e feedback.
