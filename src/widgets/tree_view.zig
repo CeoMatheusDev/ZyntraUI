@@ -37,20 +37,23 @@ pub const TreeViewResult = struct {
     toggled_index: ?usize = null,
 };
 
-/// Nó achatado para renderização (índice no array original + profundidade).
+/// Nó achatado para renderização (ponteiro direto ao item + profundidade).
+/// Ponteiro em vez de índice: `item_index` era relativo ao pai, então
+/// indexar a raiz com ele lia o rótulo errado em profundidade > 0 e
+/// estourava quando o índice do filho excedia o tamanho da raiz (M72).
 const FlatNode = struct {
-    item_index: usize,
+    item: *TreeItem,
     depth: usize,
     has_children: bool,
 };
 
 /// Achata a árvore em lista de nós visíveis (respeita `expanded`).
-fn treeViewFlatten(items: []const TreeItem, out: *std.ArrayList(FlatNode), depth: usize, allocator: std.mem.Allocator) void {
+fn treeViewFlatten(items: []TreeItem, out: *std.ArrayList(FlatNode), depth: usize, allocator: std.mem.Allocator) void {
     var i: usize = 0;
     while (i < items.len) : (i += 1) {
         const item = items[i];
         out.append(allocator, FlatNode{
-            .item_index = i,
+            .item = &items[i],
             .depth = depth,
             .has_children = item.children.len > 0,
         }) catch return;
@@ -84,37 +87,6 @@ pub fn treeViewMaxScroll(items: []TreeItem, viewport_h: f32, style: style_mod.Tr
     return @max(0, content - viewport_h);
 }
 
-/// Alterna expansão do nó no índice linear achatado.
-fn treeViewToggleExpanded(items: []TreeItem, flat: []FlatNode, flat_idx: usize) void {
-    if (flat_idx >= flat.len) return;
-    const fn_idx = flat[flat_idx].item_index;
-    // Navega até o nó pai para mutar `expanded`
-    // Nota: `items` é a raiz; precisamos achar o nó correto na hierarquia.
-    // Como `item_index` é relativo ao seu pai, precisamos de lógica recursiva.
-    // Simplificação: assumimos que o índice achatado mapeia recursivamente.
-    // Implementação recursiva de toggle:
-    _ = treeViewToggleExpandedRec(items, flat[flat_idx].depth, fn_idx, 0);
-}
-
-fn treeViewToggleExpandedRec(items: []TreeItem, target_depth: usize, target_idx: usize, current_depth: usize) bool {
-    var i: usize = 0;
-    while (i < items.len) : (i += 1) {
-        if (current_depth == target_depth and i == target_idx) {
-            if (items[i].children.len > 0) {
-                items[i].expanded = !items[i].expanded;
-                return true;
-            }
-            return false;
-        }
-        if (items[i].expanded and items[i].children.len > 0) {
-            if (treeViewToggleExpandedRec(items[i].children, target_depth, target_idx, current_depth + 1)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 pub fn beginTreeView(
     ctx: *context_mod.Context,
     id: id_mod.Id,
@@ -126,8 +98,14 @@ pub fn beginTreeView(
 ) context_mod.ContextError!TreeViewResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (items.len == 0) return error.InvalidArgument;
+    if (!std.math.isFinite(scroll_offset.*)) return error.InvalidArgument;
 
     // Achatamento da árvore visível
     var flat = std.ArrayList(FlatNode).empty;
@@ -164,8 +142,9 @@ pub fn beginTreeView(
             const expander_x = bounds.x + @as(f32, @floatFromInt(flat_node.depth)) * style.indent;
             const expander_rect = types.Rect.init(expander_x, bounds.y + @as(f32, @floatFromInt(idx)) * style.item_height - scroll_offset.*, style.expander_size, style.expander_size);
             if (flat_node.has_children and expander_rect.contains(p)) {
-                // Alterna expansão recursivamente
-                _ = treeViewToggleExpandedRec(items, flat_node.depth, flat_node.item_index, 0);
+                // Alterna expansão direto no item (ponteiro exato; sem
+                // busca ambígua por (profundidade, índice do pai)).
+                flat_node.item.expanded = !flat_node.item.expanded;
                 res.toggled_index = idx;
             } else {
                 res.changed = selected.* != idx;
@@ -229,7 +208,7 @@ pub fn beginTreeView(
                     if (selected.* < flat.items.len) {
                         const flat_node = flat.items[selected.*];
                         if (flat_node.has_children) {
-                            _ = treeViewToggleExpandedRec(items, flat_node.depth, flat_node.item_index, 0);
+                            flat_node.item.expanded = !flat_node.item.expanded;
                         } else if (flat_node.depth > 0) {
                             // Vai para o pai (simplificação: primeiro ancestral visível acima)
                             var p: usize = selected.*;
@@ -246,7 +225,7 @@ pub fn beginTreeView(
                     if (selected.* < flat.items.len) {
                         const flat_node = flat.items[selected.*];
                         if (flat_node.has_children) {
-                            _ = treeViewToggleExpandedRec(items, flat_node.depth, flat_node.item_index, 0);
+                            flat_node.item.expanded = !flat_node.item.expanded;
                         }
                     }
                 },
@@ -255,7 +234,7 @@ pub fn beginTreeView(
                     if (selected.* < flat.items.len) {
                         const flat_node = flat.items[selected.*];
                         if (flat_node.has_children) {
-                            _ = treeViewToggleExpandedRec(items, flat_node.depth, flat_node.item_index, 0);
+                            flat_node.item.expanded = !flat_node.item.expanded;
                         }
                     }
                 },
@@ -335,7 +314,7 @@ pub fn beginTreeView(
             .{ .x = text_x, .y = y + (style.item_height - font.lineHeight()) / 2 },
             text_color,
             font,
-            items[flat_node.item_index].label, // Aproximação
+            flat_node.item.label,
         ) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             error.InvalidCommand => return error.InvalidCommand,
@@ -457,6 +436,151 @@ test "TreeView seleciona, navega, expande/colapsa" {
     try stdt.testing.expectError(error.InvalidArgument, beginTreeView(&ctx, id, bounds, &[_]TreeItem{}, &selected, &scroll, style));
     const bad_style = style_mod.TreeViewStyle{ .item_height = 0, .bg = .{}, .bg_selected = .{}, .bg_hover = .{}, .text = .{}, .text_selected = .{}, .border = .{}, .border_width = 1, .indent = 16, .expander_size = 12 };
     try stdt.testing.expectError(error.InvalidArgument, beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, bad_style));
+    ctx.endFrame();
+}
+
+test "TreeView rótulos aninhados e toggle exato por ponteiro (M72)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().treeViewStyle(); // item 24, indent 16, exp 12
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 300, 200);
+    const id = id_mod.Id.fromString("test:tree-nested");
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+
+    // Raiz com 1 item e 4 filhos: índices 1..3 dos filhos excedem
+    // o comprimento da raiz (1) — indexação errada estoura aqui.
+    var kids = [_]TreeItem{
+        .{ .label = "a0", .children = &[_]TreeItem{}, .expanded = false },
+        .{ .label = "a1", .children = &[_]TreeItem{}, .expanded = false },
+        .{ .label = "a2", .children = &[_]TreeItem{}, .expanded = false },
+        .{ .label = "a3", .children = &[_]TreeItem{}, .expanded = false },
+    };
+    var items = [_]TreeItem{
+        .{ .label = "A", .children = &kids, .expanded = true },
+    };
+
+    ctx.beginFrame();
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    // Ordem dos textos desenhados: A, a0, a1, a2, a3 (rótulo do próprio nó).
+    var got = [_][]const u8{ "", "", "", "", "" };
+    var n: usize = 0;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .text and n < got.len) {
+            got[n] = ctx.draw.textOf(cmd);
+            n += 1;
+        }
+    }
+    try stdt.testing.expectEqual(@as(usize, 5), n);
+    try stdt.testing.expectEqualStrings("A", got[0]);
+    try stdt.testing.expectEqualStrings("a0", got[1]);
+    try stdt.testing.expectEqualStrings("a1", got[2]);
+    try stdt.testing.expectEqualStrings("a2", got[3]);
+    try stdt.testing.expectEqualStrings("a3", got[4]);
+    ctx.endFrame();
+
+    // Toggle exato: dois pais com filhos no mesmo (depth, índice).
+    // Clicar no expansor de b1 deve alternar b1, nunca a1.
+    var ax = [_]TreeItem{.{ .label = "x", .children = &[_]TreeItem{}, .expanded = false }};
+    var by = [_]TreeItem{.{ .label = "y", .children = &[_]TreeItem{}, .expanded = false }};
+    var ka = [_]TreeItem{
+        .{ .label = "a0", .children = &[_]TreeItem{}, .expanded = false },
+        .{ .label = "a1", .children = &ax, .expanded = true },
+    };
+    var kb = [_]TreeItem{
+        .{ .label = "b0", .children = &[_]TreeItem{}, .expanded = false },
+        .{ .label = "b1", .children = &by, .expanded = true },
+    };
+    var items2 = [_]TreeItem{
+        .{ .label = "A", .children = &ka, .expanded = true },
+        .{ .label = "B", .children = &kb, .expanded = true },
+    };
+    // Flat: 0:A 1:a0 2:a1 3:x 4:B 5:b0 6:b1 7:y — expansor de b1 (flat 6):
+    // x=16, y=6*24=144; click em (20,148).
+    var sel2: usize = 0;
+    var scr2: f32 = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(20, 148) },
+    });
+    const rt = try beginTreeView(&ctx, id, bounds, &items2, &sel2, &scr2, style);
+    try stdt.testing.expectEqual(@as(usize, 6), rt.toggled_index orelse 999);
+    try stdt.testing.expect(!kb[1].expanded); // b1 colapsou
+    try stdt.testing.expect(ka[1].expanded); // a1 intacto
+    ctx.endFrame();
+}
+
+test "TreeView nó único, limites de scroll/wheel e clip pequeno" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().treeViewStyle(); // item 24
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:tree-limits");
+    var solo = [_]TreeItem{
+        .{ .label = "Só", .children = &[_]TreeItem{}, .expanded = false },
+    };
+    var selected: usize = 5; // além do único visível → clampa
+    var scroll: f32 = 9999; // além do máximo (0) → clampa
+
+    // Árvore de 1 nó: click seleciona, scroll zera, sem crash.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(50, 12) },
+    });
+    const r0 = try beginTreeView(&ctx, id, types.Rect.init(0, 0, 300, 200), &solo, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 0), selected);
+    try stdt.testing.expectEqual(@as(usize, 0), r0.selected);
+    try stdt.testing.expectEqual(@as(f32, 0), scroll);
+    ctx.endFrame();
+
+    // Teclado nos limites com 1 nó: tudo no-op.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .up, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    const r1 = try beginTreeView(&ctx, id, types.Rect.init(0, 0, 300, 200), &solo, &selected, &scroll, style);
+    try stdt.testing.expect(!r1.changed and selected == 0);
+    ctx.endFrame();
+
+    // Wheel finito extremo: clampa sem pânico (mínimo e máximo).
+    var many = [_]TreeItem{
+        .{ .label = "a", .children = &[_]TreeItem{}, .expanded = false },
+        .{ .label = "b", .children = &[_]TreeItem{}, .expanded = false },
+        .{ .label = "c", .children = &[_]TreeItem{}, .expanded = false },
+        .{ .label = "d", .children = &[_]TreeItem{}, .expanded = false },
+        .{ .label = "e", .children = &[_]TreeItem{}, .expanded = false },
+        .{ .label = "f", .children = &[_]TreeItem{}, .expanded = false },
+    };
+    var sel2: usize = 0;
+    var scr2: f32 = 0;
+    const small = types.Rect.init(0, 0, 300, 48); // máx = 6*24-48 = 96
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = -1e30, .pos = types.Vec2.init(150, 24) } });
+    const r2 = try beginTreeView(&ctx, id, small, &many, &sel2, &scr2, style);
+    try stdt.testing.expectEqual(@as(f32, 96), scr2);
+    try stdt.testing.expectEqual(@as(f32, 96), r2.scroll_offset);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = 1e30, .pos = types.Vec2.init(150, 24) } });
+    _ = try beginTreeView(&ctx, id, small, &many, &sel2, &scr2, style);
+    try stdt.testing.expectEqual(@as(f32, 0), scr2);
+    ctx.endFrame();
+
+    // Área pequena: clip pareado presente; scroll/bounds NaN rejeitados.
+    ctx.beginFrame();
+    _ = try beginTreeView(&ctx, id, types.Rect.init(0, 0, 40, 26), &many, &sel2, &scr2, style);
+    var saw_clip = false;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .clip and !cmd.clip.null_rect) saw_clip = true;
+    }
+    try stdt.testing.expect(saw_clip);
+    var nan_scroll: f32 = std.math.nan(f32);
+    try stdt.testing.expectError(error.InvalidArgument, beginTreeView(&ctx, id, small, &many, &sel2, &nan_scroll, style));
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 48);
+    try stdt.testing.expectError(error.InvalidArgument, beginTreeView(&ctx, id, nan_bounds, &many, &sel2, &scr2, style));
     ctx.endFrame();
 }
 
