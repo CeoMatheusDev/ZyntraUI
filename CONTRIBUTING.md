@@ -13,7 +13,7 @@
 ```bash
 zig build
 zig build test
-zig build examples  # se aplicável
+zig build run-example  # se aplicável
 zig fmt --check .
 ```
 

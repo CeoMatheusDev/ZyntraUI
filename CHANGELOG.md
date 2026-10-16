@@ -51,6 +51,9 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `InvalidArgument` na entrada; cobertura nova da máquina de estado:
   texto malformado sem comando parcial, contador pré-saturado sem
   wrap, caixa clampada ao viewport.
+- `widgets/radio` (M80): `bounds` não-finitos agora retornam
+  `InvalidArgument` na entrada; cobertura nova: tecla `End`, teto de
+  256 opções, estilo inválido.
 - `README.md` reescrito (M76): estrutura profissional (princípios,
   tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
   sem inventar APIs; mesma tag de fetch e instruções verificadas.

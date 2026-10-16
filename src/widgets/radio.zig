@@ -38,6 +38,11 @@ pub fn radio(
 ) context_mod.ContextError!RadioResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (options.len == 0 or options.len > 256) return error.InvalidArgument;
     if (selected.* >= options.len) return error.InvalidArgument;
@@ -180,5 +185,44 @@ test "radio click seleciona, setas circulam, contratos" {
     try stdt.testing.expectError(error.InvalidArgument, radio(&ctx, .null, bounds, &opts, &sel, font, style));
     try stdt.testing.expectError(error.InvalidArgument, radio(&ctx, id, bounds, &empty, &sel, font, style));
     try stdt.testing.expectError(error.InvalidArgument, radio(&ctx, id, bounds, &opts, &bad, font, style));
+    ctx.endFrame();
+}
+
+test "radio limites: End, teto de opções, estilo e bounds NaN" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().radioStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 160, 60);
+    const id = id_mod.Id.fromString("test:radio-lim");
+    const opts = [_][]const u8{ "A", "B", "C" };
+    var sel: usize = 0;
+
+    // Foca com click; End salta para a última.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(10, 5) },
+    });
+    _ = try radio(&ctx, id, bounds, &opts, &sel, font, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    const r0 = try radio(&ctx, id, bounds, &opts, &sel, font, style);
+    try stdt.testing.expect(r0.changed);
+    try stdt.testing.expectEqual(@as(usize, 2), sel);
+    ctx.endFrame();
+
+    // Teto de 256 opções, estilo inválido e bounds NaN: InvalidArgument.
+    ctx.beginFrame();
+    var many: [257][]const u8 = undefined;
+    for (&many) |*o| o.* = "x";
+    try stdt.testing.expectError(error.InvalidArgument, radio(&ctx, id, bounds, &many, &sel, font, style));
+    var bad_style = style;
+    bad_style.radio_r = 0;
+    try stdt.testing.expectError(error.InvalidArgument, radio(&ctx, id, bounds, &opts, &sel, font, bad_style));
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 60);
+    try stdt.testing.expectError(error.InvalidArgument, radio(&ctx, id, nan_bounds, &opts, &sel, font, style));
     ctx.endFrame();
 }
