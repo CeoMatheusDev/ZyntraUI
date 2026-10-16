@@ -5,14 +5,19 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
-### Adicionado
+## [1.20.0] - 2026-10-15
+
+MINOR estável, 100% compatível: separador estático + endurecimento do Textarea.
 
 - `widgets/separator` (M66): divisor estático (display puro, sem `id`/
   estado). `separator` (linha horizontal/vertical, 1 comando) e
   `separatorLabeled` (linha horizontal com rótulo centralizado: 2
-  segmentos + 1 texto; rótulo vazio degrada para linha simples).
-  `SeparatorStyle` + `Theme.separatorStyle()`; `separatorLineRect` puro
-  para layout.
+  segmentos + 1 texto). `SeparatorStyle` + `Theme.separatorStyle()` e
+  `separatorLineRect` puro para layout.
+- `widgets/textarea`: arrasto com `y` finito extremo podia estourar
+  `@intFromFloat` em `lineAtY` (comportamento ilegal / panic em Debug);
+  agora satura na última linha antes da conversão. Afeta a v1.19.0.
+- 115/115 testes, integração C, CI verde.
 
 ## [1.19.0] - 2026-10-15
 
