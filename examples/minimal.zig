@@ -17,6 +17,7 @@ const switch_mod = @import("zyntra_ui").widgets.@"switch";
 const spinner_mod = @import("zyntra_ui").widgets.spinner;
 const textarea_mod = @import("zyntra_ui").widgets.textarea;
 const separator_mod = @import("zyntra_ui").widgets.separator;
+const toolbar_mod = @import("zyntra_ui").widgets.toolbar;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -627,4 +628,21 @@ pub fn main() !void {
     const sep_draws = ctx.drawCommands().len;
     ctx.endFrame();
     std.debug.print("m66 separator draws={d}\n", .{sep_draws});
+
+    // Toolbar (M67): chrome + posicionamento determinístico; os itens são
+    // desenhados pelos próprios widgets (aqui, buttons).
+    const tb_style = theme.toolbarStyle();
+    const tb_bounds = zyntra_ui.Rect.init(16, 748, 240, 40);
+    ctx.beginFrame();
+    var tb = try toolbar_mod.toolbar(&ctx, tb_bounds, tb_style);
+    const tb_btn0 = tb.nextItem(64);
+    _ = try button_mod.button(&ctx, zyntra_ui.Id.fromString("examples/m67:b0"), tb_btn0, theme.buttonStyle());
+    const tb_btn1 = tb.nextItem(64);
+    _ = try button_mod.button(&ctx, zyntra_ui.Id.fromString("examples/m67:b1"), tb_btn1, theme.buttonStyle());
+    try toolbar_mod.toolbarSeparator(&ctx, &tb, theme.separatorStyle());
+    const tb_btn2 = tb.nextItem(48);
+    _ = try button_mod.button(&ctx, zyntra_ui.Id.fromString("examples/m67:b2"), tb_btn2, theme.buttonStyle());
+    const tb_res = tb.remaining();
+    ctx.endFrame();
+    std.debug.print("m67 toolbar items=3 remaining={d:.1} overflowed={}\n", .{ tb_res, tb.overflowed });
 }

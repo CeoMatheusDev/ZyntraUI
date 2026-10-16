@@ -5,6 +5,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `widgets/toolbar` (M67): barra de ferramentas por **composição** (sem
+  `id`/interação própria). Desenha chrome (`ToolbarStyle` +
+  `Theme.toolbarStyle()`) e oferece posicionamento determinístico dos
+  itens via `layout.StackPlacer` (sem sistema de layout paralelo):
+  `toolbar` devolve `Toolbar` (estado no chamador), `Toolbar.nextItem`
+  (altura uniforme, centrada) e `Toolbar.remaining`; largura além do
+  restante é **clampada** e sinalizada em `Toolbar.overflowed`;
+  `toolbarSeparator` reusa `widgets/separator`; `toolbarContentRect` é
+  puro. Os itens são desenhados pelos widgets existentes.
+
 ## [1.20.0] - 2026-10-15
 
 MINOR estável, 100% compatível: separador estático + endurecimento do Textarea.

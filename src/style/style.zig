@@ -306,6 +306,28 @@ pub const SeparatorStyle = extern struct {
     }
 };
 
+/// Estilo de barra de ferramentas (M67). Chrome + métricas de
+/// posicionamento dos itens (ver `widgets/toolbar`).
+pub const ToolbarStyle = extern struct {
+    bg: types.Color,
+    border: types.Color,
+    border_width: f32 = 1.0,
+    padding_x: f32 = 8.0,
+    padding_y: f32 = 6.0,
+    /// Espaço horizontal entre itens (> = 0).
+    spacing: f32 = 6.0,
+    /// Altura preferida dos itens (clampada ao conteúdo).
+    item_height: f32 = 28.0,
+
+    pub fn isValid(self: ToolbarStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0 and
+            std.math.isFinite(self.padding_x) and self.padding_x >= 0 and
+            std.math.isFinite(self.padding_y) and self.padding_y >= 0 and
+            std.math.isFinite(self.spacing) and self.spacing >= 0 and
+            std.math.isFinite(self.item_height) and self.item_height >= 0;
+    }
+};
+
 /// Paleta mínima do tema.
 pub const Theme = extern struct {
     bg: types.Color,
@@ -435,6 +457,18 @@ pub const Theme = extern struct {
             .color = self.border,
             .thickness = 1.0,
             .label_gap = 6.0,
+        };
+    }
+
+    pub fn toolbarStyle(self: Theme) ToolbarStyle {
+        return .{
+            .bg = self.surface,
+            .border = self.border,
+            .border_width = 1.0,
+            .padding_x = 8.0,
+            .padding_y = 6.0,
+            .spacing = 6.0,
+            .item_height = 28.0,
         };
     }
 
@@ -572,6 +606,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(dark.progressStyle().isValid());
     try stdt.testing.expect(dark.separatorStyle().isValid());
     try stdt.testing.expect(light.separatorStyle().isValid());
+    try stdt.testing.expect(dark.toolbarStyle().isValid());
+    try stdt.testing.expect(light.toolbarStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,
