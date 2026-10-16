@@ -6,6 +6,8 @@
 //! - Teclado: `Left`/`Right` navegam, `Home`/`End` saltam, `Tab` circula.
 //! - Click na aba seleciona; `Tab` no teclado circula foco.
 //! - Desenho: 1 comando por aba (fundo) + 1 outline + 1 texto = 3*N + 2.
+//! - Teto de 32 abas (layout em array fixo na pilha): acima disso,
+//!   `InvalidArgument` em vez de truncamento silencioso.
 //! - `endTabBar(ctx)` é NO-OP (sem estado retido/draws); existe para
 //!   simetria de pareamento — chamada segura com ou sem barra aberta.
 //! `id` não-nulo obrigatório.
@@ -53,8 +55,13 @@ pub fn beginTabBar(
 ) context_mod.ContextError!TabBarResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
-    if (tabs.len == 0) return error.InvalidArgument;
+    if (tabs.len == 0 or tabs.len > 32) return error.InvalidArgument;
 
     // Valida índice ativo
     if (active.* >= tabs.len) active.* = tabs.len - 1;
@@ -264,5 +271,73 @@ test "TabBar click seleciona, teclado navega, clamp ativo" {
     try stdt.testing.expectError(error.InvalidArgument, beginTabBar(&ctx, id, bounds, &[_][]const u8{}, &active, style));
     const bad_style = style_mod.TabBarStyle{ .border_width = -1, .bg = .{}, .bg_active = .{}, .bg_hover = .{}, .text = .{}, .text_active = .{}, .border = .{}, .padding_x = 0, .padding_y = 0 };
     try stdt.testing.expectError(error.InvalidArgument, beginTabBar(&ctx, id, bounds, &tabs, &active, bad_style));
+    ctx.endFrame();
+}
+
+test "tabBar limites: bordas do teclado, aba única, teto e NaN" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().tabBarStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 400, 30);
+    const id = id_mod.Id.fromString("test:tab-lim");
+    const tabs = [_][]const u8{ "A", "BBB", "CC" };
+    var active: usize = 2; // última
+
+    // Foca com click; Right na última e Left na primeira são no-op.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(350, 15) },
+    });
+    _ = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    const r0 = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    try stdt.testing.expect(!r0.changed and active == 2);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    const rh = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    try stdt.testing.expect(rh.changed and active == 0);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    const r1 = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    try stdt.testing.expect(!r1.changed and active == 0);
+    ctx.endFrame();
+
+    // Hover expõe hovered_index sem selecionar.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(50, 15) } });
+    const r2 = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    try stdt.testing.expectEqual(@as(?usize, 1), r2.hovered_index);
+    try stdt.testing.expectEqual(@as(usize, 0), active);
+    ctx.endFrame();
+
+    // Aba única: teclado não sai do lugar; Enter não existe aqui.
+    const one = [_][]const u8{"Só"};
+    var active1: usize = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 15) },
+    });
+    _ = try beginTabBar(&ctx, id, types.Rect.init(0, 0, 400, 30), &one, &active1, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    const r3 = try beginTabBar(&ctx, id, types.Rect.init(0, 0, 400, 30), &one, &active1, style);
+    try stdt.testing.expect(!r3.changed and active1 == 0);
+    ctx.endFrame();
+
+    // Teto de 32 abas e bounds NaN: InvalidArgument.
+    ctx.beginFrame();
+    var many: [33][]const u8 = undefined;
+    for (&many) |*t| t.* = "x";
+    try stdt.testing.expectError(error.InvalidArgument, beginTabBar(&ctx, id, bounds, &many, &active, style));
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 30);
+    try stdt.testing.expectError(error.InvalidArgument, beginTabBar(&ctx, id, nan_bounds, &tabs, &active, style));
     ctx.endFrame();
 }

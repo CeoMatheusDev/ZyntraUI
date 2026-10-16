@@ -67,6 +67,10 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `InvalidArgument` na entrada única (`beginModalInner`, cobre as 3
   variantes); cobertura nova: drag extremo clampa no viewport sem
   corromper o painel do chamador.
+- `widgets/tab_bar` (M84): teto explícito de 32 abas (`InvalidArgument`
+  em vez de truncamento silencioso que o teclado atravessava além do
+  desenhado) e `bounds` não-finitos rejeitados; cobertura nova:
+  bordas do teclado, aba única, hover sem selecionar.
 - `README.md` reescrito (M76): estrutura profissional (princípios,
   tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
   sem inventar APIs; mesma tag de fetch e instruções verificadas.
