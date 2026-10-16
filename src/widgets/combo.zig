@@ -12,6 +12,7 @@
 //! - Sem clamp ao viewport (chamador posiciona); sem edição de texto.
 //! `options` vazio ou `selected` fora da faixa → `InvalidArgument`.
 
+const std = @import("std");
 const types = @import("../core/types.zig");
 const context_mod = @import("../core/context.zig");
 const id_mod = @import("../core/id.zig");
@@ -39,6 +40,11 @@ pub fn combo(
     if (id.isNull()) return error.InvalidArgument;
     if (options.len == 0 or options.len > 256) return error.InvalidArgument;
     if (selected.* >= options.len) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     var res = ComboResult{ .open = open.* };
 
     if (!open.*) {
@@ -222,5 +228,75 @@ test "combo abre com seta tendo foco" {
     try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
     const r2 = try combo(&ctx, id, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle());
     try stdt.testing.expect(!r2.open and !open);
+    ctx.endFrame();
+}
+
+test "combo limites: Escape fecha, mesma escolha, teto e NaN" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10); // ih=18.625
+    const theme = style_mod.Theme.darkDefault();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 160, 30);
+    const id = id_mod.Id.fromString("test:combo-lim");
+    const opts = [_][]const u8{ "A", "B", "C" };
+    var sel: usize = 1;
+    var open = false;
+
+    // Abre com click (press+release).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(10, 10) },
+    });
+    _ = try combo(&ctx, id, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle());
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(10, 10) },
+    });
+    _ = try combo(&ctx, id, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle());
+    try stdt.testing.expect(open);
+    ctx.endFrame();
+
+    // Escape com o menu focado fecha sem mudar a seleção.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .escape, .pressed = true, .modifiers = .{} } });
+    const r0 = try combo(&ctx, id, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle());
+    try stdt.testing.expect(!r0.open and !open and !r0.changed);
+    try stdt.testing.expectEqual(@as(usize, 1), sel);
+    ctx.endFrame();
+
+    // Escolher o item já selecionado fecha sem marcar changed.
+    // Menu abre em y=30; item 1 ocupa y 48.625..67.25 → click em y=55.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(10, 10) },
+    });
+    _ = try combo(&ctx, id, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle());
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(10, 10) },
+    });
+    _ = try combo(&ctx, id, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle());
+    try stdt.testing.expect(open);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(10, 55) },
+    });
+    const r1 = try combo(&ctx, id, bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle());
+    try stdt.testing.expect(!r1.open and !open and !r1.changed);
+    try stdt.testing.expectEqual(@as(usize, 1), sel);
+    ctx.endFrame();
+
+    // Teto de 256 opções e bounds NaN: InvalidArgument.
+    ctx.beginFrame();
+    var many: [257][]const u8 = undefined;
+    for (&many) |*o| o.* = "x";
+    try stdt.testing.expectError(error.InvalidArgument, combo(&ctx, id, bounds, &many, &sel, &open, font, theme.buttonStyle(), theme.menuStyle()));
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 30);
+    try stdt.testing.expectError(error.InvalidArgument, combo(&ctx, id, nan_bounds, &opts, &sel, &open, font, theme.buttonStyle(), theme.menuStyle()));
     ctx.endFrame();
 }

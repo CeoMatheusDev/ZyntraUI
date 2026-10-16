@@ -36,6 +36,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `bounds` não-finitos agora retornam `InvalidArgument` na entrada
   (horizontal e vertical); cobertura nova: valor inicial fora da faixa,
   drag em posição finita extrema, faixa minúscula, estilo inválido.
+- `widgets/combo`: endurecimento de contratos (sem mudar API válida) —
+  `bounds` não-finitos agora retornam `InvalidArgument` na entrada
+  (antes caía em erro interno no desenho); cobertura nova: Escape
+  fecha sem mudar, mesma escolha fecha sem `changed`, teto de
+  256 opções.
 - `README.md` reescrito (M76): estrutura profissional (princípios,
   tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
   sem inventar APIs; mesma tag de fetch e instruções verificadas.
