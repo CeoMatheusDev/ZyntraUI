@@ -32,6 +32,10 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `bounds` não-finitos agora retornam `InvalidArgument` na entrada;
   cobertura nova: tecla `End`, normalização do ativo, item único,
   área menor que uma linha com clip, teto de 4096 itens.
+- `widgets/slider`: endurecimento de contratos (sem mudar API válida) —
+  `bounds` não-finitos agora retornam `InvalidArgument` na entrada
+  (horizontal e vertical); cobertura nova: valor inicial fora da faixa,
+  drag em posição finita extrema, faixa minúscula, estilo inválido.
 
 ## [1.21.1] - 2026-10-16
 

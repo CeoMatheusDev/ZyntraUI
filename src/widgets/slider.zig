@@ -37,6 +37,11 @@ pub fn slider(
 ) context_mod.ContextError!SliderResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (!std.math.isFinite(min) or !std.math.isFinite(max) or min >= max) {
         return error.InvalidArgument;
@@ -155,6 +160,11 @@ pub fn sliderVertical(
 ) context_mod.ContextError!SliderResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (!std.math.isFinite(min) or !std.math.isFinite(max) or min >= max) {
         return error.InvalidArgument;
@@ -491,4 +501,82 @@ test "sliderVertical teclado: Up/Down, Home/End" {
     try stdt.testing.expect(r2.changed);
     try stdt.testing.expectEqual(@as(f32, 100), v);
     ctx.endFrame();
+}
+
+test "slider limites: bounds NaN, valor inicial fora, drag extremo" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().sliderStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:sld-lim");
+    const vid = id_mod.Id.fromString("test:sld-lim-v");
+
+    // Bounds não-finitos: InvalidArgument nas duas orientações.
+    var v: f32 = 50;
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 30);
+    try stdt.testing.expectError(error.InvalidArgument, slider(&ctx, id, nan_bounds, &v, 0, 100, style));
+    try stdt.testing.expectError(error.InvalidArgument, sliderVertical(&ctx, vid, nan_bounds, &v, 0, 100, style));
+
+    // Valor inicial fora da faixa clampa na entrada (sem changed).
+    var hi: f32 = 999;
+    ctx.beginFrame();
+    const r0 = try slider(&ctx, id, types.Rect.init(0, 0, 200, 30), &hi, 0, 100, style);
+    try stdt.testing.expectEqual(@as(f32, 100), hi);
+    try stdt.testing.expect(!r0.changed);
+    ctx.endFrame();
+    var lo: f32 = -999;
+    ctx.beginFrame();
+    _ = try sliderVertical(&ctx, vid, types.Rect.init(0, 0, 30, 200), &lo, 0, 100, style);
+    try stdt.testing.expectEqual(@as(f32, 0), lo);
+    ctx.endFrame();
+
+    // Drag em posição finita extrema: clampa, sem pânico nem NaN.
+    var d: f32 = 50;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(100, 15) },
+    });
+    _ = try slider(&ctx, id, types.Rect.init(0, 0, 200, 30), &d, 0, 100, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(1e30, 15) } });
+    _ = try slider(&ctx, id, types.Rect.init(0, 0, 200, 30), &d, 0, 100, style);
+    try stdt.testing.expectEqual(@as(f32, 100), d);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(-1e30, 15) } });
+    _ = try slider(&ctx, id, types.Rect.init(0, 0, 200, 30), &d, 0, 100, style);
+    try stdt.testing.expectEqual(@as(f32, 0), d);
+    ctx.endFrame();
+
+    // Faixa minúscula continua válida (sem divisão por zero: min < max).
+    // Solta o drag anterior e foca com click antes da tecla.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(-1e30, 15) },
+    });
+    ctx.endFrame();
+    var tiny: f32 = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(100, 15) },
+    });
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(100, 15) },
+    });
+    _ = try slider(&ctx, id, types.Rect.init(0, 0, 200, 30), &tiny, 0, 1e-30, style);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    const rt = try slider(&ctx, id, types.Rect.init(0, 0, 200, 30), &tiny, 0, 1e-30, style);
+    try stdt.testing.expect(rt.changed);
+    try stdt.testing.expect(tiny >= 0 and tiny <= 1e-30);
+    ctx.endFrame();
+
+    // Estilo inválido rejeitado.
+    var bad = style;
+    bad.track_height = 0;
+    try stdt.testing.expectError(error.InvalidArgument, slider(&ctx, id, types.Rect.init(0, 0, 200, 30), &d, 0, 100, bad));
 }
