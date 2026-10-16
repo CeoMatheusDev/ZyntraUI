@@ -136,6 +136,11 @@ fn menuInner(
 ) context_mod.ContextError!MenuResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (items.len == 0) return error.InvalidArgument;
     if (items.len > 4096) return error.InvalidArgument;
@@ -593,5 +598,95 @@ test "menu todo-desabilitado nunca escolhe" {
     try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
     const r1 = try menu(&ctx, id, bounds, &items, &active, font, style);
     try stdt.testing.expect(r1.chosen == null);
+    ctx.endFrame();
+}
+
+test "menu limites: End, normalização, item único, área pequena" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10); // ih=18.625
+    const style = style_mod.Theme.darkDefault().menuStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:menu-lim");
+
+    // active fora da faixa/sobre desabilitado normaliza no primeiro válido.
+    const items = [_]MenuItem{
+        .{ .label = "A", .enabled = false },
+        .{ .label = "B" },
+        .{ .label = "C", .enabled = false },
+    };
+    var active: usize = 999;
+    ctx.beginFrame();
+    _ = try menu(&ctx, id, types.Rect.init(0, 0, 160, 75), &items, &active, font, style);
+    try stdt.testing.expectEqual(@as(usize, 1), active);
+    ctx.endFrame();
+
+    // End cai no último habilitado; Home no primeiro (pulando bordas off).
+    const items2 = [_]MenuItem{
+        .{ .label = "A" },
+        .{ .label = "B", .enabled = false },
+        .{ .label = "C" },
+    };
+    var active2: usize = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try menu(&ctx, id, types.Rect.init(0, 0, 160, 75), &items2, &active2, font, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    _ = try menu(&ctx, id, types.Rect.init(0, 0, 160, 75), &items2, &active2, font, style);
+    try stdt.testing.expectEqual(@as(usize, 2), active2);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .home, .pressed = true, .modifiers = .{} } });
+    _ = try menu(&ctx, id, types.Rect.init(0, 0, 160, 75), &items2, &active2, font, style);
+    try stdt.testing.expectEqual(@as(usize, 0), active2);
+    ctx.endFrame();
+
+    // Item único: down/up circulam nele, Enter escolhe.
+    const items3 = [_]MenuItem{.{ .label = "Only" }};
+    var active3: usize = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try menu(&ctx, id, types.Rect.init(0, 0, 160, 30), &items3, &active3, font, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .up, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    const r3 = try menu(&ctx, id, types.Rect.init(0, 0, 160, 30), &items3, &active3, font, style);
+    try stdt.testing.expectEqual(@as(usize, 0), active3);
+    try stdt.testing.expectEqual(@as(?usize, 0), r3.chosen);
+    ctx.endFrame();
+
+    // Área menor que uma linha: clip pareado, click mapeia, sem crash.
+    var active4: usize = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    const r4 = try menu(&ctx, id, types.Rect.init(0, 0, 160, 10), &items2, &active4, font, style);
+    try stdt.testing.expectEqual(@as(?usize, 0), r4.chosen);
+    var saw_clip = false;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .clip and !cmd.clip.null_rect) saw_clip = true;
+    }
+    try stdt.testing.expect(saw_clip);
+    ctx.endFrame();
+
+    // Bounds NaN e lista acima do teto: InvalidArgument, sem draws novos.
+    ctx.beginFrame();
+    const before = ctx.drawCommands().len;
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 75);
+    try stdt.testing.expectError(error.InvalidArgument, menu(&ctx, id, nan_bounds, &items2, &active2, font, style));
+    var big: [4097]MenuItem = undefined;
+    for (&big) |*it| it.* = .{ .label = "x" };
+    try stdt.testing.expectError(error.InvalidArgument, menu(&ctx, id, types.Rect.init(0, 0, 160, 75), &big, &active2, font, style));
+    try stdt.testing.expectEqual(before, ctx.drawCommands().len);
     ctx.endFrame();
 }

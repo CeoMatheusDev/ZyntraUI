@@ -28,6 +28,10 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   filhos (padrão de toolbar/statusbar). Degradações documentadas
   (sem título/largo demais/borda/fundo). `GroupBoxStyle` +
   `Theme.groupBoxStyle()`; `groupBoxContentRect` puro.
+- `widgets/menu`: endurecimento de contratos (sem mudar API válida) —
+  `bounds` não-finitos agora retornam `InvalidArgument` na entrada;
+  cobertura nova: tecla `End`, normalização do ativo, item único,
+  área menor que uma linha com clip, teto de 4096 itens.
 
 ## [1.21.1] - 2026-10-16
 
