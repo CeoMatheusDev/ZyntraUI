@@ -86,9 +86,15 @@ pub fn beginTable(
 ) context_mod.ContextError!TableResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= style.header_height) return error.InvalidArgument;
     if (!columnsValid(columns)) return error.InvalidArgument;
     if (rows.len == 0) return error.InvalidArgument;
+    if (!std.math.isFinite(scroll_offset.*)) return error.InvalidArgument;
 
     const body = tableBodyRect(bounds, style);
     if (selected.* >= rows.len) selected.* = rows.len - 1;
@@ -434,3 +440,127 @@ const rows_bad_cols = [_]TableColumn{
     .{ .title = "X", .width = 50 },
     .{ .title = "Y", .width = -1 },
 };
+
+test "Table uma linha: click, teclado nos limites, scroll zerado" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().tableStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 50); // corpo h = 24
+    const id = id_mod.Id.fromString("test:table-one");
+    const columns = [_]TableColumn{.{ .title = "Nome", .width = 120 }};
+    const c0 = [_][]const u8{"só"};
+    const rows = [_]TableRow{.{ .cells = &c0 }};
+    var selected: usize = 0;
+    var scroll: f32 = 9999; // além do máximo (0) → clampa
+
+    // Click na única linha seleciona (já era 0) e foca; scroll clampa.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(100, 30) },
+    });
+    const r0 = try beginTable(&ctx, id, bounds, &columns, &rows, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 0), selected);
+    try stdt.testing.expectEqual(@as(f32, 0), scroll);
+    try stdt.testing.expectEqual(@as(f32, 0), r0.scroll_offset);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    ctx.endFrame();
+
+    // Teclado nos limites: Up/Down/PageUp/PageDown não saem da linha 0.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .up, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .page_up, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .page_down, .pressed = true, .modifiers = .{} } });
+    const r1 = try beginTable(&ctx, id, bounds, &columns, &rows, &selected, &scroll, style);
+    try stdt.testing.expect(!r1.changed);
+    try stdt.testing.expectEqual(@as(usize, 0), selected);
+    ctx.endFrame();
+}
+
+test "Table wheel extremo clampa; scroll/bounds NaN rejeitados" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().tableStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 150); // corpo 124, máx 68
+    const id = id_mod.Id.fromString("test:table-wheel");
+    const columns = [_]TableColumn{.{ .title = "N", .width = 120 }};
+    const ca = [_][]const u8{"a"};
+    const rows = [_]TableRow{ .{ .cells = &ca }, .{ .cells = &ca }, .{ .cells = &ca }, .{ .cells = &ca }, .{ .cells = &ca }, .{ .cells = &ca }, .{ .cells = &ca }, .{ .cells = &ca } };
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+
+    // Wheel finito extremo para baixo: sem pânico, clampa no máximo.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = -1e30, .pos = types.Vec2.init(100, 100) } });
+    const r0 = try beginTable(&ctx, id, bounds, &columns, &rows, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(f32, 68), scroll);
+    try stdt.testing.expectEqual(@as(f32, 68), r0.scroll_offset);
+    ctx.endFrame();
+
+    // Wheel finito extremo para cima: clampa no zero.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = 1e30, .pos = types.Vec2.init(100, 100) } });
+    _ = try beginTable(&ctx, id, bounds, &columns, &rows, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(f32, 0), scroll);
+    ctx.endFrame();
+
+    // Scroll do chamador não-finito e bounds não-finitos: InvalidArgument.
+    var nan_scroll: f32 = std.math.nan(f32);
+    try stdt.testing.expectError(error.InvalidArgument, beginTable(&ctx, id, bounds, &columns, &rows, &selected, &nan_scroll, style));
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 150);
+    try stdt.testing.expectError(error.InvalidArgument, beginTable(&ctx, id, nan_bounds, &columns, &rows, &selected, &scroll, style));
+}
+
+test "Table encolhe linhas, área pequena e última linha por click" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().tableStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:table-shrink");
+    const columns = [_]TableColumn{.{ .title = "N", .width = 120 }};
+    const ca = [_][]const u8{"a"};
+    const cb = [_][]const u8{"b"};
+    const rows8 = [_]TableRow{ .{ .cells = &ca }, .{ .cells = &cb }, .{ .cells = &ca }, .{ .cells = &cb }, .{ .cells = &ca }, .{ .cells = &cb }, .{ .cells = &ca }, .{ .cells = &cb } };
+    const rows2 = [_]TableRow{ .{ .cells = &ca }, .{ .cells = &cb } };
+    var selected: usize = 7;
+    var scroll: f32 = 0;
+
+    // Seleção além do novo tamanho é clampada (sem estado corrompido).
+    ctx.beginFrame();
+    const r0 = try beginTable(&ctx, id, types.Rect.init(0, 0, 200, 150), &columns, rows8[0..8], &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 7), r0.selected);
+    ctx.endFrame();
+    ctx.beginFrame();
+    const r1 = try beginTable(&ctx, id, types.Rect.init(0, 0, 200, 150), &columns, rows2[0..2], &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 1), selected);
+    try stdt.testing.expectEqual(@as(usize, 1), r1.selected);
+    ctx.endFrame();
+
+    // Área pequena (corpo h=1): desenha com clip pareado, sem crash.
+    selected = 0;
+    scroll = 0;
+    ctx.beginFrame();
+    _ = try beginTable(&ctx, id, types.Rect.init(0, 0, 200, 27), &columns, rows8[0..8], &selected, &scroll, style);
+    var saw_clip = false;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .clip and !cmd.clip.null_rect) saw_clip = true;
+    }
+    try stdt.testing.expect(saw_clip);
+    ctx.endFrame();
+
+    // Última linha por click com scroll no máximo (linha 7 em y=138).
+    selected = 0;
+    scroll = 68;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(100, 138) },
+    });
+    _ = try beginTable(&ctx, id, types.Rect.init(0, 0, 200, 150), &columns, rows8[0..8], &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(usize, 7), selected);
+    ctx.endFrame();
+}

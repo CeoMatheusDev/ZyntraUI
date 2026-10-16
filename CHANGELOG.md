@@ -22,6 +22,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   README `Getting started` mostra a fiação do módulo no `build.zig`
   do consumidor (`b.dependency` + `addImport`), verificada de verdade
   contra o tarball publicado.
+- `widgets/table`: endurecimento de contratos (sem mudar API válida) —
+  `scroll_offset` e `bounds` não-finitos agora retornam `InvalidArgument`
+  na entrada em vez de coerção silenciosa/erro interno; cobertura nova:
+  tabela de 1 linha, teclado nos limites, clamp de scroll mínimo/máximo,
+  wheel finito extremo, seleção após encolher linhas, área pequena com
+  clip e click na última linha.
 
 ## [1.21.0] - 2026-10-16
 
