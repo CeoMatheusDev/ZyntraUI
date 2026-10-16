@@ -332,6 +332,11 @@ fn textInputInner(
 ) context_mod.ContextError!TextInputResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (len.* > buffer.len or cursor.* > len.*) return error.InvalidArgument;
     if (anchor) |a| {
@@ -1619,5 +1624,34 @@ test "TextHistory descarta o mais antigo ao lotar" {
     const r3 = try textInputHistory(2, 16, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &hist, font, style);
     try stdt.testing.expect(!r3.undone);
     try stdt.testing.expectEqualStrings("ab", buf[0..len]);
+    ctx.endFrame();
+}
+
+test "text_input bounds não-finitos rejeitados nas 4 variantes" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:ti-nan");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 30);
+
+    // Uma checagem cobre as 4 variantes (todas funilam em textInputInner);
+    // estado do chamador intacto (rejeição antes de qualquer mutação).
+    ctx.beginFrame();
+    try stdt.testing.expectError(error.InvalidArgument, textInput(&ctx, id, nan_bounds, &buf, &len, &cursor, font, style));
+    try stdt.testing.expectError(error.InvalidArgument, textInputSelected(&ctx, id, nan_bounds, &buf, &len, &cursor, &anchor, font, style));
+    var hist = TextHistory(4, 16){};
+    try stdt.testing.expectError(error.InvalidArgument, textInputHistory(4, 16, &ctx, id, nan_bounds, &buf, &len, &cursor, &anchor, &hist, font, style));
+    var clip_buf: [16]u8 = undefined;
+    var clip = Clipboard{ .buf = &clip_buf };
+    try stdt.testing.expectError(error.InvalidArgument, textInputClipboard(4, 16, &ctx, id, nan_bounds, &buf, &len, &cursor, &anchor, &hist, &clip, font, style));
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    try stdt.testing.expectEqual(@as(usize, 0), cursor);
     ctx.endFrame();
 }

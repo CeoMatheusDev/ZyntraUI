@@ -59,6 +59,10 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   entrada; antes, `splitterClampPos` com `lo`/`hi` NaN violava a
   asserção interna de `std.math.clamp` (`lower <= upper`) e abortava;
   cobertura nova: orientação vertical, clamp de `pos`, teclado.
+- `widgets/text_input` (M82): `bounds` não-finitos agora retornam
+  `InvalidArgument` na entrada única (`textInputInner`, cobre as 4
+  variantes); restante do editor já era fail-closed (toda falha de
+  medida/decodificação UTF-8 mapeada); cobertura nova sem duplicar.
 - `README.md` reescrito (M76): estrutura profissional (princípios,
   tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
   sem inventar APIs; mesma tag de fetch e instruções verificadas.
