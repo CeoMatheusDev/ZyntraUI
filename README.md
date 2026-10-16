@@ -4,10 +4,13 @@
 
 **Modern interfaces. Native performance. Pure Zig.**
 
-A work-in-progress GUI toolkit designed for lightweight, responsive native interfaces, written in Zig.
+A lightweight GUI toolkit in Zig with caller-owned state, zero hidden
+allocations, and a renderer-independent draw-command contract.
+Stable public API since 1.0.0 — current release **v1.21.1**.
 
 [![Status](https://img.shields.io/badge/status-stable-green)](https://github.com/CeoMatheusDev/ZyntraUI)
 [![Language](https://img.shields.io/badge/language-Zig-f7a41d)](https://ziglang.org/)
+[![Release](https://img.shields.io/badge/release-v1.21.1-blue)](https://github.com/CeoMatheusDev/ZyntraUI/releases)
 [![Contributions](https://img.shields.io/badge/contributions-welcome-brightgreen)](https://github.com/CeoMatheusDev/ZyntraUI/issues)
 
 </div>
@@ -16,59 +19,93 @@ A work-in-progress GUI toolkit designed for lightweight, responsive native inter
 
 ## Overview
 
-**ZyntraUI** is an early-stage project exploring a modern GUI toolkit with an emphasis on predictable performance, explicit resource management, and a clean developer experience.
-
-The project aims to favor understandable, low-level implementations over heavyweight abstractions. Its API, rendering architecture, and platform support have **not yet been finalized**.
+**ZyntraUI** builds interfaces frame by frame: you feed normalized input
+events in, call widgets with state **you own**, and consume an explicit
+list of draw commands with a backend of your choice. There is no built-in
+GPU renderer, no windowing, no hidden globals —
+predictable behavior you can test without a screen.
 
 > [!IMPORTANT]
-> **Project status: stable (1.0.0).** API pública congelada a partir desta
-> versão (mudanças incompatíveis exigem MAJOR). ZyntraUI has no built-in
-> GPU renderer or windowing: you feed normalized events in and consume
-> draw commands with an external backend.
+> **Project status: stable.** The public API is frozen since 1.0.0
+> (breaking changes require a MAJOR release, per [SemVer 2.0.0](https://semver.org/)).
+> See [CHANGELOG.md](CHANGELOG.md) for the release history.
 
-## Design goals
+## Why ZyntraUI
 
-- **Pure Zig:** implement the toolkit itself in Zig, minimizing external dependencies where practical.
-- **Performance first:** prioritize low overhead, efficient rendering, and responsive input handling.
-- **Memory conscious:** favor explicit ownership, controlled allocations, and predictable lifetimes.
-- **Modular design:** keep platform integration, rendering, layout, and widgets decoupled.
-- **Modern UI:** aim for flexible layouts, consistent styling, and polished interactive components.
-- **Transparency:** keep the internals understandable, inspectable, and easy to extend.
+- **Caller-owned state** — selection, scroll offsets, text buffers and
+  toggles live in your code, passed by pointer each frame. The library
+  never takes ownership of your data.
+- **No hidden allocations** — widgets operate on caller memory; text is
+  copied once into the frame arena backing the draw list.
+- **Renderer-independent** — output is a plain `DrawCommand` list
+  (`rect`, `line`, `text`, `clip`, …). A reference software rasterizer
+  ships under `src/software/`; production backends stay external.
+- **Deterministic and testable** — same events in, same commands out.
+  Time-driven widgets (e.g. spinner) take the timestamp as a parameter
+  instead of reading a clock.
+- **Pure Zig, no mandatory dependencies** — the core builds on the
+  standard library only. An optional C ABI (`src/c-abi/zyntra.h`)
+  exposes version queries and the frame pipeline to C consumers.
+- **Validated in CI** — unit tests plus fuzz tests run on every commit
+  (Zig 0.17.0 × Debug/ReleaseFast), with example apps, benchmarks and
+  a C-ABI integration test.
 
-## Architecture (current layout)
+## Widgets
+
+25 public widgets, all reachable from the single supported import
+(`@import("zyntra_ui")` → `widgets.*`). Unless noted, interactive state
+is caller-owned and styling comes from `Theme.*Style()`.
+
+| Category | Widget | What it does |
+|---|---|---|
+| Input & selection | `button` | Release-to-activate button (release outside cancels) |
+| | `checkbox` | On/off checkbox bound to a caller `bool` |
+| | `radio` | Exclusive single-choice option group |
+| | `switch` | Sliding on/off toggle, companion to checkbox |
+| | `slider` / `sliderVertical` | Drag a `f32` value in `[min, max]`, keyboard-adjustable |
+| | `text_input` | Single-line field, caller-owned UTF-8 buffer + selection |
+| | `textarea` | Multi-line editing over `'\n'`, same ownership model |
+| | `combo` | Dropdown selector composing button + menu |
+| Views & navigation | `label` / `labelWrapped` | Single-line and word-wrapped text |
+| | `list_view` | Scrollable vertical list with keyboard selection |
+| | `tree_view` | Hierarchical tree with expand/collapse |
+| | `table` | Fixed-header grid with selection and scrolling |
+| | `tab_bar` | Tab strip with keyboard navigation |
+| | `scroll` | Scrollable container (wheel, thumb drag, keyboard) |
+| | `splitter` | Draggable divider between panes |
+| | `menu` / `menuNested` | Dropdown and cascading submenus, disabled items |
+| | `popup` | Floating dismissible panel with content clip |
+| | `modal` | Dialog with dimmed background and title bar |
+| | `tooltip` | Hover tooltip shown after a frame delay |
+| Feedback | `progress` | Determinate 0..1 bar |
+| | `spinner` | Indeterminate, caller-time-driven indicator |
+| Composition | `separator` / `separatorLabeled` | Static divider, optionally with centered label |
+| | `toolbar` | Bar chrome + deterministic item placement |
+| | `statusbar` | Bar chrome + left-anchored and right-anchored segments |
+| | `groupbox` | Titled frame returning its content rect for children |
+
+## Architecture
 
 ```text
 src/
 ├── root.zig      Public API (the only supported @import)
 ├── core/         Context, types, stable Ids
 ├── event/        Normalized input events
-├── draw/        Draw lists + external renderer contract
-├── layout/      Constraints, insets, stack placement
-├── style/       Themes and widget styles
-├── widgets/     Button, checkbox, radio, switch, label, slider,
-                 text input, combo, scroll, tab bar, splitter,
-                 list view, tree view, table, menu, popup, modal,
-                 tooltip, progress, spinner, textarea, separator, toolbar,
-                 status bar, group box
-├── text/        UTF-8 metrics (fallback monospace measurement)
-├── anim/        Optional easing, tweens, timers
-└── c-abi/       Optional C ABI (zyntra.h) + opaque handles
+├── draw/         Draw lists + external renderer contract
+├── layout/       Constraints, insets, stack placement
+├── style/        Themes and widget styles
+├── widgets/      The 25 widgets listed above
+├── text/         UTF-8 metrics (fallback monospace measurement)
+├── anim/         Optional easing, tweens, timers
+├── software/     Reference software rasterizer
+└── c-abi/        Optional C ABI (zyntra.h) + opaque handles
 ```
 
-Model: retained core (explicit `Context`, per-frame draw lists) with an
-ergonomic builder-style API. No GPU renderer, windowing, audio, or
-networking by design — see `docs/` for contracts.
-
-## Roadmap
-
-- [x] Architecture and public API principles
-- [x] Event processing (normalized; windowing stays external)
-- [x] Rendering and drawing primitives (backend-external contract)
-- [x] Layout and input handling
-- [x] Initial widget set (button, checkbox, label, slider, text input)
-- [x] Examples, tests, and documentation
-- [x] Pre-releases (alpha, beta)
-- [x] 1.0.0 stable (API freeze + release review)
+Frame model: create one explicit `Context`, push normalized events,
+`beginFrame()` → call widgets → `endFrame()`, then submit
+`drawCommands()` to your backend. See `docs/` for the detailed contracts
+and `examples/app.zig` for toolbar, tab bar, table and status bar
+composed across shared frames.
 
 ## Getting started
 
@@ -108,10 +145,23 @@ try ctx.draw.rectFilled(
 ctx.endFrame();
 ```
 
-Run `zig build run-example` for the full demo (widgets, layout, text,
-animations). Run `zig build run-app` for the integrated mini-app
-(toolbar + tabbar + table + statusbar composed across shared frames).
+## Examples & benchmarks
+
+- `zig build run-example` — per-widget tour: widgets, layout, text and
+  animations (`examples/minimal.zig`).
+- `zig build run-app` — integrated mini-app: toolbar, tab bar, table
+  and status bar sharing state across frames (`examples/app.zig`).
+- `zig build run-bench` — pipeline benchmark (`examples/bench.zig`,
+  notes in `docs/BENCHMARKS.md`).
+
 C consumers: see `src/c-abi/zyntra.h` and `docs/C_ABI.md`.
+
+## Versioning
+
+Releases follow [SemVer 2.0.0](https://semver.org/); every change is
+recorded in [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog format).
+`PATCH`/`MINOR` releases ship coherent, validated batches; `MAJOR`
+releases require explicit approval and mean breaking changes.
 
 ## Contributing
 

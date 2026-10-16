@@ -36,6 +36,9 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `bounds` não-finitos agora retornam `InvalidArgument` na entrada
   (horizontal e vertical); cobertura nova: valor inicial fora da faixa,
   drag em posição finita extrema, faixa minúscula, estilo inválido.
+- `README.md` reescrito (M76): estrutura profissional (princípios,
+  tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
+  sem inventar APIs; mesma tag de fetch e instruções verificadas.
 
 ## [1.21.1] - 2026-10-16
 
