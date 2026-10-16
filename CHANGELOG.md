@@ -5,7 +5,9 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
-### Adicionado
+## [1.21.0] - 2026-10-16
+
+MINOR estável, 100% compatível: chrome de aplicação por composição.
 
 - `widgets/toolbar` (M67): barra de ferramentas por **composição** (sem
   `id`/interação própria). Desenha chrome (`ToolbarStyle` +
@@ -25,6 +27,7 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   contratos da Toolbar). Largura além do livre é **clampada** e
   sinalizada em `StatusBar.overflowed`; `statusBarText` mede e emite
   1 texto; `statusBarSeparator` reusa `widgets/separator`.
+- 123/123 testes, integração C, CI verde.
 
 ## [1.20.0] - 2026-10-15
 
