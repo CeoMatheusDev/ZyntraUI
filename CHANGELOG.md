@@ -41,6 +41,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   (antes caía em erro interno no desenho); cobertura nova: Escape
   fecha sem mudar, mesma escolha fecha sem `changed`, teto de
   256 opções.
+- `widgets/list_view`: endurecimento de contratos (sem mudar API
+  válida) — `bounds`/`scroll_offset` não-finitos agora retornam
+  `InvalidArgument` na entrada (antes, `bounds.h` infinito/NaN
+  estourava a conversão float→int do layout); cobertura nova: scroll
+  e wheel nos limites.
 - `README.md` reescrito (M76): estrutura profissional (princípios,
   tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
   sem inventar APIs; mesma tag de fetch e instruções verificadas.

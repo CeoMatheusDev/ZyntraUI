@@ -48,8 +48,14 @@ pub fn beginListView(
 ) context_mod.ContextError!ListViewResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (items.len == 0) return error.InvalidArgument;
+    if (!std.math.isFinite(scroll_offset.*)) return error.InvalidArgument;
 
     if (selected.* >= items.len) selected.* = items.len - 1;
     const max_scroll = listViewMaxScroll(items, bounds.h, style);
@@ -297,5 +303,51 @@ test "ListView click seleciona, teclado navega, scroll" {
     try stdt.testing.expectError(error.InvalidArgument, beginListView(&ctx, id, bounds, &[_][]const u8{}, &selected, &scroll, style));
     const bad_style = style_mod.ListViewStyle{ .item_height = 0, .bg = .{}, .bg_selected = .{}, .bg_hover = .{}, .text = .{}, .text_selected = .{}, .border = .{}, .border_width = 1, .padding_x = 8 };
     try stdt.testing.expectError(error.InvalidArgument, beginListView(&ctx, id, bounds, &items, &selected, &scroll, bad_style));
+    ctx.endFrame();
+}
+
+test "listView limites: bounds/scroll não-finitos, scroll e wheel extremos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().listViewStyle(); // item 28
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:list-lim");
+    const items = [_][]const u8{ "A", "B", "C", "D", "E", "F", "G", "H" };
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+    // Corpo 100px, conteúdo 224px → scroll máximo 124.
+    const bounds = types.Rect.init(0, 0, 200, 100);
+
+    // Scroll do chamador além do máximo clampa na entrada.
+    scroll = 9999;
+    ctx.beginFrame();
+    const r0 = try beginListView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(f32, 124), scroll);
+    try stdt.testing.expectEqual(@as(f32, 124), r0.scroll_offset);
+    ctx.endFrame();
+
+    // Wheel finito extremo: clampa sem pânico (mínimo e máximo).
+    scroll = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = -1e30, .pos = types.Vec2.init(100, 50) } });
+    _ = try beginListView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(f32, 124), scroll);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = 1e30, .pos = types.Vec2.init(100, 50) } });
+    _ = try beginListView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(@as(f32, 0), scroll);
+    ctx.endFrame();
+
+    // Geometria não-finita: InvalidArgument em vez de pânico na
+    // conversão float→int do layout (bounds.h=+inf estourava usize).
+    ctx.beginFrame();
+    var nan_scroll: f32 = std.math.nan(f32);
+    try stdt.testing.expectError(error.InvalidArgument, beginListView(&ctx, id, bounds, &items, &selected, &nan_scroll, style));
+    const nan_bounds = types.Rect.init(0, 0, 200, std.math.nan(f32));
+    try stdt.testing.expectError(error.InvalidArgument, beginListView(&ctx, id, nan_bounds, &items, &selected, &scroll, style));
+    const inf_bounds = types.Rect.init(0, 0, 200, std.math.inf(f32));
+    try stdt.testing.expectError(error.InvalidArgument, beginListView(&ctx, id, inf_bounds, &items, &selected, &scroll, style));
     ctx.endFrame();
 }
