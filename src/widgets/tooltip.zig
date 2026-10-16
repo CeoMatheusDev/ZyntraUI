@@ -38,6 +38,11 @@ pub fn tooltip(
 ) context_mod.ContextError!TooltipResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(anchor.x) or !std.math.isFinite(anchor.y) or
+        !std.math.isFinite(anchor.w) or !std.math.isFinite(anchor.h))
+    {
+        return error.InvalidArgument;
+    }
     if (anchor.w <= 0 or anchor.h <= 0) return error.InvalidArgument;
 
     const hovered = if (ctx.mouse_pos) |p| anchor.contains(p) else false;
@@ -144,5 +149,53 @@ test "tooltip atraso, reset e imediato" {
 
     ctx.beginFrame();
     try stdt.testing.expectError(error.InvalidArgument, tooltip(&ctx, .null, anchor, "Hi", font, style, 0, &st));
+    ctx.endFrame();
+}
+
+test "tooltip limites: âncora NaN, texto malformado, saturação" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().tooltipStyle();
+    var ctx = try context_mod.Context.init(gpa, .{
+        .viewport = types.Rect.init(0, 0, 800, 600),
+    });
+    defer ctx.deinit();
+    const anchor = types.Rect.init(10, 10, 100, 40);
+    const id = id_mod.Id.fromString("test:tip-lim");
+    var st = TooltipState{};
+
+    // Âncora não-finita: InvalidArgument antes de qualquer geometria.
+    ctx.beginFrame();
+    const nan_anchor = types.Rect.init(10, 10, std.math.nan(f32), 40);
+    try stdt.testing.expectError(error.InvalidArgument, tooltip(&ctx, id, nan_anchor, "Hi", font, style, 0, &st));
+    ctx.endFrame();
+
+    // Texto malformado: InvalidArgument, sem comando parcial.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(20, 20) } });
+    const before = ctx.drawCommands().len;
+    try stdt.testing.expectError(error.InvalidArgument, tooltip(&ctx, id, anchor, "\xff", font, style, 0, &st));
+    try stdt.testing.expectEqual(before, ctx.drawCommands().len);
+    ctx.endFrame();
+
+    // Contador pré-saturado: não dá wrap, segue visível com hover.
+    st.hover_frames = std.math.maxInt(u32);
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(20, 20) } });
+    const r0 = try tooltip(&ctx, id, anchor, "Hi", font, style, 3, &st);
+    try stdt.testing.expect(r0.visible);
+    try stdt.testing.expectEqual(std.math.maxInt(u32), st.hover_frames);
+    ctx.endFrame();
+
+    // Caixa clampada ao viewport (âncora no canto inferior direito).
+    const corner = types.Rect.init(790, 590, 10, 10);
+    var st2 = TooltipState{};
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(795, 595) } });
+    _ = try tooltip(&ctx, id, corner, "Hi", font, style, 0, &st2);
+    const box = ctx.drawCommands()[0].rect_filled.rect;
+    try stdt.testing.expect(box.x + box.w <= 800);
+    try stdt.testing.expect(box.y + box.h <= 600);
     ctx.endFrame();
 }
