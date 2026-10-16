@@ -16,6 +16,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   restante é **clampada** e sinalizada em `Toolbar.overflowed`;
   `toolbarSeparator` reusa `widgets/separator`; `toolbarContentRect` é
   puro. Os itens são desenhados pelos widgets existentes.
+- `widgets/statusbar` (M68): barra de status por **composição** (sem
+  `id`/interação própria). Desenha chrome (`StatusBarStyle` +
+  `Theme.statusBarStyle()`) e posiciona segmentos à esquerda
+  (`StatusBar.nextItem`) e ancorados à direita (`StatusBar.nextRight`,
+  ex.: "Ln 1, Col 1") sem sobreposição, via `layout.StackPlacer` +
+  escalares espelhados (sem sistema de layout paralelo, sem alterar
+  contratos da Toolbar). Largura além do livre é **clampada** e
+  sinalizada em `StatusBar.overflowed`; `statusBarText` mede e emite
+  1 texto; `statusBarSeparator` reusa `widgets/separator`.
 
 ## [1.20.0] - 2026-10-15
 

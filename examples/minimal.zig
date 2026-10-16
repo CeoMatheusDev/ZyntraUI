@@ -18,6 +18,7 @@ const spinner_mod = @import("zyntra_ui").widgets.spinner;
 const textarea_mod = @import("zyntra_ui").widgets.textarea;
 const separator_mod = @import("zyntra_ui").widgets.separator;
 const toolbar_mod = @import("zyntra_ui").widgets.toolbar;
+const statusbar_mod = @import("zyntra_ui").widgets.statusbar;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -645,4 +646,17 @@ pub fn main() !void {
     const tb_res = tb.remaining();
     ctx.endFrame();
     std.debug.print("m67 toolbar items=3 remaining={d:.1} overflowed={}\n", .{ tb_res, tb.overflowed });
+
+    // StatusBar (M68): chrome + segmentos à esquerda e à direita.
+    const sb_style = theme.statusBarStyle();
+    ctx.beginFrame();
+    var sb = try statusbar_mod.statusBar(&ctx, zyntra_ui.Rect.init(16, 804, 320, 28), sb_style);
+    _ = try statusbar_mod.statusBarText(&ctx, &sb, "pronto", font, theme.text);
+    try statusbar_mod.statusBarSeparator(&ctx, &sb, theme.separatorStyle());
+    _ = try statusbar_mod.statusBarText(&ctx, &sb, "3 itens", font, theme.text);
+    const sb_right = sb.nextRight(72);
+    _ = try button_mod.button(&ctx, zyntra_ui.Id.fromString("examples/m68:b"), sb_right, theme.buttonStyle());
+    const sb_draws = ctx.drawCommands().len;
+    ctx.endFrame();
+    std.debug.print("m68 statusbar draws={d} remaining={d:.1} overflowed={}\n", .{ sb_draws, sb.remaining(), sb.overflowed });
 }

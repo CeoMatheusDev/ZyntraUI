@@ -328,6 +328,28 @@ pub const ToolbarStyle = extern struct {
     }
 };
 
+/// Estilo de barra de status (M68). Chrome + métricas de
+/// posicionamento dos segmentos (ver `widgets/statusbar`).
+pub const StatusBarStyle = extern struct {
+    bg: types.Color,
+    border: types.Color,
+    border_width: f32 = 1.0,
+    padding_x: f32 = 8.0,
+    padding_y: f32 = 4.0,
+    /// Espaço horizontal entre segmentos (>= 0).
+    spacing: f32 = 6.0,
+    /// Altura preferida dos segmentos (clampada ao conteúdo).
+    item_height: f32 = 20.0,
+
+    pub fn isValid(self: StatusBarStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0 and
+            std.math.isFinite(self.padding_x) and self.padding_x >= 0 and
+            std.math.isFinite(self.padding_y) and self.padding_y >= 0 and
+            std.math.isFinite(self.spacing) and self.spacing >= 0 and
+            std.math.isFinite(self.item_height) and self.item_height >= 0;
+    }
+};
+
 /// Paleta mínima do tema.
 pub const Theme = extern struct {
     bg: types.Color,
@@ -472,6 +494,18 @@ pub const Theme = extern struct {
         };
     }
 
+    pub fn statusBarStyle(self: Theme) StatusBarStyle {
+        return .{
+            .bg = self.surface,
+            .border = self.border,
+            .border_width = 1.0,
+            .padding_x = 8.0,
+            .padding_y = 4.0,
+            .spacing = 6.0,
+            .item_height = 20.0,
+        };
+    }
+
     pub fn spinnerStyle(self: Theme) SpinnerStyle {
         return .{
             .track = types.Color.rgb(90, 90, 100),
@@ -608,6 +642,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(light.separatorStyle().isValid());
     try stdt.testing.expect(dark.toolbarStyle().isValid());
     try stdt.testing.expect(light.toolbarStyle().isValid());
+    try stdt.testing.expect(dark.statusBarStyle().isValid());
+    try stdt.testing.expect(light.statusBarStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,
