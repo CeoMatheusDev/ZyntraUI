@@ -35,6 +35,11 @@ pub fn beginPopup(
 ) context_mod.ContextError!PopupResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
 
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
@@ -151,6 +156,47 @@ test "popup dispensa fora, mantém dentro" {
     try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
     const other = try beginPopup(&ctx, id, bounds, style);
     try stdt.testing.expect(!other.dismissed);
+    try endPopup(&ctx);
+    ctx.endFrame();
+}
+
+test "popup limites: bounds NaN, press na borda, estilo inválido" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().popupStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(100, 100, 160, 120);
+    const id = id_mod.Id.fromString("test:pop-lim");
+
+    // Bounds NaN: InvalidArgument antes de desenhar (sem draws novos).
+    ctx.beginFrame();
+    const before = ctx.drawCommands().len;
+    const nan_bounds = types.Rect.init(100, 100, std.math.nan(f32), 120);
+    try stdt.testing.expectError(error.InvalidArgument, beginPopup(&ctx, id, nan_bounds, style));
+    var bad_style = style;
+    bad_style.border_width = -1;
+    try stdt.testing.expectError(error.InvalidArgument, beginPopup(&ctx, id, bounds, bad_style));
+    try stdt.testing.expectEqual(before, ctx.drawCommands().len);
+    ctx.endFrame();
+
+    // Press exatamente na borda direita (exclusiva): fora → dispensa.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(260, 150) },
+    });
+    const edge = try beginPopup(&ctx, id, bounds, style);
+    try stdt.testing.expect(edge.dismissed and !edge.hovered);
+    try endPopup(&ctx);
+    ctx.endFrame();
+
+    // Press no canto interno (inclusivo): mantém.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(100, 100) },
+    });
+    const corner = try beginPopup(&ctx, id, bounds, style);
+    try stdt.testing.expect(!corner.dismissed and corner.hovered);
     try endPopup(&ctx);
     ctx.endFrame();
 }

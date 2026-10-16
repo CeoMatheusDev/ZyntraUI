@@ -71,6 +71,9 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   em vez de truncamento silencioso que o teclado atravessava além do
   desenhado) e `bounds` não-finitos rejeitados; cobertura nova:
   bordas do teclado, aba única, hover sem selecionar.
+- `widgets/popup` (M85): `bounds` não-finitos agora retornam
+  `InvalidArgument` na entrada; cobertura nova: borda exclusiva do
+  painel, estilo inválido, sem draws em rejeição.
 - `README.md` reescrito (M76): estrutura profissional (princípios,
   tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
   sem inventar APIs; mesma tag de fetch e instruções verificadas.
