@@ -71,6 +71,11 @@ fn beginModalInner(
 ) context_mod.ContextError!ModalResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
 
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
@@ -350,6 +355,56 @@ test "modalTitled desenha título, arrasta e valida" {
     const bad_font = metrics_mod.FontMetrics{ .size = 0, .advance = 0, .ascent = 0, .descent = 0, .line_gap = 0 };
     try stdt.testing.expectError(error.InvalidArgument, beginModalTitled(&ctx, id, &bounds, "A", bad_font, 24, &drag, style));
     try stdt.testing.expectError(error.InvalidArgument, beginModalTitled(&ctx, id, &bounds, "\xff", font, 24, &drag, style));
+    try endModal(&ctx);
+    ctx.endFrame();
+}
+
+test "modal limites: bounds NaN, drag extremo clampa no viewport" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().modalStyle();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    var ctx = try context_mod.Context.init(gpa, .{
+        .viewport = types.Rect.init(0, 0, 800, 600),
+    });
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:modal-lim");
+    var bounds = types.Rect.init(300, 200, 200, 150);
+    var drag = ModalDragState{};
+
+    // Bounds NaN nas 3 variantes: InvalidArgument, painel intacto.
+    const nan_bounds = types.Rect.init(std.math.nan(f32), 200, 200, 150);
+    var nan_b = nan_bounds;
+    try stdt.testing.expectError(error.InvalidArgument, beginModal(&ctx, id, nan_bounds, style));
+    try stdt.testing.expectError(error.InvalidArgument, beginModalDraggable(&ctx, id, &nan_b, 24, &drag, style));
+    try stdt.testing.expectError(error.InvalidArgument, beginModalTitled(&ctx, id, &nan_b, "T", font, 24, &drag, style));
+    try stdt.testing.expectEqual(types.Rect.init(300, 200, 200, 150), bounds);
+    const nan_th: f32 = std.math.nan(f32);
+    try stdt.testing.expectError(error.InvalidArgument, beginModalDraggable(&ctx, id, &bounds, nan_th, &drag, style));
+
+    // Press na barra de título captura; drag extremo clampa no viewport.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(400, 210) },
+    });
+    const r0 = try beginModalDraggable(&ctx, id, &bounds, 24, &drag, style);
+    try stdt.testing.expect(r0.dragging);
+    try endModal(&ctx);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(1e30, 1e30) } });
+    const r1 = try beginModalDraggable(&ctx, id, &bounds, 24, &drag, style);
+    try stdt.testing.expect(r1.dragging);
+    try stdt.testing.expectEqual(types.Rect.init(600, 450, 200, 150), bounds);
+    try stdt.testing.expect(std.math.isFinite(bounds.x) and std.math.isFinite(bounds.y));
+    try endModal(&ctx);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(600, 450) },
+    });
+    const r2 = try beginModalDraggable(&ctx, id, &bounds, 24, &drag, style);
+    try stdt.testing.expect(!r2.dragging and ctx.press_owner == null);
     try endModal(&ctx);
     ctx.endFrame();
 }

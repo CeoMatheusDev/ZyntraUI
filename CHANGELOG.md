@@ -63,6 +63,10 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `InvalidArgument` na entrada única (`textInputInner`, cobre as 4
   variantes); restante do editor já era fail-closed (toda falha de
   medida/decodificação UTF-8 mapeada); cobertura nova sem duplicar.
+- `widgets/modal` (M83): `bounds` não-finitos agora retornam
+  `InvalidArgument` na entrada única (`beginModalInner`, cobre as 3
+  variantes); cobertura nova: drag extremo clampa no viewport sem
+  corromper o painel do chamador.
 - `README.md` reescrito (M76): estrutura profissional (princípios,
   tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
   sem inventar APIs; mesma tag de fetch e instruções verificadas.
