@@ -22,6 +22,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   README `Getting started` mostra a fiação do módulo no `build.zig`
   do consumidor (`b.dependency` + `addImport`), verificada de verdade
   contra o tarball publicado.
+- `widgets/groupbox` (M73): caixa agrupadora com título (display puro,
+  sem `id`/estado). Desenha fundo + borda segmentada no topo
+  flanqueando o título + texto; devolve o rect de conteúdo para os
+  filhos (padrão de toolbar/statusbar). Degradações documentadas
+  (sem título/largo demais/borda/fundo). `GroupBoxStyle` +
+  `Theme.groupBoxStyle()`; `groupBoxContentRect` puro.
 
 ## [1.21.1] - 2026-10-16
 

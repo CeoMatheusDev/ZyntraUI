@@ -49,7 +49,7 @@ src/
                  text input, combo, scroll, tab bar, splitter,
                  list view, tree view, table, menu, popup, modal,
                  tooltip, progress, spinner, textarea, separator, toolbar,
-                 status bar
+                 status bar, group box
 ├── text/        UTF-8 metrics (fallback monospace measurement)
 ├── anim/        Optional easing, tweens, timers
 └── c-abi/       Optional C ABI (zyntra.h) + opaque handles

@@ -328,6 +328,28 @@ pub const ToolbarStyle = extern struct {
     }
 };
 
+/// Estilo de caixa agrupadora com título (M73).
+/// Ver `widgets/groupbox` para as regras de degradação.
+pub const GroupBoxStyle = extern struct {
+    /// Preenchimento; transparente (a == 0) ⇒ não desenhado.
+    bg: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    border: types.Color,
+    /// Espessura da borda em px (0 ⇒ sem borda).
+    border_width: f32 = 1.0,
+    /// Cor do texto do título.
+    title: types.Color,
+    /// Margem interna em px.
+    padding: f32 = 8.0,
+    /// Vão (px) entre o título e cada segmento do topo.
+    title_gap: f32 = 6.0,
+
+    pub fn isValid(self: GroupBoxStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0 and
+            std.math.isFinite(self.padding) and self.padding >= 0 and
+            std.math.isFinite(self.title_gap) and self.title_gap >= 0;
+    }
+};
+
 /// Estilo de barra de status (M68). Chrome + métricas de
 /// posicionamento dos segmentos (ver `widgets/statusbar`).
 pub const StatusBarStyle = extern struct {
@@ -506,6 +528,16 @@ pub const Theme = extern struct {
         };
     }
 
+    pub fn groupBoxStyle(self: Theme) GroupBoxStyle {
+        return .{
+            .border = self.border,
+            .title = self.text,
+            .border_width = 1.0,
+            .padding = 8.0,
+            .title_gap = 6.0,
+        };
+    }
+
     pub fn spinnerStyle(self: Theme) SpinnerStyle {
         return .{
             .track = types.Color.rgb(90, 90, 100),
@@ -644,6 +676,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(light.toolbarStyle().isValid());
     try stdt.testing.expect(dark.statusBarStyle().isValid());
     try stdt.testing.expect(light.statusBarStyle().isValid());
+    try stdt.testing.expect(dark.groupBoxStyle().isValid());
+    try stdt.testing.expect(light.groupBoxStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,

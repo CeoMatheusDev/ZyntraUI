@@ -19,6 +19,7 @@ const textarea_mod = @import("zyntra_ui").widgets.textarea;
 const separator_mod = @import("zyntra_ui").widgets.separator;
 const toolbar_mod = @import("zyntra_ui").widgets.toolbar;
 const statusbar_mod = @import("zyntra_ui").widgets.statusbar;
+const groupbox_mod = @import("zyntra_ui").widgets.groupbox;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -659,4 +660,17 @@ pub fn main() !void {
     const sb_draws = ctx.drawCommands().len;
     ctx.endFrame();
     std.debug.print("m68 statusbar draws={d} remaining={d:.1} overflowed={}\n", .{ sb_draws, sb.remaining(), sb.overflowed });
+
+    // GroupBox (M73): caixa com título + filho posicionado no conteúdo.
+    ctx.beginFrame();
+    const gb_content = try groupbox_mod.groupBox(&ctx, zyntra_ui.Rect.init(360, 700, 200, 100), "Opções", font, theme.groupBoxStyle());
+    _ = try checkbox_mod.checkbox(&ctx, zyntra_ui.Id.fromString("examples/m73:chk"), .{
+        .x = gb_content.x,
+        .y = gb_content.y,
+        .w = chk_style.box_size,
+        .h = chk_style.box_size,
+    }, &checked, chk_style);
+    const gb_draws = ctx.drawCommands().len;
+    ctx.endFrame();
+    std.debug.print("m73 groupbox draws={d} content_h={d:.1}\n", .{ gb_draws, gb_content.h });
 }
