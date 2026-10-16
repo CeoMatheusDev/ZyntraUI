@@ -78,6 +78,17 @@ Requires Zig 0.17.0. Add the dependency:
 zig fetch --save https://github.com/CeoMatheusDev/ZyntraUI/archive/refs/tags/v1.21.0.tar.gz
 ```
 
+Wire the module in your `build.zig` (the `fetch` above records the
+`.url`/`.hash` entry in your `build.zig.zon`):
+
+```zig
+const zyntra_dep = b.dependency("zyntra_ui", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("zyntra_ui", zyntra_dep.module("zyntra_ui"));
+```
+
 The snippet below was compiled and run against this tag (`snippet ok`):
 
 ```zig

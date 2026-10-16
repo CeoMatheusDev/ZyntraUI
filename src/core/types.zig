@@ -148,6 +148,31 @@ test "version_* espelham build.zig.zon (fonte de verdade)" {
     try stdt.testing.expectEqualStrings(v.prerelease, version_prerelease);
 }
 
+test "README fetch usa a tag da versão do pacote (M70)" {
+    // Guarda de integração do consumidor: o `zig fetch --save <tarball>`
+    // documentado no README deve apontar exatamente para a tag da versão
+    // em `build.zig.zon`; deriva (404 ou pacote obsoleto para quem segue
+    // a doc) quebra o CI aqui em vez de quebrar o consumidor lá fora.
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const io = stdt.testing.io;
+    const zon = stdt.Io.Dir.cwd().readFileAlloc(io, "build.zig.zon", gpa, .limited(4096)) catch
+        return error.MissingVersion;
+    defer gpa.free(zon);
+    const key = stdt.mem.indexOf(u8, zon, ".version") orelse return error.MissingVersion;
+    const open = stdt.mem.indexOfScalarPos(u8, zon, key, '"') orelse return error.MissingVersion;
+    const close = stdt.mem.indexOfScalarPos(u8, zon, open + 1, '"') orelse return error.MissingVersion;
+    const ver = zon[open + 1 .. close];
+
+    const readme = stdt.Io.Dir.cwd().readFileAlloc(io, "README.md", gpa, .limited(65536)) catch
+        return error.MissingVersion;
+    defer gpa.free(readme);
+    var tag_buf: [64]u8 = undefined;
+    const tag = stdt.fmt.bufPrint(&tag_buf, "refs/tags/v{s}.tar.gz", .{ver}) catch
+        return error.MissingVersion;
+    try stdt.testing.expect(stdt.mem.indexOf(u8, readme, tag) != null);
+}
+
 test "Vec2 init/eql" {
     const std = @import("std");
     const a = Vec2.init(1.5, -2.0);

@@ -14,6 +14,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   alternar estado, filtro vazio com placeholder (sem tabela vazia) e
   resumo na statusbar. Só APIs públicas, sem framework de aplicação,
   sem renderer/GPU, sem dependências novas.
+- Guarda de integração do consumidor (M70): teste
+  `README fetch usa a tag da versão do pacote` — o tarball do
+  `zig fetch` documentado no README deve apontar exatamente para a tag
+  de `build.zig.zon` (falha ruidosamente em deriva; `README.md`
+  declarado como entrada do passo de teste para invalidar o cache).
+  README `Getting started` mostra a fiação do módulo no `build.zig`
+  do consumidor (`b.dependency` + `addImport`), verificada de verdade
+  contra o tarball publicado.
 
 ## [1.21.0] - 2026-10-16
 

@@ -88,6 +88,9 @@ pub fn build(b: *std.Build) void {
     // O teste de sincronia de versão lê build.zig.zon em runtime:
     // declará-lo como entrada invalida o cache quando só o zon muda.
     run_mod_tests.addFileInput(b.path("build.zig.zon"));
+    // O teste da tag de fetch (M70) lê README.md em runtime: mesma
+    // razão para declará-lo como entrada.
+    run_mod_tests.addFileInput(b.path("README.md"));
 
     const test_step = b.step("test", "Executa os testes unitários");
     test_step.dependOn(&run_mod_tests.step);
