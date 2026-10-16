@@ -98,6 +98,11 @@ pub fn statusBar(
     style: style_mod.StatusBarStyle,
 ) context_mod.ContextError!StatusBar {
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
 
     ctx.draw.rectFilled(ctx.allocator, bounds, style.bg) catch |err| switch (err) {
@@ -280,5 +285,19 @@ test "statusbar texto mede e posiciona; integração com button" {
     try stdt.testing.expect(ctx.drawCommands().len > 3);
     const last = ctx.drawCommands()[ctx.drawCommands().len - 1];
     try stdt.testing.expect(last == .rect_filled or last == .rect_outline);
+    ctx.endFrame();
+}
+
+test "statusBar rejeita bounds não-finitos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().statusBarStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 28);
+    ctx.beginFrame();
+    const before = ctx.drawCommands().len;
+    try stdt.testing.expectError(error.InvalidArgument, statusBar(&ctx, nan_bounds, style));
+    try stdt.testing.expectEqual(before, ctx.drawCommands().len);
     ctx.endFrame();
 }

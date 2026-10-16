@@ -199,6 +199,11 @@ pub fn textArea(
 ) context_mod.ContextError!TextAreaResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (len.* > buffer.len or cursor.* > len.* or anchor.* > len.*) return error.InvalidArgument;
     if (!std.math.isFinite(scroll_y.*)) return error.InvalidArgument;
@@ -1001,5 +1006,26 @@ test "TextArea arrasto fora da área clampa; y extremo não estoura" {
     try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(5, -1000) } });
     _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
     try stdt.testing.expectEqual(@as(usize, 0), cursor);
+    ctx.endFrame();
+}
+
+test "textArea rejeita bounds não-finitos sem tocar o estado" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:ta-nan");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    const nan_bounds = types.Rect.init(0, 0, 200, std.math.nan(f32));
+    ctx.beginFrame();
+    try stdt.testing.expectError(error.InvalidArgument, textArea(&ctx, id, nan_bounds, &buf, &len, &cursor, &anchor, &scroll, font, style));
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    try stdt.testing.expectEqual(@as(f32, 0), scroll);
     ctx.endFrame();
 }

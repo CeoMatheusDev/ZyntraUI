@@ -53,6 +53,11 @@ pub fn beginSwitch(
 ) context_mod.ContextError!SwitchResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (style.knob_pad * 2 >= bounds.h) return error.InvalidArgument;
     if (bounds.w < bounds.h) return error.InvalidArgument;
@@ -241,5 +246,20 @@ test "switch knob desliza + contratos inválidos" {
         .knob_pad = -1.0,
     };
     try stdt.testing.expectError(error.InvalidArgument, beginSwitch(&ctx, id, bounds, &checked, bad_style));
+    ctx.endFrame();
+}
+
+test "switch rejeita bounds não-finitos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().switchStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:sw-nan");
+    var checked = false;
+    const nan_bounds = types.Rect.init(std.math.nan(f32), 0, 44, 22);
+    ctx.beginFrame();
+    try stdt.testing.expectError(error.InvalidArgument, beginSwitch(&ctx, id, nan_bounds, &checked, style));
+    try stdt.testing.expect(!checked);
     ctx.endFrame();
 }

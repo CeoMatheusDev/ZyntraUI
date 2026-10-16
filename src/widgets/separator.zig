@@ -52,6 +52,11 @@ pub fn separator(
     style: style_mod.SeparatorStyle,
 ) context_mod.ContextError!void {
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     try fill(ctx, separatorLineRect(bounds, orientation, style.thickness), style.color);
 }
@@ -69,6 +74,11 @@ pub fn separatorLabeled(
 ) context_mod.ContextError!void {
     if (orientation != .horizontal) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (label.len == 0) return separator(ctx, bounds, orientation, style);
 
@@ -206,4 +216,20 @@ test "separatorLabeled emite segmentos + rótulo; valida e degrada" {
     try stdt.testing.expectError(error.InvalidArgument, separatorLabeled(&ctx, bounds, .horizontal, "x", font, style.color, bad_gap));
     const bad_font = metrics_mod.FontMetrics.withSize(0);
     try stdt.testing.expectError(error.InvalidArgument, separatorLabeled(&ctx, bounds, .horizontal, "x", bad_font, style.color, style));
+}
+
+test "separator rejeita bounds não-finitos nas duas variantes" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().separatorStyle();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 20);
+    ctx.beginFrame();
+    const before = ctx.drawCommands().len;
+    try stdt.testing.expectError(error.InvalidArgument, separator(&ctx, nan_bounds, .horizontal, style));
+    try stdt.testing.expectError(error.InvalidArgument, separatorLabeled(&ctx, nan_bounds, .horizontal, "x", font, style.color, style));
+    try stdt.testing.expectEqual(before, ctx.drawCommands().len);
+    ctx.endFrame();
 }

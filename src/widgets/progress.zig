@@ -18,6 +18,11 @@ pub fn progress(
     style: style_mod.ProgressStyle,
 ) context_mod.ContextError!void {
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (!std.math.isFinite(frac)) return error.InvalidArgument;
     const t = std.math.clamp(frac, 0, 1);
@@ -65,5 +70,19 @@ test "progress preenche proporcional e valida" {
     try progress(&ctx, bounds, -3, style);
     try stdt.testing.expectEqual(@as(f32, 0), ctx.drawCommands()[4].rect_filled.rect.w);
     try stdt.testing.expectError(error.InvalidArgument, progress(&ctx, bounds, std.math.nan(f32), style));
+    ctx.endFrame();
+}
+
+test "progress rejeita bounds não-finitos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().progressStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const nan_bounds = types.Rect.init(0, 0, 200, std.math.inf(f32));
+    ctx.beginFrame();
+    const before = ctx.drawCommands().len;
+    try stdt.testing.expectError(error.InvalidArgument, progress(&ctx, nan_bounds, 0.5, style));
+    try stdt.testing.expectEqual(before, ctx.drawCommands().len);
     ctx.endFrame();
 }

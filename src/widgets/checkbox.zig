@@ -9,6 +9,7 @@
 //! insetada quando marcado. Emite 2-3 comandos.
 //! `id` não-nulo obrigatório; `box` deve ter tamanho > 0.
 
+const std = @import("std");
 const types = @import("../core/types.zig");
 const context_mod = @import("../core/context.zig");
 const id_mod = @import("../core/id.zig");
@@ -30,6 +31,11 @@ pub fn checkbox(
 ) context_mod.ContextError!CheckboxResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(box.x) or !std.math.isFinite(box.y) or
+        !std.math.isFinite(box.w) or !std.math.isFinite(box.h))
+    {
+        return error.InvalidArgument;
+    }
     if (box.w <= 0 or box.h <= 0) return error.InvalidArgument;
 
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
@@ -175,5 +181,20 @@ test "checkbox teclado: Espaço alterna, Enter ignora" {
     try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
     const r2 = try checkbox(&ctx, id, box, &checked, style);
     try stdt.testing.expect(!r2.toggled and checked);
+    ctx.endFrame();
+}
+
+test "checkbox rejeita box não-finita" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().checkboxStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:chk-nan");
+    var checked = false;
+    const nan_box = types.Rect.init(std.math.inf(f32), 0, 18, 18);
+    ctx.beginFrame();
+    try stdt.testing.expectError(error.InvalidArgument, checkbox(&ctx, id, nan_box, &checked, style));
+    try stdt.testing.expect(!checked);
     ctx.endFrame();
 }

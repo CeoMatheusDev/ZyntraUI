@@ -74,6 +74,13 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `widgets/popup` (M85): `bounds` não-finitos agora retornam
   `InvalidArgument` na entrada; cobertura nova: borda exclusiva do
   painel, estilo inválido, sem draws em rejeição.
+- Uniformidade de validação de geometria (M86): `bounds` não-finitos
+  agora retornam `InvalidArgument` na entrada dos pontos restantes
+  (`button`, `checkbox`, `scroll`, `progress`, `switch`, `statusbar`,
+  `toolbar`, `separator`/`separatorLabeled`, `textarea`) — todos
+  auditados como livres de conversão numérica ilegal (pior caso era
+  erro interno no desenho); 9 testes novos, cada checagem provada
+  load-bearing (só o teste correspondente falha sem ela).
 - `README.md` reescrito (M76): estrutura profissional (princípios,
   tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
   sem inventar APIs; mesma tag de fetch e instruções verificadas.

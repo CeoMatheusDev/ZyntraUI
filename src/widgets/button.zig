@@ -13,6 +13,7 @@
 //! `bounds`/`style`. `id` não-nulo obrigatório.
 //! Emite 2 comandos (fill + outline). Erros: OOM ou estilo inválido.
 
+const std = @import("std");
 const types = @import("../core/types.zig");
 const context_mod = @import("../core/context.zig");
 const id_mod = @import("../core/id.zig");
@@ -33,6 +34,11 @@ pub fn button(
 ) context_mod.ContextError!ButtonResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
 
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
@@ -207,5 +213,18 @@ test "button teclado: Espaço/Enter clicam com foco" {
     try ctx.pushEvent(.{ .key = .{ .key = .space, .pressed = true, .modifiers = .{} } });
     const r4 = try button(&ctx, id, bounds, style);
     try stdt.testing.expect(!r4.clicked);
+    ctx.endFrame();
+}
+
+test "button rejeita bounds não-finitos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().buttonStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:btn-nan");
+    const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 40);
+    ctx.beginFrame();
+    try stdt.testing.expectError(error.InvalidArgument, button(&ctx, id, nan_bounds, style));
     ctx.endFrame();
 }

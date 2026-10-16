@@ -71,6 +71,11 @@ pub fn toolbar(
     style: style_mod.ToolbarStyle,
 ) context_mod.ContextError!Toolbar {
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
 
     ctx.draw.rectFilled(ctx.allocator, bounds, style.bg) catch |err| switch (err) {
@@ -233,5 +238,19 @@ test "toolbar integração: separador vertical dentro do conteúdo" {
     try stdt.testing.expect(line.x >= tb.content.x and line.x + line.w <= tb.content.x + tb.content.w);
     try stdt.testing.expectEqual(@as(f32, sep_style.thickness), line.w);
     try stdt.testing.expectEqual(tb.item_h, line.h);
+    ctx.endFrame();
+}
+
+test "toolbar rejeita bounds não-finitos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().toolbarStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const nan_bounds = types.Rect.init(0, std.math.inf(f32), 200, 40);
+    ctx.beginFrame();
+    const before = ctx.drawCommands().len;
+    try stdt.testing.expectError(error.InvalidArgument, toolbar(&ctx, nan_bounds, style));
+    try stdt.testing.expectEqual(before, ctx.drawCommands().len);
     ctx.endFrame();
 }

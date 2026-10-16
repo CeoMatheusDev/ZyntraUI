@@ -55,6 +55,11 @@ pub fn beginScroll(
 ) context_mod.ContextError!ScrollResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (!std.math.isFinite(content_h) or content_h < 0) return error.InvalidArgument;
     if (!std.math.isFinite(speed) or speed <= 0) return error.InvalidArgument;
@@ -351,5 +356,20 @@ test "scroll teclado: PageUp/Down, Home/End com foco" {
     try stdt.testing.expect(!r2.scrolled);
     try stdt.testing.expectEqual(@as(f32, 0), off);
     try endScroll(&ctx, bounds, off, 300, style);
+    ctx.endFrame();
+}
+
+test "scroll rejeita bounds não-finitos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().scrollStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:scr-nan");
+    var off: f32 = 0;
+    const nan_bounds = types.Rect.init(0, 0, 200, std.math.nan(f32));
+    ctx.beginFrame();
+    try stdt.testing.expectError(error.InvalidArgument, beginScroll(&ctx, id, nan_bounds, &off, 300, 24, style));
+    try stdt.testing.expectEqual(@as(f32, 0), off);
     ctx.endFrame();
 }
