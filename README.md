@@ -2,99 +2,92 @@
 
 # ZyntraUI
 
-**Modern interfaces. Native performance. Pure Zig.**
+**Build interfaces with control. Render with freedom. Ship with Zig.**
 
-A modern, lightweight and high-performance GUI toolkit written entirely in Zig. ZyntraUI is designed for applications that need precise control over UI state, predictable rendering output, and maximum performance with minimal runtime dependencies.
+A lightweight, immediate-mode GUI toolkit written in Zig, built around explicit state ownership, deterministic draw commands, and a renderer-independent architecture.
 
-[![Status](https://img.shields.io/badge/status-stable-green)](https://github.com/CeoMatheusDev/ZyntraUI)
-[![Language](https://img.shields.io/badge/language-Zig-f7a41d)](https://ziglang.org/)
-[![Release](https://img.shields.io/badge/release-v1.21.1-blue)](https://github.com/CeoMatheusDev/ZyntraUI/releases)
-[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/CeoMatheusDev/ZyntraUI/blob/main/LICENSE)
+[![Zig](https://img.shields.io/badge/Zig-0.17.0-F7A41D?logo=zig&logoColor=white)](https://ziglang.org/)
+[![Release](https://img.shields.io/badge/release-v1.21.1-2563EB)](https://github.com/CeoMatheusDev/ZyntraUI/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE)
+
+[Getting started](#getting-started) · [Features](#why-zyntraui) · [Architecture](#architecture) · [Examples](#examples-and-validation)
 
 </div>
 
 ---
 
-## Sumário
-
-- Overview
-- Use cases
-- Key features
-- Widgets (resumo)
-- Architecture & API surface
-- Getting started (quickstart)
-- Examples & benchmarks
-- CI, testing and validation
-- Contributing & Security
-- License
-
----
-
 ## Overview
 
-ZyntraUI builds immediate-mode style interfaces frame-by-frame with an emphasis on explicit ownership and determinism. You provide normalized input events and caller-owned widget state each frame; the library emits an explicit draw-list (`DrawCommand` sequence) that any renderer can consume.
+**ZyntraUI** is a modular GUI toolkit for developers who want to own their application state and rendering pipeline. Its Zig-native core processes normalized input events and produces a backend-neutral sequence of draw commands for the host application's renderer.
 
-The public API is stable (since 1.0.0). Breaking changes require a MAJOR release; see `CHANGELOG.md` for history.
+Rather than tying UI logic to a window system or GPU API, ZyntraUI keeps those concerns separate. You choose how to supply events, manage widget state, and render each frame.
 
-## Use cases
+> **Scope:** ZyntraUI is a UI toolkit, not a complete windowing framework. Integrate your own platform event source and rendering backend. A reference software rasterizer is included.
 
-- Desktop applications that need a lightweight, testable UI layer without heavy runtime dependencies.
-- Embedded or headless environments where predictable render outputs are required for snapshots or testing.
-- Tooling and internal apps where deterministic behavior and precise control over memory are important.
+## Why ZyntraUI?
 
-## Key features
+- **Explicit ownership:** Your application owns widget state, including text buffers, selections, scroll positions, and toggles.
+- **Renderer independence:** Consume draw commands with the graphics backend of your choice.
+- **Predictable frame lifecycle:** Build each frame using a clear begin → widgets → end flow.
+- **Allocation-aware design:** A per-frame arena supports transient draw commands and text copies, avoiding hidden hot-path allocations.
+- **Deterministic behavior:** Explicit inputs and draw lists make UI logic suitable for automated and snapshot testing.
+- **Pure Zig core:** Use the native Zig API or the optional C ABI without introducing a heavyweight GUI runtime.
 
-- Caller-owned state: selection, scroll offsets, text buffers, toggles are all managed by the application.
-- Zero hidden allocations in the hot path; per-frame arena backs draw lists and text copies.
-- Renderer-agnostic: draw list is backend neutral (rect, line, text, clip, etc.).
-- Deterministic output suitable for unit and fuzz testing.
-- Pure Zig core with an optional C ABI (`src/c-abi/zyntra.h`).
-- Minimal dependencies and a small compile-time footprint.
+## Widgets
 
-## Widgets (resumo)
+ZyntraUI provides **25 public widgets**, organized around common interface needs:
 
-25 public widgets are available via `@import("zyntra_ui")` → `widgets.*`. Major categories:
+| Category | Widgets |
+| --- | --- |
+| Input & selection | Button, checkbox, radio, switch, slider, text input, textarea, combo |
+| Views & navigation | Label, wrapped label, list view, tree view, table, tab bar, scroll, splitter, menu, popup, modal, tooltip |
+| Feedback | Progress, spinner |
+| Composition | Separator, labeled separator, toolbar, status bar, group box |
 
-- Input & selection: `button`, `checkbox`, `radio`, `switch`, `slider`, `text_input`, `textarea`, `combo`
-- Views & navigation: `label`, `labelWrapped`, `list_view`, `tree_view`, `table`, `tab_bar`, `scroll`, `splitter`, `menu`, `popup`, `modal`, `tooltip`
-- Feedback: `progress`, `spinner`
-- Composition: `separator`, `separatorLabeled`, `toolbar`, `statusbar`, `groupbox`
+Widgets are exposed through the `widgets` namespace of `@import("zyntra_ui")`. Refer to the in-repository documentation and examples for individual APIs.
 
-Consult in-repo docs for per-widget API details and examples.
+## Architecture
 
-## Architecture & API surface
+ZyntraUI separates UI behavior, layout, styling, input, and rendering into focused modules:
 
-Directory layout (important modules):
-
+```text
 src/
-├── root.zig      Public API (single supported `@import`)
-├── core/         Context, types, stable Ids
-├── event/        Normalized input events
-├── draw/         Draw lists + renderer contract
-├── layout/       Constraints, insets, placement
-├── style/        Theme and widget styles
-├── widgets/      Widget implementations
-├── text/         UTF-8 metrics and fallback measurement
-├── anim/         Optional easing and tween helpers
-├── software/     Reference software rasterizer (example backend)
-└── c-abi/        Optional C ABI (zyntra.h)
+├── root.zig       Public Zig API
+├── core/          Context, types, and stable IDs
+├── event/         Normalized input events
+├── draw/          Draw commands and renderer contract
+├── layout/        Constraints and placement
+├── style/         Themes and widget styles
+├── widgets/       Widget implementations
+├── text/          UTF-8 metrics and text measurement
+├── anim/          Optional animation helpers
+├── software/      Reference software rasterizer
+└── c-abi/         Optional C interface
+```
 
-API notes:
-- Create one `Context` per UI instance, push events, call `beginFrame()` → widgets → `endFrame()`, then submit `drawCommands()` to your renderer.
-- Widgets take caller-provided state handles and explicit style inputs.
-- Time-dependent widgets accept an explicit timestamp parameter for deterministic testing.
+### Frame lifecycle
 
-## Getting started (quickstart)
+1. Create a `Context` for each UI instance.
+2. Start a frame with `beginFrame()` and provide normalized input events.
+3. Invoke widgets with application-owned state and explicit styles.
+4. Retrieve `drawCommands()` and submit them to your renderer.
+5. Finish the frame with `endFrame()`.
 
-Requirements: Zig 0.17.0.
+Time-dependent widgets can receive an explicit timestamp, allowing repeatable behavior in tests.
 
-Add as a dependency:
+## Getting started
+
+**Requirement:** Zig **0.17.0**.
+
+### Install
+
+Add the tagged release to your Zig project:
 
 ```sh
 zig fetch --save https://github.com/CeoMatheusDev/ZyntraUI/archive/refs/tags/v1.21.1.tar.gz
 ```
 
-In consumer `build.zig`:
+Then import the module in your consumer's `build.zig`:
 
 ```zig
 const zyntra_dep = b.dependency("zyntra_ui", .{
@@ -104,51 +97,64 @@ const zyntra_dep = b.dependency("zyntra_ui", .{
 exe.root_module.addImport("zyntra_ui", zyntra_dep.module("zyntra_ui"));
 ```
 
-Small runtime snippet (compiled against v1.21.1):
+### Minimal draw-command example
+
+The following illustrates a frame using the public context and drawing API. It produces commands; displaying them requires a renderer supplied by the application.
 
 ```zig
 const zyntra_ui = @import("zyntra_ui");
 
-var ctx = try zyntra_ui.Context.init(allocator, .{ .viewport = zyntra_ui.Rect.init(0,0,800,600) });
+var ctx = try zyntra_ui.Context.init(allocator, .{
+    .viewport = zyntra_ui.Rect.init(0, 0, 800, 600),
+});
 defer ctx.deinit();
 
 ctx.beginFrame();
-try ctx.draw.rectFilled(ctx.allocator, zyntra_ui.Rect.init(10,10,100,40), zyntra_ui.Color.rgb(70,110,180));
+try ctx.draw.rectFilled(
+    ctx.allocator,
+    zyntra_ui.Rect.init(10, 10, 100, 40),
+    zyntra_ui.Color.rgb(70, 110, 180),
+);
+
+// Submit ctx.drawCommands() to your rendering backend here.
 ctx.endFrame();
 ```
 
-## Examples & benchmarks
+For a runnable integration example, start with [`examples/minimal.zig`](examples/minimal.zig).
 
-- `zig build run-example` — per-widget tour (`examples/minimal.zig`).
-- `zig build run-app` — integrated mini-app demonstrating toolbars, tab bars, tables and status bars (`examples/app.zig`).
-- `zig build run-bench` — pipeline benchmark and notes in `docs/BENCHMARKS.md`.
+## Examples and validation
 
-C consumers: see `src/c-abi/zyntra.h` and `docs/C_ABI.md`.
+Run these commands from the repository root:
 
-## CI, testing and validation
-
-- Unit tests and fuzz tests run on CI for Zig 0.17.0 (Debug/ReleaseFast).
-- Example apps and a C-ABI integration test are exercised in CI flows.
-- Recommended local quick checks:
-
-```bash
+```sh
+zig build run-example  # Widget and input behavior walkthrough
+zig build run-app      # Integrated mini-app example
+zig build run-bench    # Frame pipeline benchmark
+zig build test         # Unit tests
 zig fmt --check src/ examples/ build.zig
-zig build test
-zig build run-example
 ```
 
-## Contributing & Security
+The included examples exercise the UI pipeline; they do not provide a standalone desktop window. For benchmark methodology and results, see [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
-Read `CONTRIBUTING.md` and `SECURITY.md` for contribution workflows, commit conventions, and vulnerability reporting. Keep commits small and focused; follow Conventional Commits.
+## C interoperability
+
+An optional C ABI is available for non-Zig consumers. See [`src/c-abi/zyntra.h`](src/c-abi/zyntra.h) and [`docs/C_ABI.md`](docs/C_ABI.md) for the exported interface and integration details.
+
+## Project resources
+
+- [Changelog](CHANGELOG.md) — release history and API changes
+- [Contributing](CONTRIBUTING.md) — development and contribution guidelines
+- [Security](SECURITY.md) — vulnerability reporting
+- [Documentation](docs/) — technical references and benchmarks
 
 ## License
 
-MIT — see `LICENSE`.
+Distributed under the [MIT License](LICENSE).
 
 ---
 
 <div align="center">
 
-**ZyntraUI** · Built with Zig · Designed for control, determinism, and performance
+**ZyntraUI** · Explicit state · Predictable rendering · Pure Zig
 
 </div>
