@@ -54,6 +54,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `widgets/radio` (M80): `bounds` não-finitos agora retornam
   `InvalidArgument` na entrada; cobertura nova: tecla `End`, teto de
   256 opções, estilo inválido.
+- `widgets/splitter` (M81): correção real de robustez (sem mudar API
+  válida) — `bounds` não-finitos agora retornam `InvalidArgument` na
+  entrada; antes, `splitterClampPos` com `lo`/`hi` NaN violava a
+  asserção interna de `std.math.clamp` (`lower <= upper`) e abortava;
+  cobertura nova: orientação vertical, clamp de `pos`, teclado.
 - `README.md` reescrito (M76): estrutura profissional (princípios,
   tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
   sem inventar APIs; mesma tag de fetch e instruções verificadas.

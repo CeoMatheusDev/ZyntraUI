@@ -63,6 +63,11 @@ pub fn beginSplitter(
 ) context_mod.ContextError!SplitterResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid()) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
+    {
+        return error.InvalidArgument;
+    }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (!std.math.isFinite(pos.*)) return error.InvalidArgument;
 
@@ -191,5 +196,78 @@ test "Splitter drag, clamp, teclado" {
     try stdt.testing.expectError(error.InvalidArgument, beginSplitter(&ctx, id, types.Rect.init(0, 0, 0, 0), .horizontal, &pos, style));
     const bad_style = style_mod.SplitterStyle{ .handle_w = -1, .bg = .{}, .bg_hover = .{}, .bg_drag = .{}, .handle_h = 8.0 };
     try stdt.testing.expectError(error.InvalidArgument, beginSplitter(&ctx, id, bounds, .horizontal, &pos, bad_style));
+    ctx.endFrame();
+}
+
+test "splitter vertical, limites de pos e bounds NaN" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().splitterStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 400, 300);
+    const id = id_mod.Id.fromString("test:split-v");
+    var pos: f32 = 9999; // fora da faixa → clampa na entrada
+
+    // Pos inicial além do máximo clampa sem changed.
+    ctx.beginFrame();
+    const r0 = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expectEqual(@as(f32, 400), pos);
+    try stdt.testing.expect(!r0.changed);
+    ctx.endFrame();
+
+    // Press no handle vertical (x=400, handle_w=8 → faixa 396..404):
+    // captura e drag segue o mouse X.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(400, 150) },
+    });
+    const r1 = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expect(r1.dragging);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(100, 150) } });
+    const r2 = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expect(r2.dragging and r2.changed);
+    try stdt.testing.expectEqual(@as(f32, 100), pos);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(100, 150) },
+    });
+    _ = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expect(ctx.press_owner == null);
+    ctx.endFrame();
+
+    // Teclado vertical: Left/Right ajustam, Home/End saltam.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(100, 150) },
+    });
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = false, .pos = types.Vec2.init(100, 150) },
+    });
+    _ = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    _ = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expectEqual(@as(f32, 92), pos);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    _ = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expectEqual(@as(f32, 400), pos);
+    ctx.endFrame();
+
+    // Pos e bounds não-finitos: InvalidArgument, sem corromper pos.
+    ctx.beginFrame();
+    var nan_pos: f32 = std.math.nan(f32);
+    try stdt.testing.expectError(error.InvalidArgument, beginSplitter(&ctx, id, bounds, .vertical, &nan_pos, style));
+    const nan_bounds = types.Rect.init(std.math.nan(f32), 0, 400, 300);
+    const before = pos;
+    try stdt.testing.expectError(error.InvalidArgument, beginSplitter(&ctx, id, nan_bounds, .vertical, &pos, style));
+    try stdt.testing.expectEqual(before, pos);
     ctx.endFrame();
 }
