@@ -85,6 +85,9 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `widgets/popup` (M85): `bounds` não-finitos agora retornam
   `InvalidArgument` na entrada; cobertura nova: borda exclusiva do
   painel, estilo inválido, sem draws em rejeição.
+- `core/context` (M87): viewport não-finita agora rejeitada em `init`
+  e `setViewport` (antes contaminava dim/clamp dos widgets);
+  cobertura nova: foco órfão fora do registro e slot único de Tab.
 - Uniformidade de validação de geometria (M86): `bounds` não-finitos
   agora retornam `InvalidArgument` na entrada dos pontos restantes
   (`button`, `checkbox`, `scroll`, `progress`, `switch`, `statusbar`,

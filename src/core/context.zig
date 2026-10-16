@@ -88,6 +88,11 @@ pub const Context = struct {
     /// Cria o contexto. Valida a config; listas iniciam vazias
     /// (sem alocação) para `init` nunca falhar por OOM.
     pub fn init(allocator: std.mem.Allocator, config: ContextConfig) ContextError!Self {
+        if (!std.math.isFinite(config.viewport.x) or !std.math.isFinite(config.viewport.y) or
+            !std.math.isFinite(config.viewport.w) or !std.math.isFinite(config.viewport.h))
+        {
+            return error.InvalidArgument;
+        }
         if (config.viewport.w < 0 or config.viewport.h < 0) {
             return error.InvalidArgument;
         }
@@ -235,6 +240,11 @@ pub const Context = struct {
     }
 
     pub fn setViewport(self: *Self, viewport: types.Rect) ContextError!void {
+        if (!std.math.isFinite(viewport.x) or !std.math.isFinite(viewport.y) or
+            !std.math.isFinite(viewport.w) or !std.math.isFinite(viewport.h))
+        {
+            return error.InvalidArgument;
+        }
         if (viewport.w < 0 or viewport.h < 0) return error.InvalidArgument;
         self.viewport = viewport;
     }
@@ -398,5 +408,54 @@ test "Context M12: registro de focáveis + avanço com wrap" {
     ctx.endFrame();
     ctx.beginFrame(); // → b
     try std.testing.expect(ctx.focus_owner == b);
+    ctx.endFrame();
+}
+
+test "Context M12b: viewport não-finita, foco órfão e Tab único" {
+    const idz = @import("id.zig");
+    const allocator = std.testing.allocator;
+    var ctx = try Context.init(allocator, .{});
+    defer ctx.deinit();
+    const a = idz.Id.fromString("a");
+    const b = idz.Id.fromString("b");
+
+    // Viewport NaN: init e setViewport rejeitam sem efeito.
+    try std.testing.expectError(
+        error.InvalidArgument,
+        Context.init(allocator, .{ .viewport = types.Rect.init(0, 0, std.math.nan(f32), 600) }),
+    );
+    try std.testing.expectError(
+        error.InvalidArgument,
+        ctx.setViewport(types.Rect.init(std.math.inf(f32), 0, 800, 600)),
+    );
+    try std.testing.expectEqual(types.Rect.init(0, 0, 0, 0), ctx.viewport);
+
+    // Foco em id fora do registro: avanço cai no primeiro/último.
+    ctx.focus_owner = idz.Id.fromString("sumiu");
+    ctx.beginFrame();
+    try ctx.registerFocusable(a);
+    try ctx.registerFocusable(b);
+    ctx.requestFocusAdvance(.next);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try std.testing.expect(ctx.focus_owner == a);
+    try ctx.registerFocusable(a);
+    try ctx.registerFocusable(b);
+    ctx.focus_owner = idz.Id.fromString("sumiu");
+    ctx.requestFocusAdvance(.prev);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try std.testing.expect(ctx.focus_owner == b);
+    ctx.endFrame();
+
+    // Slot único de avanço: último Tab do frame vence.
+    ctx.beginFrame();
+    try ctx.registerFocusable(a);
+    try ctx.registerFocusable(b);
+    ctx.requestFocusAdvance(.next);
+    ctx.requestFocusAdvance(.prev);
+    ctx.endFrame();
+    ctx.beginFrame(); // foco era b → prev cai em a
+    try std.testing.expect(ctx.focus_owner == a);
     ctx.endFrame();
 }
