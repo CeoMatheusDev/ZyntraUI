@@ -891,4 +891,26 @@ pub fn main() !void {
             dv3_titles[dock_mod.dockGroup(&dv3, dv3_panes[0].node).?.activePane()],
         },
     );
+
+    // Serializacao do layout (M79, docking passo 4c): 'dockSerialize' grava
+    // um blob versionado e 'dockDeserialize' restaura tudo-ou-nada. Aqui o
+    // layout do m78 (um grupo de 2 abas, ativo 0) vai e volta num layout
+    // novo, e a versao do formato e lida sem interpretar o corpo.
+    var dv4_buf: [zyntra_ui.dock_serial_max_size]u8 = undefined;
+    const dv4_n = try zyntra_ui.dockSerialize(&dv3, &dv4_buf);
+    const dv4_ver = try zyntra_ui.dockSerialVersion(dv4_buf[0..dv4_n]);
+    var dv4: zyntra_ui.DockLayout = undefined;
+    const dv4_used = try zyntra_ui.dockDeserialize(&dv4, dv4_buf[0..dv4_n]);
+    const dv4_group = dock_mod.dockGroup(&dv4, 0).?;
+    std.debug.print(
+        "m79 serial bytes={d} used={d} ver={d} groups={d} tabs={d} active={d}\n",
+        .{
+            dv4_n,
+            dv4_used,
+            dv4_ver,
+            dock_mod.dockLeafCount(&dv4),
+            dv4_group.count,
+            dv4_group.active,
+        },
+    );
 }

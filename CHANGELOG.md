@@ -7,6 +7,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `dock/serialize` (M79, docking passo 4c): serialização **versionada** do
+  `DockLayout` para persistência — `dockSerialize` grava um blob binário
+  little-endian (magic `ZDKL`, versão, nós com folhas/abas e splits) e
+  `dockDeserialize` o restaura (tudo-ou-nada: em erro o destino fica
+  intacto). Valida entrada não confiável (versão/magic, faixas de
+  `len`/`root`, invariantes da folha/split e a árvore: rejeita ciclos,
+  filhos compartilhados e órfãos) e é canônico (re-serializar dá os mesmos
+  bytes). Acompanham `dockSerializedSize`, `dockSerialVersion`,
+  `dock_serial_version` e `dock_serial_max_size`; teste de fuzz garante que
+  lixo nunca vira layout inválido. `examples/minimal.zig` ganha a demo `m79`.
 - `dock/layout`: **abas acopladas por grupo** (M78, docking passo 4a) — a
   folha da árvore passa a ser um `DockGroup` (até `DockGroup.max_tabs = 4`
   painéis, com aba ativa): `dockGroup`/`dockGroupMut` leem o grupo,

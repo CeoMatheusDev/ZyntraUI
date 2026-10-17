@@ -52,6 +52,7 @@ pub const style = struct {
 
 pub const dock = struct {
     pub const layout = @import("dock/layout.zig");
+    pub const serialize = @import("dock/serialize.zig");
 };
 
 pub const widgets = struct {
@@ -182,6 +183,13 @@ pub const DockError = dock.layout.DockError;
 pub const DockSplitInfo = dock.layout.DockSplitInfo;
 pub const DockPaneInfo = dock.layout.DockPaneInfo;
 pub const DockZone = dock.layout.DockZone;
+pub const DockSerializeError = dock.serialize.Error;
+pub const dock_serial_version = dock.serialize.version;
+pub const dock_serial_max_size = dock.serialize.max_size;
+pub const dockSerializedSize = dock.serialize.dockSerializedSize;
+pub const dockSerialVersion = dock.serialize.dockSerialVersion;
+pub const dockSerialize = dock.serialize.dockSerialize;
+pub const dockDeserialize = dock.serialize.dockDeserialize;
 pub const DockStyle = style.style_mod.DockStyle;
 pub const DockViewOptions = widgets.dock_view.DockViewOptions;
 pub const DockDrop = widgets.dock_view.DockDrop;
@@ -221,6 +229,7 @@ test {
     _ = @import("layout/layout.zig");
     _ = @import("style/style.zig");
     _ = @import("dock/layout.zig");
+    _ = @import("dock/serialize.zig");
     _ = @import("text/metrics.zig");
     _ = @import("text/wrap.zig");
     _ = @import("draw/renderer.zig");

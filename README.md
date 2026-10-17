@@ -59,7 +59,7 @@ src/
 ├── layout/        Constraints and placement
 ├── style/         Themes and widget styles
 ├── widgets/       Widget implementations
-├── dock/          Docking layout model
+├── dock/          Docking layout model and serialization
 ├── text/          UTF-8 metrics and text measurement
 ├── anim/          Optional animation helpers
 ├── software/      Reference software rasterizer
