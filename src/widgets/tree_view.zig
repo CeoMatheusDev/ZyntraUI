@@ -814,6 +814,9 @@ test "TreeView golden G6: scrollbar usa S2 enquanto linhas usam S1" {
     var items = [_]TreeItem{
         .{ .label = "X", .children = &children, .expanded = false },
         .{ .label = "Y", .children = &[_]TreeItem{} },
+        .{ .label = "Z", .children = &[_]TreeItem{} },
+        .{ .label = "W", .children = &[_]TreeItem{} },
+        .{ .label = "Q", .children = &[_]TreeItem{} },
     };
     const id = id_mod.Id.fromString("golden:g6");
     var selected: usize = 0;
@@ -835,14 +838,16 @@ test "TreeView golden G6: scrollbar usa S2 enquanto linhas usam S1" {
             switch (texts) {
                 0 => try testing.expectEqualStrings("X", ctx.draw.textOf(cmd)),
                 1 => try testing.expectEqualStrings("Y", ctx.draw.textOf(cmd)),
+                2 => try testing.expectEqualStrings("Z", ctx.draw.textOf(cmd)),
+                3 => try testing.expectEqualStrings("W", ctx.draw.textOf(cmd)),
                 else => return error.InvalidArgument,
             }
             texts += 1;
         }
     }
-    try testing.expectEqual(@as(usize, 2), texts);
-    // Fundo + 2 linhas + expansor de X + thumb da scrollbar de S2.
-    try testing.expectEqual(@as(usize, 5), filled_rects);
+    try testing.expectEqual(@as(usize, 4), texts);
+    // Fundo + 4 linhas + expansor de X + thumb da scrollbar de S2.
+    try testing.expectEqual(@as(usize, 7), filled_rects);
     ctx.endFrame();
 }
 
