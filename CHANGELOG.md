@@ -7,6 +7,19 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `widgets/panel` (M74, Docking passo 1): *shell* de painel acoplável —
+  cabeçalho com título (truncado à largura disponível) + controles de
+  colapso (chevron) e fechar (`×`, quando `closable`), devolvendo o rect
+  de conteúdo para o chamador posicionar os filhos. `collapsed: *bool`
+  fica no chamador (padrão ImGui-like); colapsado, só o cabeçalho é
+  desenhado e `content` volta zerado. Press captura, release dentro
+  aciona; teclado (foco) alterna colapso com Espaço/Enter e circula com
+  Tab; `close_requested` apenas reporta (ciclo de vida é do chamador).
+  `PanelStyle` + `Theme.panelStyle()`. Sem arraste/aninhamento
+  automático: combine com `splitter`/`splitterPanes`.
+- `widgets/splitter`: `splitterPanes(bounds, orientation, pos, style)` —
+  divisão pura em dois lados + faixa da divisória (clampada, nunca
+  negativa), para aninhar painéis (hierarquia) sem boilerplate.
 - `widgets/menu`: `MenuItem` ganha `checked: ?bool` e `shortcut: ?[]const u8`
   (aditivo, com defaults). Itens marcáveis reservam uma coluna de tique à
   esquerda (`true` desenha o tique vetorial, sem fonte/atlas); `shortcut`

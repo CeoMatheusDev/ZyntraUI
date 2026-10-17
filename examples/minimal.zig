@@ -20,6 +20,8 @@ const separator_mod = @import("zyntra_ui").widgets.separator;
 const toolbar_mod = @import("zyntra_ui").widgets.toolbar;
 const statusbar_mod = @import("zyntra_ui").widgets.statusbar;
 const groupbox_mod = @import("zyntra_ui").widgets.groupbox;
+const panel_mod = @import("zyntra_ui").widgets.panel;
+const splitter_mod = @import("zyntra_ui").widgets.splitter;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -674,4 +676,39 @@ pub fn main() !void {
     const gb_draws = ctx.drawCommands().len;
     ctx.endFrame();
     std.debug.print("m73 groupbox draws={d} content_h={d:.1}\n", .{ gb_draws, gb_content.h });
+
+    // Panel + splitter aninhável (M74, base do docking): cabeçalho com
+    // título/controles devolve o conteúdo; o splitter divide esse conteúdo
+    // em dois painéis (lado a / lado b) — composição para hierarquia.
+    var panel_collapsed = false;
+    const panel_bounds = zyntra_ui.Rect.init(600, 690, 220, 120);
+    const split_style = theme.splitterStyle();
+    ctx.beginFrame();
+    const pni = try panel_mod.panel(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m74:panel"),
+        panel_bounds,
+        &panel_collapsed,
+        .{ .title = "Camadas", .closable = true },
+        font,
+        theme.panelStyle(),
+    );
+    var split_pos: f32 = pni.content.x + pni.content.w * 0.5;
+    const panes = splitter_mod.splitterPanes(pni.content, .vertical, split_pos, split_style);
+    _ = try splitter_mod.beginSplitter(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m74:split"),
+        pni.content,
+        .vertical,
+        &split_pos,
+        split_style,
+    );
+    _ = try label_mod.label(&ctx, zyntra_ui.Id.fromString("examples/m74:la"), panes.a, "Esq", theme.text, font, false);
+    _ = try label_mod.label(&ctx, zyntra_ui.Id.fromString("examples/m74:lb"), panes.b, "Dir", theme.text, font, false);
+    const pn_draws = ctx.drawCommands().len;
+    ctx.endFrame();
+    std.debug.print(
+        "m74 panel draws={d} content_h={d:.1} left_w={d:.1} right_w={d:.1}\n",
+        .{ pn_draws, pni.content.h, panes.a.w, panes.b.w },
+    );
 }

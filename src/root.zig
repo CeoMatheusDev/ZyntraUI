@@ -78,6 +78,7 @@ pub const widgets = struct {
     pub const toolbar = @import("widgets/toolbar.zig");
     pub const statusbar = @import("widgets/statusbar.zig");
     pub const groupbox = @import("widgets/groupbox.zig");
+    pub const panel = @import("widgets/panel.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -146,6 +147,7 @@ pub const Toolbar = widgets.toolbar.Toolbar;
 pub const StatusBarStyle = style.style_mod.StatusBarStyle;
 pub const StatusBar = widgets.statusbar.StatusBar;
 pub const GroupBoxStyle = style.style_mod.GroupBoxStyle;
+pub const PanelStyle = style.style_mod.PanelStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -167,6 +169,9 @@ pub const ComboResult = widgets.combo.ComboResult;
 pub const TabBarResult = widgets.tab_bar.TabBarResult;
 pub const SplitterResult = widgets.splitter.SplitterResult;
 pub const SplitterOrientation = widgets.splitter.SplitterOrientation;
+pub const SplitterPanes = widgets.splitter.SplitterPanes;
+pub const PanelOptions = widgets.panel.PanelOptions;
+pub const PanelResult = widgets.panel.PanelResult;
 pub const ListViewResult = widgets.list_view.ListViewResult;
 pub const TreeViewResult = widgets.tree_view.TreeViewResult;
 pub const TreeItem = widgets.tree_view.TreeItem;
@@ -231,4 +236,5 @@ test {
     _ = @import("widgets/toolbar.zig");
     _ = @import("widgets/statusbar.zig");
     _ = @import("widgets/groupbox.zig");
+    _ = @import("widgets/panel.zig");
 }

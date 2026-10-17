@@ -350,6 +350,42 @@ pub const GroupBoxStyle = extern struct {
     }
 };
 
+/// Estilo de painel acoplável (M74). Chrome do cabeçalho + métricas.
+pub const PanelStyle = extern struct {
+    /// Fundo do corpo (transparente, `a == 0` ⇒ não desenhado).
+    bg: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Fundo do cabeçalho (transparente ⇒ não desenhado).
+    header_bg: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Cor da borda.
+    border: types.Color,
+    /// Espessura da borda em px (0 ⇒ sem borda).
+    border_width: f32 = 1.0,
+    /// Cor do texto do título.
+    title: types.Color,
+    /// Cor dos glifos dos controles (chevron/close).
+    control: types.Color,
+    /// Fundo do controle sob o mouse (transparente ⇒ não desenhado).
+    control_hover: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Linha sob o cabeçalho (transparente ⇒ não desenhada).
+    separator: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Padding vertical do cabeçalho (altura = `lineHeight + 2*header_pad`).
+    header_pad: f32 = 6.0,
+    /// Padding horizontal (título) e reserva lateral.
+    padding_x: f32 = 8.0,
+    /// Padding vertical do conteúdo.
+    padding_y: f32 = 8.0,
+    /// Largura/altura reservada a cada controle do cabeçalho.
+    control_size: f32 = 18.0,
+
+    pub fn isValid(self: PanelStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0 and
+            std.math.isFinite(self.header_pad) and self.header_pad >= 0 and
+            std.math.isFinite(self.padding_x) and self.padding_x >= 0 and
+            std.math.isFinite(self.padding_y) and self.padding_y >= 0 and
+            std.math.isFinite(self.control_size) and self.control_size > 0;
+    }
+};
+
 /// Estilo de barra de status (M68). Chrome + métricas de
 /// posicionamento dos segmentos (ver `widgets/statusbar`).
 pub const StatusBarStyle = extern struct {
@@ -535,6 +571,23 @@ pub const Theme = extern struct {
             .border_width = 1.0,
             .padding = 8.0,
             .title_gap = 6.0,
+        };
+    }
+
+    pub fn panelStyle(self: Theme) PanelStyle {
+        return .{
+            .bg = self.surface,
+            .header_bg = self.bg,
+            .border = self.border,
+            .border_width = 1.0,
+            .title = self.text,
+            .control = self.text,
+            .control_hover = self.accent,
+            .separator = self.border,
+            .header_pad = 6.0,
+            .padding_x = 8.0,
+            .padding_y = 8.0,
+            .control_size = 18.0,
         };
     }
 

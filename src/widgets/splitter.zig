@@ -6,6 +6,8 @@
 //!   pos = y) ou `.vertical` (divide horizontalmente, pos = x).
 //! - Mouse: press na divisória captura; drag move; release encerra.
 //! - Teclado com foco: setas ajustam em 8 px, Home/End saltam.
+//! - `splitterPanes(bounds, orientation, pos, style)` (M74): divisão pura
+//!   em dois lados + faixa da divisória, para aninhar painéis (item 6).
 //! - `SplitterStyle` + `Theme.splitterStyle()` — cores, largura.
 //! `id` não-nulo obrigatório.
 
@@ -51,6 +53,50 @@ pub fn splitterClampPos(bounds: types.Rect, orientation: SplitterOrientation, po
     };
     if (hi <= lo) return lo;
     return std.math.clamp(pos, lo, hi);
+}
+
+/// Divisão de uma área em dois lados + a faixa da divisória, em torno de
+/// `pos` (px do chamador, clampado). Pura — base para aninhar painéis
+/// (item 6): o chamador posiciona os filhos em `a`/`b` e passa `divider`
+/// ao próprio `beginSplitter`. Áreas nunca negativas.
+pub const SplitterPanes = struct {
+    /// Lado inicial (antes da divisória).
+    a: types.Rect,
+    /// Lado final (depois da divisória).
+    b: types.Rect,
+    /// Faixa ocupada pela divisória (espessura = handle do estilo).
+    divider: types.Rect,
+};
+
+pub fn splitterPanes(
+    bounds: types.Rect,
+    orientation: SplitterOrientation,
+    pos: f32,
+    style: style_mod.SplitterStyle,
+) SplitterPanes {
+    const p = splitterClampPos(bounds, orientation, pos);
+    switch (orientation) {
+        .horizontal => {
+            const half = style.handle_h / 2;
+            const d0 = @max(bounds.y, p - half);
+            const d1 = @min(bounds.y + bounds.h, p + half);
+            return .{
+                .a = .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = @max(0, d0 - bounds.y) },
+                .divider = .{ .x = bounds.x, .y = d0, .w = bounds.w, .h = @max(0, d1 - d0) },
+                .b = .{ .x = bounds.x, .y = d1, .w = bounds.w, .h = @max(0, bounds.y + bounds.h - d1) },
+            };
+        },
+        .vertical => {
+            const half = style.handle_w / 2;
+            const d0 = @max(bounds.x, p - half);
+            const d1 = @min(bounds.x + bounds.w, p + half);
+            return .{
+                .a = .{ .x = bounds.x, .y = bounds.y, .w = @max(0, d0 - bounds.x), .h = bounds.h },
+                .divider = .{ .x = d0, .y = bounds.y, .w = @max(0, d1 - d0), .h = bounds.h },
+                .b = .{ .x = d1, .y = bounds.y, .w = @max(0, bounds.x + bounds.w - d1), .h = bounds.h },
+            };
+        },
+    }
 }
 
 pub fn beginSplitter(
@@ -270,4 +316,33 @@ test "splitter vertical, limites de pos e bounds NaN" {
     try stdt.testing.expectError(error.InvalidArgument, beginSplitter(&ctx, id, nan_bounds, .vertical, &pos, style));
     try stdt.testing.expectEqual(before, pos);
     ctx.endFrame();
+}
+
+test "splitterPanes: dois lados + divisória, clamp e aninhamento" {
+    const stdt = @import("std");
+    const style = style_mod.Theme.darkDefault().splitterStyle(); // handle 8
+    const bounds = types.Rect.init(0, 0, 400, 300);
+
+    // Horizontal (pos = y): divisória centrada em 150.
+    const h = splitterPanes(bounds, .horizontal, 150, style);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 400, 146), h.a);
+    try stdt.testing.expectEqual(types.Rect.init(0, 146, 400, 8), h.divider);
+    try stdt.testing.expectEqual(types.Rect.init(0, 154, 400, 146), h.b);
+
+    // Vertical (pos = x).
+    const v = splitterPanes(bounds, .vertical, 100, style);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 96, 300), v.a);
+    try stdt.testing.expectEqual(types.Rect.init(96, 0, 8, 300), v.divider);
+    try stdt.testing.expectEqual(types.Rect.init(104, 0, 296, 300), v.b);
+
+    // Pos clampa à borda: lado final fica vazio, sem medidas negativas.
+    const edge = splitterPanes(bounds, .horizontal, 9999, style);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 400, 296), edge.a);
+    try stdt.testing.expectEqual(types.Rect.init(0, 296, 400, 4), edge.divider);
+    try stdt.testing.expectEqual(@as(f32, 0), edge.b.h);
+
+    // Aninhamento: divide o lado `a` de novo (grade 2x2 determinística).
+    const top_left = splitterPanes(h.a, .vertical, 200, style);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 196, 146), top_left.a);
+    try stdt.testing.expectEqual(types.Rect.init(204, 0, 196, 146), top_left.b);
 }
