@@ -101,6 +101,10 @@ pub fn beginSwitch(
         }
     }
 
+    // Estado de interação (M99): hover e alternância mudam a cor da
+    // trilha ⇒ alimenta o dirty rect (a alternância por teclado também).
+    try ctx.mark_hot(id, bounds, hovered or res.toggled);
+
     ctx.draw.rectFilled(ctx.allocator, bounds, switchTrackColor(checked.*, hovered, style)) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,

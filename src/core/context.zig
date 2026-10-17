@@ -90,10 +90,17 @@ pub const Context = struct {
     /// Região suja acumulada no frame corrente: união das áreas
     /// marcadas via `mark_dirty` (vazia = nada a repintar). Limpa em
     /// `beginFrame`. Consumida por `software.raster.renderRegion` para
-    /// repintar só o que mudou. Convenção: widgets marcam os próprios
-    /// bounds quando o estado de interação muda (hover/press/foco) e o
-    /// chamador marca quando dados externos mudam a aparência.
+    /// repintar só o que mudou. Widgets marcam pelo helper `mark_hot`
+    /// (estado de interação) e o chamador marca direto via `mark_dirty`
+    /// quando dados externos mudam a aparência.
     dirty_rect: types.Rect = types.Rect.init(0, 0, 0, 0),
+    /// Ids "quentes" no frame anterior (ver `mark_hot`): widgets que
+    /// declararam interação e que, portanto, podem ter deixado pixels
+    /// realçados para desfazer. Trocado com `hot_now` no `beginFrame`.
+    hot_prev: std.ArrayList(id_mod.Id) = .empty,
+    /// Ids "quentes" do frame corrente, em ordem de declaração. Vira
+    /// `hot_prev` no `beginFrame` seguinte.
+    hot_now: std.ArrayList(id_mod.Id) = .empty,
 
     const Self = @This();
 
@@ -130,9 +137,13 @@ pub const Context = struct {
         self.events.deinit(self.allocator);
         self.draw.deinit(self.allocator);
         self.focusables.deinit(self.allocator);
+        self.hot_prev.deinit(self.allocator);
+        self.hot_now.deinit(self.allocator);
         self.events = event_mod.EventQueue.initEmpty();
         self.draw = draw_mod.DrawList.initEmpty();
         self.focusables = .empty;
+        self.hot_prev = .empty;
+        self.hot_now = .empty;
         self.state = .idle;
         self.frame_index = 0;
         self.mouse_pos = null;
@@ -145,8 +156,9 @@ pub const Context = struct {
     }
 
     /// Inicia um novo frame: aplica avanço de foco pendente (sobre o
-    /// registro do frame anterior) e limpa eventos/draw/focáveis do
-    /// frame anterior (retendo capacidade). Deve ser pareado com `endFrame`.
+    /// registro do frame anterior) e limpa eventos/draw/focáveis/região
+    /// suja do frame anterior (retendo capacidade), promovendo o registro
+    /// "quente" corrente a anterior. Deve ser pareado com `endFrame`.
     /// Precondição: nenhum frame ativo.
     pub fn beginFrame(self: *Self) void {
         std.debug.assert(self.state == .idle);
@@ -159,6 +171,10 @@ pub const Context = struct {
         self.events.clearRetainingCapacity();
         self.draw.clearRetainingCapacity();
         self.focusables.clearRetainingCapacity();
+        // Fecha o ciclo de interação: o registro quente do frame que
+        // terminou vira a base da detecção de saída em `mark_hot`.
+        std.mem.swap(std.ArrayList(id_mod.Id), &self.hot_prev, &self.hot_now);
+        self.hot_now.clearRetainingCapacity();
         self.clear_dirty();
     }
 
@@ -216,6 +232,36 @@ pub const Context = struct {
     /// Limpa o rectângulo sujo (chamado no `beginFrame`).
     pub fn clear_dirty(self: *Self) void {
         self.dirty_rect = types.Rect.init(0, 0, 0, 0);
+    }
+
+    /// Declara o estado de interação do widget `id` neste frame e mantém o
+    /// dirty rect coerente com a transição. Chame TODO frame, depois de
+    /// conhecer o estado, com `hot` verdadeiro quando a aparência do
+    /// widget pode diferir do desenho "frio": hover, press/drag capturado
+    /// ou valor alterado (inclua foco se o widget desenhar realce de foco).
+    ///
+    /// - `hot`: `bounds` entra na região suja (o widget pode ter mudado);
+    /// - `hot` falso com o id quente no frame ANTERIOR: `bounds` também
+    ///   entra, para apagar o realce que ficou no framebuffer (é a razão
+    ///   de o registro ser guardado entre frames).
+    ///
+    /// O mecanismo é conservador de propósito: enquanto quente, o widget
+    /// é tratado como em mudança e o próprio rect é repintado a cada frame
+    /// (os demais continuam pulados). Widget que deixou de ser desenhado
+    /// não é conhecido aqui — quem some deve marcar o próprio rect via
+    /// `mark_dirty` (idem se mudou de posição/tamanho: o rect anterior,
+    /// que ainda está no framebuffer, não é conhecido).
+    pub fn mark_hot(self: *Self, id: id_mod.Id, bounds: types.Rect, hot: bool) ContextError!void {
+        if (hot and !hotIdIn(self.hot_now.items, id)) {
+            self.hot_now.append(self.allocator, id) catch return error.OutOfMemory;
+        }
+        if (hot or self.was_hot(id)) self.mark_dirty(bounds);
+    }
+
+    /// True se `id` foi declarado quente no frame anterior — isto é, pode
+    /// ter pixels realçados pendentes de repintura.
+    pub fn was_hot(self: *const Self, id: id_mod.Id) bool {
+        return hotIdIn(self.hot_prev.items, id);
     }
 
     pub fn hasFocus(self: *const Self, id: id_mod.Id) bool {
@@ -279,6 +325,15 @@ pub const Context = struct {
         self.viewport = viewport;
     }
 };
+
+/// Busca linear de `id` numa lista de ids (registros por frame são
+/// pequenos e a ordem não importa). Ver `Context.mark_hot`.
+fn hotIdIn(items: []const id_mod.Id, id: id_mod.Id) bool {
+    for (items) |other| {
+        if (other == id) return true;
+    }
+    return false;
+}
 
 test "Context ciclo de vida mínimo" {
     const allocator = std.testing.allocator;
@@ -540,4 +595,73 @@ test "Context M98b: deinit zera o dirty rect" {
     ctx.endFrame();
     ctx.deinit();
     try std.testing.expect(ctx.dirty_rect.isEmpty());
+}
+
+test "Context M99: mark_hot marca na entrada e na saída do estado" {
+    const allocator = std.testing.allocator;
+    var ctx = try Context.init(allocator, .{ .viewport = types.Rect.init(0, 0, 100, 100) });
+    defer ctx.deinit();
+    const a = id_mod.Id.fromString("hot:a");
+    const ra = types.Rect.init(10, 10, 20, 20);
+
+    // Frame 1: frio ⇒ nada sujo e ninguém quente no registro anterior.
+    ctx.beginFrame();
+    try ctx.mark_hot(a, ra, false);
+    try std.testing.expect(ctx.dirty_rect.isEmpty());
+    try std.testing.expect(!ctx.was_hot(a));
+    ctx.endFrame();
+
+    // Frame 2: entra quente ⇒ bounds sujo; ainda não conta como anterior.
+    ctx.beginFrame();
+    try ctx.mark_hot(a, ra, true);
+    try std.testing.expectEqual(ra, ctx.dirty_rect);
+    try std.testing.expect(!ctx.was_hot(a));
+    ctx.endFrame();
+
+    // Frame 3: sai do estado quente ⇒ bounds sujo de novo, para apagar o
+    // realce deixado no framebuffer.
+    ctx.beginFrame();
+    try std.testing.expect(ctx.was_hot(a));
+    try ctx.mark_hot(a, ra, false);
+    try std.testing.expectEqual(ra, ctx.dirty_rect);
+    ctx.endFrame();
+
+    // Frame 4: já frio nos dois frames ⇒ nada sujo (frame ocioso).
+    ctx.beginFrame();
+    try std.testing.expect(!ctx.was_hot(a));
+    try ctx.mark_hot(a, ra, false);
+    try std.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+}
+
+test "Context M99b: mark_hot une bounds de ids distintos sem duplicar" {
+    const allocator = std.testing.allocator;
+    var ctx = try Context.init(allocator, .{});
+    defer ctx.deinit();
+    const a = id_mod.Id.fromString("hot:a2");
+    const b = id_mod.Id.fromString("hot:b2");
+    const ra = types.Rect.init(0, 0, 10, 10);
+    const rb = types.Rect.init(40, 40, 10, 10);
+
+    ctx.beginFrame();
+    try ctx.mark_hot(a, ra, true);
+    try ctx.mark_hot(b, rb, true);
+    try ctx.mark_hot(a, ra, true); // repetido: mesma entrada, sem duplicar
+    try std.testing.expectEqual(ra.unionWith(rb), ctx.dirty_rect);
+    try std.testing.expectEqual(@as(usize, 2), ctx.hot_now.items.len);
+    ctx.endFrame();
+
+    // Um continua quente, o outro sai: o que sai repinta, o que fica também.
+    ctx.beginFrame();
+    try ctx.mark_hot(a, ra, true);
+    try ctx.mark_hot(b, rb, false);
+    try std.testing.expectEqual(ra.unionWith(rb), ctx.dirty_rect);
+    try std.testing.expectEqual(@as(usize, 1), ctx.hot_now.items.len);
+    ctx.endFrame();
+
+    // Registro anterior é o do frame passado: `a` quente, `b` já frio.
+    ctx.beginFrame();
+    try std.testing.expect(ctx.was_hot(a));
+    try std.testing.expect(!ctx.was_hot(b));
+    ctx.endFrame();
 }

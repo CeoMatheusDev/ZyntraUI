@@ -103,6 +103,9 @@ pub fn radio(
     }
 
     // Desenho: círculo + ponto + texto por linha.
+    // Estado de interação (M99): hover e troca de seleção mudam a
+    // aparência ⇒ alimenta o dirty rect (setas com foco, sem hover, também).
+    try ctx.mark_hot(id, bounds, hovered or res.changed);
     const r = @min(style.radio_r, rh / 2 - 1);
     var i: usize = 0;
     while (i < options.len) : (i += 1) {

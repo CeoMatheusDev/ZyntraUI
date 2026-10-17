@@ -157,6 +157,16 @@ that effects sampling neighbors (`.blur`, `.rect_shadow`) read the preserved
 framebuffer. Per-frame allocation is already avoided — `DrawList` retains its
 capacity and its text arena between frames.
 
+Interactive widgets take part automatically: each control calls
+`mark_hot(id, bounds, hot)` every frame, and the context repaints its bounds
+both when the state starts (hover, press/drag, value change) and when it stops
+— the previous frame's hot ids are retained so a highlight left behind in the
+framebuffer is erased. Currently wired: `button`, `checkbox`, `radio`,
+`switch` and `slider` (both orientations). The mechanism is conservative by
+design: while hot, the widget is treated as changing and its own rect is
+repainted every frame, while the rest of the frame stays skipped. A widget
+that is no longer drawn is unknown to the context — mark its rect yourself.
+
 ## Examples and validation
 
 Run these commands from the repository root:

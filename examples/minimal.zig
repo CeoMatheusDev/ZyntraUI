@@ -1547,4 +1547,94 @@ pub fn main() !void {
             dr_idle_ok,
         },
     );
+
+    // Widgets alimentam o dirty rect sozinhos (M99): `mark_hot` marca os
+    // bounds quando o estado de interação (hover/press/valor) pode ter
+    // mudado a aparência — inclusive na SAÍDA do estado, via registro
+    // quente do frame anterior. Dois botões (A em (8,8,40,20), B em
+    // (64,8,40,20)) sobre fundo; a aplicação NÃO marca nada depois do
+    // primeiro frame. Frame 1 (índice 0): mouse no vão, tudo frio, região
+    // = viewport (primeiro desenho). Frame 2 (índice 1): mouse entra em A
+    // ⇒ região = bounds de A, só A repinta em hover. Frame 3 (índice 2):
+    // mouse sai ⇒ região = bounds de A de novo, apagando o realce.
+    var hot_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 120, 40);
+    defer hot_fb.deinit(allocator);
+    const hot_vp = zyntra_ui.Rect.init(0, 0, 120, 40);
+    const hot_bg = zyntra_ui.Color.rgb(24, 24, 28);
+    const hot_a_rect = zyntra_ui.Rect.init(8, 8, 40, 20);
+    const hot_b_rect = zyntra_ui.Rect.init(64, 8, 40, 20);
+    const hot_style = zyntra_ui.ButtonStyle{
+        .bg = zyntra_ui.Color.rgb(70, 70, 80),
+        .bg_hover = zyntra_ui.Color.rgb(120, 160, 220),
+        .bg_pressed = zyntra_ui.Color.rgb(40, 180, 90),
+        .border = zyntra_ui.Color.rgb(200, 200, 200),
+        .border_width = 1,
+        .radius = 0,
+    };
+    const hot_a_id = zyntra_ui.Id.fromString("examples/m99:a");
+    const hot_b_id = zyntra_ui.Id.fromString("examples/m99:b");
+
+    var hot_cold_a: u8 = 0;
+    var hot_cold_b: u8 = 0;
+    var hot_hover_a: u8 = 0;
+    var hot_keep_b: u8 = 0;
+    var hot_out_a: u8 = 0;
+    var hot_drawn: u32 = 0;
+    var hot_culled: u32 = 0;
+    var hot_region = zyntra_ui.Rect.init(0, 0, 0, 0);
+    var hot_frame: usize = 0;
+    while (hot_frame < 3) : (hot_frame += 1) {
+        ctx.beginFrame();
+        if (hot_frame == 0) {
+            try ctx.pushEvent(.{ .mouse_move = .{ .pos = .{ .x = 56, .y = 32 } } });
+        } else if (hot_frame == 1) {
+            try ctx.pushEvent(.{ .mouse_move = .{ .pos = .{ .x = 20, .y = 18 } } });
+        } else {
+            try ctx.pushEvent(.{ .mouse_move = .{ .pos = .{ .x = 56, .y = 32 } } });
+        }
+        try ctx.draw.rectFilled(allocator, hot_vp, hot_bg);
+        _ = try button_mod.button(&ctx, hot_a_id, hot_a_rect, hot_style);
+        _ = try button_mod.button(&ctx, hot_b_id, hot_b_rect, hot_style);
+        if (hot_frame == 0) ctx.mark_dirty(hot_vp); // 1º frame: tudo sujo
+        const hot_dirty = ctx.dirty_rect;
+        if (!hot_dirty.isEmpty()) {
+            const hot_stats = try zyntra_ui.software.raster.renderRegion(
+                &hot_fb,
+                ctx.drawCommands(),
+                hot_vp,
+                hot_dirty,
+            );
+            hot_drawn = hot_stats.drawn;
+            hot_culled = hot_stats.culled;
+        }
+        if (hot_frame == 0) {
+            hot_cold_a = hot_fb.get(20, 18)[0];
+            hot_cold_b = hot_fb.get(80, 18)[0];
+        } else if (hot_frame == 1) {
+            hot_hover_a = hot_fb.get(20, 18)[0];
+            hot_keep_b = hot_fb.get(80, 18)[0]; // B cullado: preservado
+        } else {
+            hot_region = hot_dirty; // saída do hover, sem mark_dirty do app
+            hot_out_a = hot_fb.get(20, 18)[0];
+        }
+        ctx.endFrame();
+    }
+    // Frame 2: 3 comandos desenhados (fundo, fill e borda de A) e 2
+    // cullados (fill e borda de B, fora da região); região == bounds de A.
+    std.debug.print(
+        "m99 hot cold_a={d} cold_b={d} hover_a={d} keep_b={d} out_a={d} drawn={d} culled={d} region={d:.1},{d:.1} {d:.1}x{d:.1}\n",
+        .{
+            hot_cold_a,
+            hot_cold_b,
+            hot_hover_a,
+            hot_keep_b,
+            hot_out_a,
+            hot_drawn,
+            hot_culled,
+            hot_region.x,
+            hot_region.y,
+            hot_region.w,
+            hot_region.h,
+        },
+    );
 }

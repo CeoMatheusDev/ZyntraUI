@@ -85,6 +85,10 @@ pub fn button(
     else
         style.bg;
 
+    // Estado de interação (M99): hover/press mudam a cor de fundo ⇒
+    // alimenta o dirty rect (tanto na entrada quanto na saída do realce).
+    try ctx.mark_hot(id, bounds, hovered or res.pressed);
+
     ctx.draw.rectFilled(ctx.allocator, bounds, bg) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,

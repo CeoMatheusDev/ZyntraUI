@@ -42,6 +42,23 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   idênticas. Demo `m98` no exemplo: frame integral, frame parcial (só o
   card em hover) e frame ocioso (nada sujo ⇒ nenhuma repintura).
 
+- `core/context` + `widgets/button|checkbox|radio|switch|slider`:
+  **interação alimenta o dirty rect** (M99, aditivo) —
+  `Context.mark_hot(id, bounds, hot)` declara o estado de interação do
+  widget a cada frame e marca `bounds` como sujo quando o widget entra no
+  estado (hover, press/drag, valor alterado) e quando SAI dele: o
+  registro quente do frame anterior (`hot_prev`, consultado por
+  `was_hot`) é o que permite apagar o realce deixado no framebuffer sem
+  nenhuma linha de `mark_dirty` na aplicação. Mecanismo conservador por
+  construção: enquanto quente, o widget é tratado como em mudança e só o
+  rect dele é repintado a cada frame (o resto segue pulado); widget que
+  deixou de ser desenhado deve ser marcado pela aplicação. Primeiros
+  widgets fiados: `button` (hover/press), `checkbox` (hover/alternância,
+  inclusive por teclado sem hover), `radio` (hover/seleção), `switch`
+  (hover/alternância) e `slider` horizontal e vertical (hover/drag/valor).
+  Demo `m99` no exemplo: hover entra e sai de um botão com repintura
+  parcial apenas dos bounds dele.
+
 ## [1.26.0] - 2026-10-17
 
 MINOR estável, 100% compatível: fecha o bloco "ferramentas profissionais"

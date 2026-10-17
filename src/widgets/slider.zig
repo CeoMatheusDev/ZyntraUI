@@ -104,6 +104,10 @@ pub fn slider(
         res.changed = res.value != entry;
     }
 
+    // Estado de interação (M99): hover/drag e mudança de valor alteram a
+    // aparência (preenchimento/handle) ⇒ alimenta o dirty rect.
+    try ctx.mark_hot(id, bounds, hovered or res.dragging or res.changed);
+
     const t = (value.* - min) / (max - min);
     const cy = bounds.y + bounds.h / 2;
     const track = types.Rect{
@@ -225,6 +229,9 @@ pub fn sliderVertical(
         res.value = value.*;
         res.changed = res.value != entry;
     }
+
+    // Estado de interação (M99): idem slider horizontal.
+    try ctx.mark_hot(id, bounds, hovered or res.dragging or res.changed);
 
     const t = (value.* - min) / (max - min);
     const cx = bounds.x + bounds.w / 2;

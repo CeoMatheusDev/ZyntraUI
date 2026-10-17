@@ -78,6 +78,11 @@ pub fn checkbox(
     }
 
     const bg = if (checked.*) style.bg_checked else style.bg;
+
+    // Estado de interação (M99): hover e alternância mudam a aparência ⇒
+    // alimenta o dirty rect (a alternância por teclado, sem hover, também).
+    try ctx.mark_hot(id, box, hovered or res.toggled);
+
     ctx.draw.rectFilled(ctx.allocator, box, bg) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
