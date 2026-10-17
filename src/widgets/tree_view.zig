@@ -150,10 +150,6 @@ pub fn beginTreeView(
         ctx.focus_owner = id;
     }
 
-    // Layout dos itens visíveis
-    const first_visible: usize = @as(usize, @intFromFloat(@floor(scroll_offset.* / style.item_height)));
-    var last_visible: usize = @min(visible_count, first_visible + @as(usize, @intFromFloat(@ceil(bounds.h / style.item_height))) + 1);
-
     // Click seleciona ou alterna expansor
     if (fm.pressed_pos) |p| {
         if (bounds.contains(p)) {
@@ -187,10 +183,11 @@ pub fn beginTreeView(
         }
     }
 
-    // Snapshot S1: após o mouse e antes do teclado.
+    // Snapshot S1: após mouse e wheel, antes do teclado.
     const keyboard_visible_count = treeViewCountVisible(items);
+    const first_visible: usize = @as(usize, @intFromFloat(@floor(scroll_offset.* / style.item_height)));
+    var last_visible: usize = @min(keyboard_visible_count, first_visible + @as(usize, @intFromFloat(@ceil(bounds.h / style.item_height))) + 1);
     if (selected.* >= keyboard_visible_count and keyboard_visible_count > 0) selected.* = keyboard_visible_count - 1;
-    last_visible = @min(keyboard_visible_count, last_visible);
 
     // Teclado com foco
     if (ctx.hasFocus(id)) {
