@@ -1156,3 +1156,37 @@ test "TreeView ignores non-finite wheel delta" {
     try testing.expectEqual(@as(f32, 0), result.scroll_offset);
     ctx.endFrame();
 }
+
+test "TreeView mouse collapse clamps selection and reports change" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+
+    var children = [_]TreeItem{
+        .{ .label = "child a", .children = &[_]TreeItem{} },
+        .{ .label = "child b", .children = &[_]TreeItem{} },
+    };
+    var items = [_]TreeItem{
+        .{ .label = "parent", .children = &children, .expanded = true },
+        .{ .label = "tail", .children = &[_]TreeItem{} },
+    };
+    const bounds = types.Rect.init(0, 0, 240, style.item_height * 5);
+    const id = id_mod.Id.fromString("test:tree-collapse-clamp");
+    var selected: usize = 3;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{
+        .button = .left,
+        .pressed = true,
+        .pos = types.Vec2.init(style.expander_size / 2, style.expander_size / 2),
+    } });
+    const result = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expect(!items[0].expanded);
+    try testing.expectEqual(@as(usize, 1), selected);
+    try testing.expectEqual(selected, result.selected);
+    try testing.expect(result.changed);
+    try testing.expectEqual(@as(?usize, 0), result.toggled_index);
+    ctx.endFrame();
+}
