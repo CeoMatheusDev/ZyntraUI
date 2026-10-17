@@ -33,4 +33,8 @@ jobs:
           /tmp/zyntra-c-test
       - name: Benchmark smoke test
         # std.debug.print escreve em stderr: fundir para o grep validar.
-        run: zig build run-bench -Doptimize=${{ matrix.optimize }} 2>&1 | grep checksum=
+        run: |
+          set -o pipefail
+          zig build run-bench -Doptimize=${{ matrix.optimize }} 2>&1 | tee /tmp/zyntra-bench.log
+          grep -q "^bench frames=.*checksum=" /tmp/zyntra-bench.log
+          grep -q "^treeview frames=.*checksum=" /tmp/zyntra-bench.log
