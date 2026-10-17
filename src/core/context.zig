@@ -87,10 +87,12 @@ pub const Context = struct {
     /// registrados no frame e resultado do último solto. O `beginFrame`
     /// resolve o solto do frame anterior. Ver `dnd/service`.
     dnd: dnd_mod.State = .{},
-    /// Rectângulo sujo acumulado neste frame. Começa vazio; widgets
-    /// chamam `mark_dirty` para indicar áreas que foram modificadas.
-    /// No `beginFrame` é limpo; o renderizador pode usá-lo para
-    /// restringir o redesenho a estas regiões.
+    /// Região suja acumulada no frame corrente: união das áreas
+    /// marcadas via `mark_dirty` (vazia = nada a repintar). Limpa em
+    /// `beginFrame`. Consumida por `software.raster.renderRegion` para
+    /// repintar só o que mudou. Convenção: widgets marcam os próprios
+    /// bounds quando o estado de interação muda (hover/press/foco) e o
+    /// chamador marca quando dados externos mudam a aparência.
     dirty_rect: types.Rect = types.Rect.init(0, 0, 0, 0),
 
     const Self = @This();
@@ -203,20 +205,12 @@ pub const Context = struct {
         self.focus_owner = null;
     }
 
-    /// Marca `rect` como sujo para este frame. As chamadas sucessivas
-    /// fazem union do rectângulo (a área cresce para cobrir todas as
-    /// regiões modificadas).
+    /// Marca `rect` como sujo para este frame. Chamadas sucessivas
+    /// acumulam por união (a região cresce para cobrir todas as áreas
+    /// modificadas); marcar um rect vazio é no-op. O rect vale para o
+    /// frame corrente: `beginFrame` limpa antes do próximo.
     pub fn mark_dirty(self: *Self, rect: types.Rect) void {
-        if (!self.dirty_rect.w > 0 or !self.dirty_rect.h > 0) {
-            self.dirty_rect = rect;
-        } else {
-            self.dirty_rect = types.Rect{
-                .x = @min(self.dirty_rect.x, rect.x),
-                .y = @min(self.dirty_rect.y, rect.y),
-                .w = @max(self.dirty_rect.x + self.dirty_rect.w, rect.x + rect.w) - @min(self.dirty_rect.x, rect.x),
-                .h = @max(self.dirty_rect.y + self.dirty_rect.h, rect.y + rect.h) - @min(self.dirty_rect.y, rect.y),
-            };
-        }
+        self.dirty_rect = self.dirty_rect.unionWith(rect);
     }
 
     /// Limpa o rectângulo sujo (chamado no `beginFrame`).
@@ -494,4 +488,56 @@ test "Context M12b: viewport não-finita, foco órfão e Tab único" {
     ctx.beginFrame(); // foco era b → prev cai em a
     try std.testing.expect(ctx.focus_owner == a);
     ctx.endFrame();
+}
+
+test "Context M98: dirty rect acumula por união e limpa no beginFrame" {
+    const allocator = std.testing.allocator;
+    var ctx = try Context.init(allocator, .{ .viewport = types.Rect.init(0, 0, 200, 100) });
+    defer ctx.deinit();
+
+    // Antes de qualquer frame: vazio.
+    try std.testing.expect(ctx.dirty_rect.isEmpty());
+
+    ctx.beginFrame();
+    try std.testing.expect(ctx.dirty_rect.isEmpty());
+    // Marcação única: o rect vale por si.
+    ctx.mark_dirty(types.Rect.init(10, 10, 20, 20));
+    try std.testing.expectEqual(types.Rect.init(10, 10, 20, 20), ctx.dirty_rect);
+    // União com um segundo rect (disjunto) cobre os dois.
+    ctx.mark_dirty(types.Rect.init(60, 40, 30, 20));
+    try std.testing.expectEqual(types.Rect.init(10, 10, 80, 50), ctx.dirty_rect);
+    // Rect vazio é no-op (não apaga o acumulado).
+    ctx.mark_dirty(types.Rect.init(0, 0, 0, 0));
+    try std.testing.expectEqual(types.Rect.init(10, 10, 80, 50), ctx.dirty_rect);
+    // Rect contido não cresce a região.
+    ctx.mark_dirty(types.Rect.init(15, 15, 5, 5));
+    try std.testing.expectEqual(types.Rect.init(10, 10, 80, 50), ctx.dirty_rect);
+    ctx.endFrame();
+
+    // O rect é por frame: `beginFrame` limpa o acumulado anterior.
+    ctx.beginFrame();
+    try std.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.mark_dirty(types.Rect.init(1, 2, 3, 4));
+    try std.testing.expectEqual(types.Rect.init(1, 2, 3, 4), ctx.dirty_rect);
+    ctx.endFrame();
+
+    // `clear_dirty` explícito no meio do frame também zera.
+    ctx.beginFrame();
+    ctx.mark_dirty(types.Rect.init(5, 5, 5, 5));
+    ctx.clear_dirty();
+    try std.testing.expect(ctx.dirty_rect.isEmpty());
+    // Marcar depois de limpar volta a funcionar (não fica "grudado").
+    ctx.mark_dirty(types.Rect.init(7, 8, 9, 10));
+    try std.testing.expectEqual(types.Rect.init(7, 8, 9, 10), ctx.dirty_rect);
+    ctx.endFrame();
+}
+
+test "Context M98b: deinit zera o dirty rect" {
+    const allocator = std.testing.allocator;
+    var ctx = try Context.init(allocator, .{});
+    ctx.beginFrame();
+    ctx.mark_dirty(types.Rect.init(3, 3, 4, 4));
+    ctx.endFrame();
+    ctx.deinit();
+    try std.testing.expect(ctx.dirty_rect.isEmpty());
 }

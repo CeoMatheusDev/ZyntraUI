@@ -27,6 +27,21 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   janela. Novo `DragGhostStyle` + `Theme.dragGhostStyle()`;
   `examples/minimal.zig` ganha a demo `m97` (arraste, fantasma e solto).
 
+- `core/types` + `core/context` + `software/raster`: **dirty rect por
+  frame** (M98, aditivo) — `Rect.isEmpty` e `Rect.unionWith` como
+  primitivas puras; `Context.mark_dirty(rect)`/`clear_dirty()` e o campo
+  `ctx.dirty_rect`, que acumula por união as áreas modificadas no frame
+  (rect vazio é no-op e é identidade na união) e é limpo no `beginFrame`.
+  `software.raster.renderRegion(fb, cmds, viewport, region)` consome a
+  região: repinta só a interseção com o viewport e com o framebuffer,
+  culla (`culled`) o que não toca a região e — diferença deliberada em
+  relação a `render` — trata `clear` como limpeza **apenas da região**,
+  deixando o resto do framebuffer com o frame anterior (é o que torna a
+  repintura parcial correta). Região vazia ou disjunta não desenha nada.
+  O caminho integral (`render`) mantém pixels, semântica e estatísticas
+  idênticas. Demo `m98` no exemplo: frame integral, frame parcial (só o
+  card em hover) e frame ocioso (nada sujo ⇒ nenhuma repintura).
+
 ## [1.26.0] - 2026-10-17
 
 MINOR estável, 100% compatível: fecha o bloco "ferramentas profissionais"

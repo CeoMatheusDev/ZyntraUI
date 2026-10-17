@@ -53,6 +53,25 @@ pub const Rect = extern struct {
     pub fn size(self: Rect) Size {
         return .{ .w = self.w, .h = self.h };
     }
+
+    /// Retorna true se o rect não cobre área (`w` ou `h` <= 0).
+    /// Escrito como `!(v > 0)` para que `NaN` também conte como vazio.
+    pub fn isEmpty(self: Rect) bool {
+        return !(self.w > 0) or !(self.h > 0);
+    }
+
+    /// Menor rect que contém `self` e `other`. Vazio é identidade
+    /// (retorna o outro); ambos vazios retornam vazio. Valores não
+    /// finitos propagam (a chamada vira vazia pelas comparações).
+    pub fn unionWith(self: Rect, other: Rect) Rect {
+        if (self.isEmpty()) return other;
+        if (other.isEmpty()) return self;
+        const x = @min(self.x, other.x);
+        const y = @min(self.y, other.y);
+        const x2 = @max(self.x + self.w, other.x + other.w);
+        const y2 = @max(self.y + self.h, other.y + other.h);
+        return .{ .x = x, .y = y, .w = x2 - x, .h = y2 - y };
+    }
 };
 
 /// Cor RGBA não-premultiplicada, 8 bits por canal.
@@ -190,6 +209,34 @@ test "Rect.contains bordas" {
     try std.testing.expect(!r.contains(Vec2.init(0, 0)));
     try std.testing.expect(!Rect.init(0, 0, 0, 10).contains(Vec2.init(0, 0)));
     try std.testing.expect(!Rect.init(0, 0, 10, 0).contains(Vec2.init(0, 0)));
+}
+
+test "Rect.isEmpty inclui NaN" {
+    const std = @import("std");
+    try std.testing.expect(Rect.init(0, 0, 0, 0).isEmpty());
+    try std.testing.expect(Rect.init(0, 0, 10, 0).isEmpty());
+    try std.testing.expect(Rect.init(0, 0, 0, 10).isEmpty());
+    try std.testing.expect(Rect.init(0, 0, -5, 10).isEmpty());
+    try std.testing.expect(Rect.init(0, 0, std.math.nan(f32), 10).isEmpty());
+    try std.testing.expect(!Rect.init(0, 0, 1, 1).isEmpty());
+}
+
+test "Rect.unionWith cobre ambos e ignora vazios" {
+    const std = @import("std");
+    const a = Rect.init(10, 20, 30, 40); // 10..40 x 20..60
+    const b = Rect.init(25, 5, 40, 20); // 25..65 x 5..25
+    try std.testing.expectEqual(Rect.init(10, 5, 55, 55), a.unionWith(b));
+    try std.testing.expectEqual(Rect.init(10, 5, 55, 55), b.unionWith(a));
+    // Contido: a união é o maior.
+    try std.testing.expectEqual(a, a.unionWith(Rect.init(12, 22, 4, 4)));
+    try std.testing.expectEqual(a, a.unionWith(Rect.init(12, 22, 4, 4)).unionWith(a));
+    // Vazio é identidade.
+    const empty = Rect.init(0, 0, 0, 0);
+    try std.testing.expectEqual(a, a.unionWith(empty));
+    try std.testing.expectEqual(a, empty.unionWith(a));
+    try std.testing.expect(empty.unionWith(empty).isEmpty());
+    // Coordenadas negativas (áreas parcialmente fora do viewport).
+    try std.testing.expectEqual(Rect.init(-10, -5, 20, 20), Rect.init(-10, -5, 5, 5).unionWith(Rect.init(0, 0, 10, 15)));
 }
 
 test "Color pack/unpack roundtrip" {

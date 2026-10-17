@@ -483,8 +483,40 @@ fn overlaps(a: types.Rect, b: types.Rect) bool {
 
 /// Executa comandos no framebuffer (1px = 1px lógico). Texto é pulado
 /// E contado (sem fonte, sem glifos). Comandos inválidos retornam erro
-/// sem efeito parcial garantido além do já desenhado.
+/// sem efeito parcial garantido além do já desenhado. `clear` limpa o
+/// framebuffer INTEIRO (não só o viewport).
 pub fn render(fb: *SoftwareFramebuffer, cmds: []const commands.DrawCommand, viewport: types.Rect) !SoftwareStats {
+    return renderInternal(fb, cmds, viewport, null);
+}
+
+/// Executa comandos restringindo-se a `region` (interseção com
+/// `viewport` e com o framebuffer) — repintura parcial dirigida pelo
+/// dirty rect de `Context` (`ctx.dirty_rect`). Diferenças em relação a
+/// `render`:
+/// - `clear` limpa apenas a região efetiva (o resto do framebuffer é
+///   preservado: é o frame anterior, que continua válido fora dela).
+/// - Comandos cujo bounds não toca a região contam em `culled` e são
+///   pulados; dentro dela valem o clip corrente e a interseção.
+/// - Região vazia (ou disjunta do viewport) não desenha nada.
+/// Correção é responsabilidade do chamador: marque como sujo tudo cujo
+/// pixel final mudou. Efeitos que amostram vizinhos (`.blur`,
+/// `.rect_shadow`) leem o framebuffer preservado — os vizinhos precisam
+/// estar corretos (isto é, não sujos) na região marcada.
+pub fn renderRegion(
+    fb: *SoftwareFramebuffer,
+    cmds: []const commands.DrawCommand,
+    viewport: types.Rect,
+    region: types.Rect,
+) !SoftwareStats {
+    return renderInternal(fb, cmds, viewport, region);
+}
+
+fn renderInternal(
+    fb: *SoftwareFramebuffer,
+    cmds: []const commands.DrawCommand,
+    viewport: types.Rect,
+    region: ?types.Rect,
+) !SoftwareStats {
     var out = SoftwareStats{ .submitted = @intCast(cmds.len) };
     var clip: ?types.Rect = null;
     const vp = types.Rect{
@@ -493,11 +525,20 @@ pub fn render(fb: *SoftwareFramebuffer, cmds: []const commands.DrawCommand, view
         .w = @max(0, @min(viewport.w, @as(f32, @floatFromInt(fb.w)))),
         .h = @max(0, @min(viewport.h, @as(f32, @floatFromInt(fb.h)))),
     };
+    // Área efetiva de desenho: viewport clampado ao fb (e, na repintura
+    // parcial, também à região suja). No caminho integral `area == vp`,
+    // então o desenho é idêntico ao histórico.
+    const area = if (region) |r| intersect(vp, r) else vp;
+    // Culling: no caminho integral mantém-se a checagem histórica contra
+    // `viewport` (não o clampado), preservando as estatísticas; na
+    // repintura parcial culla-se contra a área efetiva.
+    const cull_rect = if (region == null) viewport else area;
     for (cmds) |cmd| {
         if (!cmd.isValid()) return error.InvalidCommand;
         switch (cmd) {
             .clear => |c| {
-                fb.clear(c.color);
+                // Parcial: preserva o resto do framebuffer.
+                if (region == null) fb.clear(c.color) else fb.fillRect(area, null, c.color);
                 out.drawn += 1;
             },
             .clip => |c| {
@@ -508,19 +549,19 @@ pub fn render(fb: *SoftwareFramebuffer, cmds: []const commands.DrawCommand, view
                 out.skipped_text += 1;
             },
             else => {
-                if (!boundsVisible(cmd, viewport)) {
+                if (!boundsVisible(cmd, cull_rect)) {
                     out.culled += 1;
                     continue;
                 }
                 switch (cmd) {
-                    .rect_filled => |c| fb.fillRect(intersectClip(c.rect, clip, vp), null, c.color),
-                    .rect_outline => |c| fb.strokeRect(c.rect, c.thickness, mergeClip(clip, vp), c.color),
-                    .line => |c| fb.strokeLine(c.p0, c.p1, c.thickness, mergeClip(clip, vp), c.color),
-                    .circle_filled => |c| fb.fillCircle(c.center, c.radius, mergeClip(clip, vp), c.color),
-                    .rect_rounded => |c| fb.fillRoundRect(c.rect, c.radius, mergeClip(clip, vp), c.color),
-                    .rect_gradient => |c| fb.fillGradient(c.rect, c.p0, c.p1, c.color0, c.color1, mergeClip(clip, vp)),
-                    .rect_shadow => |c| fb.fillShadow(c.rect, c.radius, c.offset, c.blur, mergeClip(clip, vp), c.color),
-                    .blur => |c| fb.blurRegion(c.rect, c.radius, mergeClip(clip, vp)),
+                    .rect_filled => |c| fb.fillRect(intersectClip(c.rect, clip, area), null, c.color),
+                    .rect_outline => |c| fb.strokeRect(c.rect, c.thickness, mergeClip(clip, area), c.color),
+                    .line => |c| fb.strokeLine(c.p0, c.p1, c.thickness, mergeClip(clip, area), c.color),
+                    .circle_filled => |c| fb.fillCircle(c.center, c.radius, mergeClip(clip, area), c.color),
+                    .rect_rounded => |c| fb.fillRoundRect(c.rect, c.radius, mergeClip(clip, area), c.color),
+                    .rect_gradient => |c| fb.fillGradient(c.rect, c.p0, c.p1, c.color0, c.color1, mergeClip(clip, area)),
+                    .rect_shadow => |c| fb.fillShadow(c.rect, c.radius, c.offset, c.blur, mergeClip(clip, area), c.color),
+                    .blur => |c| fb.blurRegion(c.rect, c.radius, mergeClip(clip, area)),
                     else => unreachable,
                 }
                 out.drawn += 1;
@@ -1149,4 +1190,127 @@ test "render com blur (ordem importa, drawn + cull)" {
     _ = try render(&fb2, &cmds2, vp);
     try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb2.get(0, 0));
     try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb2.get(1, 0));
+}
+
+test "renderRegion repinta só a região suja e preserva o resto" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const vp = types.Rect.init(0, 0, 12, 4);
+    const bg = types.Color.rgb(10, 10, 10);
+    const box_a = types.Rect.init(0, 0, 4, 4);
+    const box_b = types.Rect.init(8, 0, 4, 4);
+
+    var fb = try SoftwareFramebuffer.init(gpa, 12, 4);
+    defer fb.deinit(gpa);
+
+    // Frame 1 (integral): fundo escuro + A e B cinza.
+    const frame1 = [_]commands.DrawCommand{
+        .{ .clear = .{ .color = bg } },
+        .{ .rect_filled = .{ .rect = box_a, .color = types.Color.rgb(100, 100, 100) } },
+        .{ .rect_filled = .{ .rect = box_b, .color = types.Color.rgb(100, 100, 100) } },
+    };
+    const s1 = try render(&fb, &frame1, vp);
+    try stdt.testing.expectEqual(@as(u32, 3), s1.drawn);
+    try stdt.testing.expectEqual([4]u8{ 100, 100, 100, 255 }, fb.get(1, 1));
+    try stdt.testing.expectEqual([4]u8{ 100, 100, 100, 255 }, fb.get(9, 1));
+    try stdt.testing.expectEqual([4]u8{ 10, 10, 10, 255 }, fb.get(6, 1));
+
+    // Frame 2: só A mudou (ex.: hover). A região suja é o rect de A.
+    const frame2 = [_]commands.DrawCommand{
+        .{ .clear = .{ .color = bg } },
+        .{ .rect_filled = .{ .rect = box_a, .color = types.Color.rgb(200, 200, 200) } },
+        .{ .rect_filled = .{ .rect = box_b, .color = types.Color.rgb(100, 100, 100) } },
+    };
+    const s2 = try renderRegion(&fb, &frame2, vp, box_a);
+    try stdt.testing.expectEqual(@as(u32, 3), s2.submitted);
+    try stdt.testing.expectEqual(@as(u32, 2), s2.drawn); // clear parcial + A
+    try stdt.testing.expectEqual(@as(u32, 1), s2.culled); // B fora da região
+    // A repintado; B e o vão seguem do frame 1 (o clear não os tocou).
+    try stdt.testing.expectEqual([4]u8{ 200, 200, 200, 255 }, fb.get(1, 1));
+    try stdt.testing.expectEqual([4]u8{ 100, 100, 100, 255 }, fb.get(9, 1));
+    try stdt.testing.expectEqual([4]u8{ 10, 10, 10, 255 }, fb.get(6, 1));
+    try stdt.testing.expectEqual([4]u8{ 10, 10, 10, 255 }, fb.get(5, 3));
+}
+
+test "renderRegion: interseção com viewport, região vazia e clip do usuário" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const vp = types.Rect.init(0, 0, 12, 4);
+
+    var fb = try SoftwareFramebuffer.init(gpa, 12, 4);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(7, 7, 7));
+    const cmds = [_]commands.DrawCommand{
+        .{ .clear = .{ .color = types.Color.rgb(1, 1, 1) } },
+        .{ .rect_filled = .{ .rect = types.Rect.init(0, 0, 4, 4), .color = types.Color.rgb(50, 0, 0) } },
+        .{ .rect_filled = .{ .rect = types.Rect.init(8, 0, 4, 4), .color = types.Color.rgb(0, 60, 0) } },
+    };
+
+    // Região maior que o viewport: efetiva = interseção (10,0,2,4).
+    const s = try renderRegion(&fb, &cmds, vp, types.Rect.init(10, 0, 100, 4));
+    try stdt.testing.expectEqual(@as(u32, 2), s.drawn); // clear parcial + B
+    try stdt.testing.expectEqual(@as(u32, 1), s.culled); // A
+    try stdt.testing.expectEqual([4]u8{ 0, 60, 0, 255 }, fb.get(10, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 60, 0, 255 }, fb.get(11, 3));
+    try stdt.testing.expectEqual([4]u8{ 7, 7, 7, 255 }, fb.get(9, 0)); // fora: intocado
+    try stdt.testing.expectEqual([4]u8{ 7, 7, 7, 255 }, fb.get(0, 0));
+
+    // Região vazia: `clear` executa (no-op em pixels), retângulos cullados.
+    const empty = try renderRegion(&fb, &cmds, vp, types.Rect.init(0, 0, 0, 0));
+    try stdt.testing.expectEqual(@as(u32, 1), empty.drawn);
+    try stdt.testing.expectEqual(@as(u32, 2), empty.culled);
+    try stdt.testing.expectEqual([4]u8{ 7, 7, 7, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 60, 0, 255 }, fb.get(10, 0));
+
+    // Região disjunta do viewport (fora do framebuffer): nada muda.
+    const outside = try renderRegion(&fb, &cmds, vp, types.Rect.init(100, 100, 4, 4));
+    try stdt.testing.expectEqual(@as(u32, 2), outside.culled);
+    try stdt.testing.expectEqual([4]u8{ 7, 7, 7, 255 }, fb.get(0, 0));
+
+    // Clip do usuário continua restringindo dentro da região.
+    var fb2 = try SoftwareFramebuffer.init(gpa, 12, 4);
+    defer fb2.deinit(gpa);
+    fb2.clear(types.Color.rgb(7, 7, 7));
+    const clipped = [_]commands.DrawCommand{
+        .{ .clip = .{ .rect = types.Rect.init(0, 0, 2, 2), .null_rect = false } },
+        .{ .rect_filled = .{ .rect = types.Rect.init(0, 0, 4, 4), .color = types.Color.rgb(90, 0, 0) } },
+    };
+    _ = try renderRegion(&fb2, &clipped, vp, types.Rect.init(0, 0, 4, 4));
+    try stdt.testing.expectEqual([4]u8{ 90, 0, 0, 255 }, fb2.get(1, 1));
+    try stdt.testing.expectEqual([4]u8{ 7, 7, 7, 255 }, fb2.get(2, 2));
+    try stdt.testing.expectEqual([4]u8{ 7, 7, 7, 255 }, fb2.get(5, 1));
+}
+
+test "renderRegion com região == viewport == framebuffer equivale ao integral" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const vp = types.Rect.init(0, 0, 8, 2);
+    const cmds = [_]commands.DrawCommand{
+        .{ .clear = .{ .color = types.Color.rgb(3, 3, 3) } },
+        .{ .clip = .{ .rect = types.Rect.init(0, 0, 6, 2), .null_rect = false } },
+        .{ .rect_filled = .{ .rect = types.Rect.init(0, 0, 8, 2), .color = types.Color.rgb(200, 10, 10) } },
+        .{ .clip = .{ .rect = types.Rect.init(0, 0, 0, 0), .null_rect = true } },
+        .{ .rect_filled = .{ .rect = types.Rect.init(7, 0, 1, 2), .color = types.Color.rgb(10, 200, 10) } },
+        .{ .line = .{ .p0 = .{ .x = 1, .y = 0 }, .p1 = .{ .x = 6, .y = 1 }, .color = types.Color.rgb(255, 255, 0), .thickness = 1 } },
+        .{ .text = .{ .pos = .{ .x = 0, .y = 0 }, .color = types.Color.rgb(255, 255, 255), .size = 8, .width = 4, .start = 0, .len = 0 } },
+    };
+
+    var full = try SoftwareFramebuffer.init(gpa, 8, 2);
+    defer full.deinit(gpa);
+    var region = try SoftwareFramebuffer.init(gpa, 8, 2);
+    defer region.deinit(gpa);
+
+    const sf = try render(&full, &cmds, vp);
+    const sr = try renderRegion(&region, &cmds, vp, vp);
+    try stdt.testing.expectEqual(sf.submitted, sr.submitted);
+    try stdt.testing.expectEqual(sf.drawn, sr.drawn);
+    try stdt.testing.expectEqual(sf.culled, sr.culled);
+    try stdt.testing.expectEqual(sf.skipped_text, sr.skipped_text);
+    var y: u32 = 0;
+    while (y < 2) : (y += 1) {
+        var x: u32 = 0;
+        while (x < 8) : (x += 1) {
+            try stdt.testing.expectEqual(full.get(x, y), region.get(x, y));
+        }
+    }
 }

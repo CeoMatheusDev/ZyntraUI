@@ -127,6 +127,36 @@ ctx.endFrame();
 
 For a runnable integration example, start with [`examples/minimal.zig`](examples/minimal.zig).
 
+### Dirty rect / partial repaint
+
+The context accumulates the region that changed during a frame. Call
+`mark_dirty(rect)` for each area whose pixels changed (successive calls unite
+the region; an empty rect is a no-op). `beginFrame()` resets it, so
+`dirty_rect` always describes the current frame.
+
+```zig
+ctx.beginFrame();
+// ... widgets and draw commands ...
+
+ctx.mark_dirty(zyntra_ui.Rect.init(10, 10, 100, 40)); // this area changed
+
+const dirty = ctx.dirty_rect;
+if (!dirty.isEmpty()) {
+    _ = try zyntra_ui.software.raster.renderRegion(&fb, ctx.drawCommands(), ctx.viewport, dirty);
+}
+ctx.endFrame();
+```
+
+`renderRegion` paints only the intersection of `region` with the viewport:
+commands whose bounds miss it are culled, and a `clear` command clears *only*
+that region — the rest of the framebuffer keeps the previous frame, which is
+what makes partial repaint correct. Marking nothing lets you skip rendering
+entirely. `render` (full frame) is unchanged. Correctness is the caller's
+responsibility: mark everything whose final pixels changed, and keep in mind
+that effects sampling neighbors (`.blur`, `.rect_shadow`) read the preserved
+framebuffer. Per-frame allocation is already avoided — `DrawList` retains its
+capacity and its text arena between frames.
+
 ## Examples and validation
 
 Run these commands from the repository root:

@@ -1461,4 +1461,90 @@ pub fn main() !void {
             dnd_texts,
         },
     );
+
+    // Dirty rect por frame (M98): `ctx.mark_dirty` acumula a região que
+    // mudou e `software.raster.renderRegion` repinta SÓ ela, preservando
+    // o resto do framebuffer (que segue com o frame anterior). Framebuffer
+    // 120x24 com dois "cards": A em (8,8,40,16) e B em (64,8,40,16).
+    // Frame 1 (índice 0): tudo sujo (viewport) ⇒ repintura integral.
+    // Frame 2 (índice 1): só A mudou (hover) ⇒ região = rect de A, B fica
+    // de fora (cullado) e o vão permanece com o fundo do frame anterior.
+    // Frame 3 (índice 2): nada sujo ⇒ nenhuma repintura (pixels intactos).
+    var dr_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 120, 24);
+    defer dr_fb.deinit(allocator);
+    const dr_vp = zyntra_ui.Rect.init(0, 0, 120, 24);
+    const dr_bg = zyntra_ui.Color.rgb(24, 24, 28);
+    const dr_card_a = zyntra_ui.Rect.init(8, 8, 40, 16);
+    const dr_card_b = zyntra_ui.Rect.init(64, 8, 40, 16);
+    const dr_card_base = zyntra_ui.Color.rgb(90, 90, 100);
+    const dr_card_hot = zyntra_ui.Color.rgb(140, 160, 200);
+
+    var dr_base_a: u8 = 0;
+    var dr_base_b: u8 = 0;
+    var dr_hot_a: u8 = 0;
+    var dr_keep_b: u8 = 0;
+    var dr_gutter: u8 = 0;
+    var dr_drawn: u32 = 0;
+    var dr_culled: u32 = 0;
+    var dr_region = zyntra_ui.Rect.init(0, 0, 0, 0);
+    var dr_idle_ok = false;
+    var dr_frame: usize = 0;
+    while (dr_frame < 3) : (dr_frame += 1) {
+        ctx.beginFrame();
+        try ctx.draw.clear(allocator, dr_bg);
+        try ctx.draw.rectFilled(
+            allocator,
+            dr_card_a,
+            if (dr_frame == 1) dr_card_hot else dr_card_base,
+        );
+        try ctx.draw.rectFilled(allocator, dr_card_b, dr_card_base);
+        // Só o frame 2 marca sujeira; o frame 1 repinta o viewport inteiro.
+        if (dr_frame == 0) ctx.mark_dirty(dr_vp);
+        if (dr_frame == 1) ctx.mark_dirty(dr_card_a);
+        const dr_dirty = ctx.dirty_rect;
+        if (!dr_dirty.isEmpty()) {
+            const dr_stats = try zyntra_ui.software.raster.renderRegion(
+                &dr_fb,
+                ctx.drawCommands(),
+                dr_vp,
+                dr_dirty,
+            );
+            dr_drawn = dr_stats.drawn;
+            dr_culled = dr_stats.culled;
+        }
+        if (dr_frame == 0) {
+            dr_base_a = dr_fb.get(10, 12)[0];
+            dr_base_b = dr_fb.get(70, 12)[0];
+        } else if (dr_frame == 1) {
+            dr_region = dr_dirty;
+            dr_hot_a = dr_fb.get(10, 12)[0];
+            dr_keep_b = dr_fb.get(70, 12)[0]; // preservado (B cullado)
+            dr_gutter = dr_fb.get(56, 12)[0]; // fundo do frame anterior
+        } else {
+            // Frame ocioso: nada sujo, nenhuma repintura e pixels intactos.
+            dr_idle_ok = dr_dirty.isEmpty() and
+                dr_fb.get(10, 12)[0] == dr_card_hot.r and
+                dr_fb.get(70, 12)[0] == dr_card_base.r;
+        }
+        ctx.endFrame();
+    }
+    // Frame 2: `clear` parcial + A = 2 executados; B fora da região = 1
+    // cullado; região suja == rect de A (8,8,40,16).
+    std.debug.print(
+        "m98 dirty base_a={d} base_b={d} hot_a={d} keep_b={d} gutter={d} drawn={d} culled={d} region={d:.1},{d:.1} {d:.1}x{d:.1} idle={}\n",
+        .{
+            dr_base_a,
+            dr_base_b,
+            dr_hot_a,
+            dr_keep_b,
+            dr_gutter,
+            dr_drawn,
+            dr_culled,
+            dr_region.x,
+            dr_region.y,
+            dr_region.w,
+            dr_region.h,
+            dr_idle_ok,
+        },
+    );
 }
