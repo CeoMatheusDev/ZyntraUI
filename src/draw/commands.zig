@@ -88,6 +88,15 @@ pub const DrawCommand = union(enum) {
         blur: f32,
         color: types.Color,
     },
+    /// Desfoca (box blur separável) o que JÁ foi desenhado dentro de
+    /// `rect` — "backdrop blur" (vidro fosco). Ordem importa: só afeta
+    /// comandos ANTERIORES. `radius` em px (arredondado; < 0.5 = no-op).
+    /// Os canais RGBA são desfocados independentemente (não
+    /// premultiplicado).
+    blur: extern struct {
+        rect: types.Rect,
+        radius: f32,
+    },
 
     fn finite(v: f32) bool {
         return std.math.isFinite(v);
@@ -147,6 +156,12 @@ pub const DrawCommand = union(enum) {
                     finite(c.radius) and c.radius >= 0 and
                     finite(c.offset.x) and finite(c.offset.y) and
                     finite(c.blur) and c.blur >= 0;
+            },
+            .blur => |c| {
+                return finite(c.rect.x) and finite(c.rect.y) and
+                    finite(c.rect.w) and finite(c.rect.h) and
+                    c.rect.w >= 0 and c.rect.h >= 0 and
+                    finite(c.radius) and c.radius >= 0;
             },
         }
     }
@@ -264,6 +279,11 @@ pub const DrawList = struct {
             .blur = blur,
             .color = color,
         } });
+    }
+
+    /// Desfoca (box blur) o conteúdo desenhado antes, dentro de `rect`.
+    pub fn backdropBlur(self: *Self, gpa: std.mem.Allocator, rect: types.Rect, radius: f32) !void {
+        try self.push(gpa, .{ .blur = .{ .rect = rect, .radius = radius } });
     }
 
     /// Enfileira texto copiando os bytes para a arena interna.
@@ -410,6 +430,29 @@ test "DrawList rectShadow + validação" {
         types.Vec2.init(std.math.inf(f32), 0),
         1,
         types.Color.rgb(0, 0, 0),
+    ));
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+}
+
+test "DrawList backdropBlur + validação" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    try dl.backdropBlur(gpa, types.Rect.init(0, 0, 20, 20), 8);
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    try stdt.testing.expect(dl.items()[0].isValid());
+
+    try stdt.testing.expectError(error.InvalidCommand, dl.backdropBlur(
+        gpa,
+        types.Rect.init(0, 0, 20, 20),
+        -1,
+    ));
+    try stdt.testing.expectError(error.InvalidCommand, dl.backdropBlur(
+        gpa,
+        types.Rect.init(0, 0, 20, std.math.nan(f32)),
+        2,
     ));
     try stdt.testing.expectEqual(@as(usize, 1), dl.len());
 }

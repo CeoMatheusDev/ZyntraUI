@@ -26,6 +26,10 @@ pub const SoftwareFramebuffer = struct {
     w: u32,
     h: u32,
     pixels: []u8, // len == w*h*4, RGBA por pixel
+    /// Buffer de trabalho do mesmo tamanho de `pixels`, usado por efeitos
+    /// que precisam de uma cópia (ex.: `blur`). `init` sempre o
+    /// dimensiona; uma construção manual deve fornecê-lo para usar blur.
+    scratch: []u8 = &.{},
 
     const Self = @This();
 
@@ -35,12 +39,16 @@ pub const SoftwareFramebuffer = struct {
         }
         const n: u64 = @as(u64, w) * h * 4;
         const pixels = try gpa.alloc(u8, @intCast(n));
-        return .{ .w = w, .h = h, .pixels = pixels };
+        errdefer gpa.free(pixels);
+        const scratch = try gpa.alloc(u8, @intCast(n));
+        return .{ .w = w, .h = h, .pixels = pixels, .scratch = scratch };
     }
 
     pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
         gpa.free(self.pixels);
+        if (self.scratch.len != 0) gpa.free(self.scratch);
         self.pixels = &.{};
+        self.scratch = &.{};
         self.w = 0;
         self.h = 0;
     }
@@ -306,6 +314,80 @@ pub const SoftwareFramebuffer = struct {
         }
     }
 
+    /// Box blur separável (H depois V) do conteúdo atual, gravando apenas
+    /// a interseção de `r` com `clip`. `radius` é arredondado para um raio
+    /// inteiro de janela (clampado a 4096 px); amostragem clamp-to-edge
+    /// contra as bordas do framebuffer (o "backdrop" fora de `r` conta).
+    /// Canais RGBA desfocados independentemente (não premultiplicado).
+    /// Requer `scratch` do tamanho de `pixels` (garantido por `init`);
+    /// entradas não-finitas/raio < 0.5/região vazia saturam em no-op.
+    pub fn blurRegion(self: *Self, r: types.Rect, radius: f32, clip: ?types.Rect) void {
+        if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
+            !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
+            !std.math.isFinite(radius)) return;
+        if (r.w <= 0 or r.h <= 0) return;
+        const ir: i64 = @intFromFloat(@round(@min(radius, 4096)));
+        if (ir <= 0) return;
+        if (self.scratch.len < self.pixels.len) return;
+        const iw: i64 = @intCast(self.w);
+        const ih: i64 = @intCast(self.h);
+        const x0 = @max(@as(i64, 0), @as(i64, @intFromFloat(@floor(r.x))));
+        const y0 = @max(@as(i64, 0), @as(i64, @intFromFloat(@floor(r.y))));
+        const x1 = @min(iw, @as(i64, @intFromFloat(@ceil(r.x + r.w))));
+        const y1 = @min(ih, @as(i64, @intFromFloat(@ceil(r.y + r.h))));
+        if (x1 <= x0 or y1 <= y0) return;
+        const win: u32 = @intCast(2 * ir + 1);
+        // Passo H: linhas da região expandidas de `ir` para cima/baixo,
+        // para o passo V ler vizinhança válida no scratch.
+        const hy0 = @max(@as(i64, 0), y0 - ir);
+        const hy1 = @min(ih, y1 + ir);
+        const w_us: usize = self.w;
+        var y = hy0;
+        while (y < hy1) : (y += 1) {
+            var x = x0;
+            while (x < x1) : (x += 1) {
+                var acc: [4]u32 = .{ 0, 0, 0, 0 };
+                var d: i64 = -ir;
+                while (d <= ir) : (d += 1) {
+                    const sx: usize = @intCast(std.math.clamp(x + d, 0, iw - 1));
+                    const si: usize = (@as(usize, @intCast(y)) * w_us + sx) * 4;
+                    acc[0] += self.pixels[si];
+                    acc[1] += self.pixels[si + 1];
+                    acc[2] += self.pixels[si + 2];
+                    acc[3] += self.pixels[si + 3];
+                }
+                const di: usize = (@as(usize, @intCast(y)) * w_us + @as(usize, @intCast(x))) * 4;
+                self.scratch[di] = @intCast(acc[0] / win);
+                self.scratch[di + 1] = @intCast(acc[1] / win);
+                self.scratch[di + 2] = @intCast(acc[2] / win);
+                self.scratch[di + 3] = @intCast(acc[3] / win);
+            }
+        }
+        // Passo V: lê o scratch (já desfocado na horizontal) e grava.
+        y = y0;
+        while (y < y1) : (y += 1) {
+            var x = x0;
+            while (x < x1) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                var acc: [4]u32 = .{ 0, 0, 0, 0 };
+                var d: i64 = -ir;
+                while (d <= ir) : (d += 1) {
+                    const sy: usize = @intCast(std.math.clamp(y + d, 0, ih - 1));
+                    const si: usize = (sy * w_us + @as(usize, @intCast(x))) * 4;
+                    acc[0] += self.scratch[si];
+                    acc[1] += self.scratch[si + 1];
+                    acc[2] += self.scratch[si + 2];
+                    acc[3] += self.scratch[si + 3];
+                }
+                const di: usize = (@as(usize, @intCast(y)) * w_us + @as(usize, @intCast(x))) * 4;
+                self.pixels[di] = @intCast(acc[0] / win);
+                self.pixels[di + 1] = @intCast(acc[1] / win);
+                self.pixels[di + 2] = @intCast(acc[2] / win);
+                self.pixels[di + 3] = @intCast(acc[3] / win);
+            }
+        }
+    }
+
     /// Interpola um canal (0..255) por `tq` em 0..255 (arredondado).
     fn lerpChannel(a: u8, b: u8, tq: u32) u8 {
         return @intCast((@as(u32, a) * (255 - tq) + @as(u32, b) * tq + 127) / 255);
@@ -438,6 +520,7 @@ pub fn render(fb: *SoftwareFramebuffer, cmds: []const commands.DrawCommand, view
                     .rect_rounded => |c| fb.fillRoundRect(c.rect, c.radius, mergeClip(clip, vp), c.color),
                     .rect_gradient => |c| fb.fillGradient(c.rect, c.p0, c.p1, c.color0, c.color1, mergeClip(clip, vp)),
                     .rect_shadow => |c| fb.fillShadow(c.rect, c.radius, c.offset, c.blur, mergeClip(clip, vp), c.color),
+                    .blur => |c| fb.blurRegion(c.rect, c.radius, mergeClip(clip, vp)),
                     else => unreachable,
                 }
                 out.drawn += 1;
@@ -608,7 +691,8 @@ test "fuzz primitivas: sem crash com bits arbitrários" {
 fn fuzzRaster(_: void, smith: *std.testing.Smith) !void {
     var backing: [16 * 16 * 4]u8 = undefined;
     smith.bytes(&backing);
-    var fb = SoftwareFramebuffer{ .w = 16, .h = 16, .pixels = &backing };
+    var scratch: [16 * 16 * 4]u8 = undefined;
+    var fb = SoftwareFramebuffer{ .w = 16, .h = 16, .pixels = &backing, .scratch = &scratch };
 
     var fb2: [16]u8 = undefined;
     smith.bytes(&fb2);
@@ -631,6 +715,8 @@ fn fuzzRaster(_: void, smith: *std.testing.Smith) !void {
     fb.fillGradient(r, p0, p1, c, c, types.Rect.init(-100, -100, 1000, 1000));
     fb.fillShadow(r, @abs(bits[3]), p0, @abs(bits[1]), null, c);
     fb.fillShadow(r, @abs(bits[3]), p0, @abs(bits[1]), types.Rect.init(-100, -100, 1000, 1000), c);
+    fb.blurRegion(r, @abs(bits[2]), null);
+    fb.blurRegion(r, @abs(bits[2]), types.Rect.init(-100, -100, 1000, 1000));
 
     // Invariante estrutural: tamanho do buffer intacto.
     try std.testing.expectEqual(@as(usize, 16 * 16 * 4), fb.pixels.len);
@@ -969,4 +1055,98 @@ test "render com sombra projetada (drawn + cull)" {
     try stdt.testing.expect(fb.get(24, 24)[0] > 0);
     try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(1, 1));
     try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(58, 38));
+}
+
+test "raster blur: box blur separável, região e clip" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+
+    // Borda vertical [0,255,255,0]: raio 1 suaviza em [85,170,170,85].
+    var fb = try SoftwareFramebuffer.init(gpa, 4, 1);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+    fb.fillRect(types.Rect.init(1, 0, 2, 1), null, types.Color.rgb(255, 255, 255));
+    fb.blurRegion(types.Rect.init(0, 0, 4, 1), 1, null);
+    try stdt.testing.expectEqual([4]u8{ 85, 85, 85, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 170, 170, 170, 255 }, fb.get(1, 0));
+    try stdt.testing.expectEqual([4]u8{ 170, 170, 170, 255 }, fb.get(2, 0));
+    try stdt.testing.expectEqual([4]u8{ 85, 85, 85, 255 }, fb.get(3, 0));
+
+    // 2D: pixel branco central espalha 28 (85/3) na vizinhança 3x3.
+    var fbd = try SoftwareFramebuffer.init(gpa, 5, 5);
+    defer fbd.deinit(gpa);
+    fbd.clear(types.Color.rgb(0, 0, 0));
+    fbd.fillRect(types.Rect.init(2, 2, 1, 1), null, types.Color.rgb(255, 255, 255));
+    fbd.blurRegion(types.Rect.init(0, 0, 5, 5), 1, null);
+    try stdt.testing.expectEqual([4]u8{ 28, 28, 28, 255 }, fbd.get(2, 2));
+    try stdt.testing.expectEqual([4]u8{ 28, 28, 28, 255 }, fbd.get(1, 1));
+    try stdt.testing.expectEqual([4]u8{ 28, 28, 28, 255 }, fbd.get(3, 3));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fbd.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fbd.get(4, 4));
+
+    // Fora da região não muda; raio < 0.5, região vazia e NaN = no-op.
+    var fb2 = try SoftwareFramebuffer.init(gpa, 4, 1);
+    defer fb2.deinit(gpa);
+    fb2.clear(types.Color.rgb(0, 0, 0));
+    fb2.fillRect(types.Rect.init(1, 0, 2, 1), null, types.Color.rgb(255, 255, 255));
+    fb2.blurRegion(types.Rect.init(0, 0, 2, 1), 1, null);
+    try stdt.testing.expectEqual([4]u8{ 85, 85, 85, 255 }, fb2.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 170, 170, 170, 255 }, fb2.get(1, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb2.get(2, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb2.get(3, 0));
+    fb2.blurRegion(types.Rect.init(0, 0, 4, 1), 0.4, null);
+    fb2.blurRegion(types.Rect.init(0, 0, 0, 1), 2, null);
+    fb2.blurRegion(types.Rect.init(0, 0, 4, 1), std.math.nan(f32), null);
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb2.get(2, 0));
+
+    // Clip limita a escrita (o desfoque ainda lê o backdrop inteiro).
+    var fb3 = try SoftwareFramebuffer.init(gpa, 4, 1);
+    defer fb3.deinit(gpa);
+    fb3.clear(types.Color.rgb(0, 0, 0));
+    fb3.fillRect(types.Rect.init(1, 0, 2, 1), null, types.Color.rgb(255, 255, 255));
+    fb3.blurRegion(types.Rect.init(0, 0, 4, 1), 1, types.Rect.init(1, 0, 1, 1));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb3.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 170, 170, 170, 255 }, fb3.get(1, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb3.get(2, 0));
+
+    // Região uniforme permanece uniforme (inclusive alfa).
+    var fb4 = try SoftwareFramebuffer.init(gpa, 3, 3);
+    defer fb4.deinit(gpa);
+    fb4.clear(types.Color.rgb(40, 80, 120));
+    fb4.blurRegion(types.Rect.init(0, 0, 3, 3), 4, null);
+    try stdt.testing.expectEqual([4]u8{ 40, 80, 120, 255 }, fb4.get(1, 1));
+}
+
+test "render com blur (ordem importa, drawn + cull)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const vp = types.Rect.init(0, 0, 4, 1);
+
+    // Blur DEPOIS do desenho: desfoca.
+    var fb = try SoftwareFramebuffer.init(gpa, 4, 1);
+    defer fb.deinit(gpa);
+    const cmds = [_]commands.DrawCommand{
+        .{ .clear = .{ .color = types.Color.rgb(0, 0, 0) } },
+        .{ .rect_filled = .{ .rect = types.Rect.init(1, 0, 2, 1), .color = types.Color.rgb(255, 255, 255) } },
+        .{ .blur = .{ .rect = types.Rect.init(0, 0, 4, 1), .radius = 1 } },
+        .{ .blur = .{ .rect = types.Rect.init(500, 0, 4, 1), .radius = 1 } },
+    };
+    const s = try render(&fb, &cmds, vp);
+    try stdt.testing.expectEqual(@as(u32, 4), s.submitted);
+    try stdt.testing.expectEqual(@as(u32, 3), s.drawn);
+    try stdt.testing.expectEqual(@as(u32, 1), s.culled);
+    try stdt.testing.expectEqual([4]u8{ 85, 85, 85, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 170, 170, 170, 255 }, fb.get(1, 0));
+
+    // Blur ANTES do desenho: o retângulo desenhado depois fica nítido.
+    var fb2 = try SoftwareFramebuffer.init(gpa, 4, 1);
+    defer fb2.deinit(gpa);
+    const cmds2 = [_]commands.DrawCommand{
+        .{ .clear = .{ .color = types.Color.rgb(0, 0, 0) } },
+        .{ .blur = .{ .rect = types.Rect.init(0, 0, 4, 1), .radius = 1 } },
+        .{ .rect_filled = .{ .rect = types.Rect.init(1, 0, 2, 1), .color = types.Color.rgb(255, 255, 255) } },
+    };
+    _ = try render(&fb2, &cmds2, vp);
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb2.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb2.get(1, 0));
 }

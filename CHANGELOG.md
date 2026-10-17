@@ -7,6 +7,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `draw/commands` + `software/raster`: **blur de backdrop** (M93, aditivo)
+  — novo comando `blur` (`rect`, `radius`) e helper `DrawList.backdropBlur`:
+  box blur **separável** (H depois V) que desfoca o que já foi desenhado
+  dentro de `rect` (ordem importa). Amostragem clamp-to-edge (o backdrop
+  fora de `rect` conta), canais RGBA independentes (não premultiplicado),
+  gravação restrita a `rect ∩ clip`; `radius` arredondado e clampado a 4096
+  px, `< 0.5` = no-op. `SoftwareFramebuffer` passa a reservar um `scratch`
+  do tamanho de `pixels` para o passe de cópia. `examples/minimal.zig` ganha
+  a demo `m93`.
 - `draw/commands` + `software/raster`: **sombra projetada** (M92, aditivo)
   — novo comando `rect_shadow` (`rect`, `radius`, `offset`, `blur`,
   `color`) e helper `DrawList.rectShadow`. A silhueta (retângulo

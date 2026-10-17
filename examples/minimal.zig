@@ -1058,4 +1058,20 @@ pub fn main() !void {
         "m92 shadow inside={d} edge={d} out={d}\n",
         .{ sh_fb.get(6, 4)[0], sh_fb.get(11, 4)[0], sh_fb.get(14, 4)[0] },
     );
+
+    // Draw moderno (M93): blur de backdrop (box blur separável). Desenha
+    // uma borda dura e desfoca: [0,255,255,0] -> [85,170,170,85]. Ordem
+    // importa (o comando só afeta o que já foi desenhado).
+    var bl_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 4, 1);
+    defer bl_fb.deinit(allocator);
+    ctx.beginFrame();
+    try ctx.draw.clear(allocator, zyntra_ui.Color.rgb(0, 0, 0));
+    try ctx.draw.rectFilled(allocator, zyntra_ui.Rect.init(1, 0, 2, 1), zyntra_ui.Color.rgb(255, 255, 255));
+    try ctx.draw.backdropBlur(allocator, zyntra_ui.Rect.init(0, 0, 4, 1), 1);
+    _ = try zyntra_ui.software.raster.render(&bl_fb, ctx.drawCommands(), zyntra_ui.Rect.init(0, 0, 4, 1));
+    ctx.endFrame();
+    std.debug.print(
+        "m93 blur px0={d} px1={d} px2={d} px3={d}\n",
+        .{ bl_fb.get(0, 0)[0], bl_fb.get(1, 0)[0], bl_fb.get(2, 0)[0], bl_fb.get(3, 0)[0] },
+    );
 }

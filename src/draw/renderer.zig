@@ -77,6 +77,7 @@ pub fn commandBounds(cmd: commands.DrawCommand) ?types.Rect {
             const y2 = @max(c.rect.y + c.rect.h, sr.y + sr.h) + pad;
             return .{ .x = x, .y = y, .w = x2 - x, .h = y2 - y };
         },
+        .blur => |c| return c.rect,
     }
 }
 
@@ -235,6 +236,11 @@ test "cull usa bounds do retângulo arredondado" {
             .blur = 6,
             .color = .{ .r = 0, .g = 0, .b = 0, .a = 128 },
         } }).?,
+    );
+    // Blur: bounds é o próprio rect.
+    try stdt.testing.expectEqual(
+        types.Rect.init(5, 6, 7, 8),
+        commandBounds(.{ .blur = .{ .rect = types.Rect.init(5, 6, 7, 8), .radius = 3 } }).?,
     );
     const cmds = [_]commands.DrawCommand{
         .{ .rect_rounded = .{ .rect = types.Rect.init(10, 10, 20, 20), .radius = 4, .color = types.Color.rgb(1, 2, 3) } },
