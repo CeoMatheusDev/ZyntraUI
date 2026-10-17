@@ -37,30 +37,51 @@ pub const TreeViewResult = struct {
     toggled_index: ?usize = null,
 };
 
-/// Nó achatado para renderização (ponteiro direto ao item + profundidade).
-/// Ponteiro em vez de índice: `item_index` era relativo ao pai, então
-/// indexar a raiz com ele lia o rótulo errado em profundidade > 0 e
-/// estourava quando o índice do filho excedia o tamanho da raiz (M72).
+/// Referência a um nó visível, resolvida sob demanda sem vetor achatado.
 const FlatNode = struct {
     item: *TreeItem,
     depth: usize,
     has_children: bool,
 };
 
-/// Achata a árvore em lista de nós visíveis (respeita `expanded`).
-fn treeViewFlatten(items: []TreeItem, out: *std.ArrayList(FlatNode), depth: usize, allocator: std.mem.Allocator) void {
-    var i: usize = 0;
-    while (i < items.len) : (i += 1) {
-        const item = items[i];
-        out.append(allocator, FlatNode{
-            .item = &items[i],
-            .depth = depth,
-            .has_children = item.children.len > 0,
-        }) catch return;
-        if (item.expanded and item.children.len > 0) {
-            treeViewFlatten(item.children, out, depth + 1, allocator);
+/// Busca o índice em pré-ordem; o estado expandido original permanece
+/// imutável durante o teclado, preservando o snapshot S1 do frame.
+fn treeViewFind(items: []TreeItem, target: usize) ?FlatNode {
+    var cursor: usize = 0;
+    return treeViewFindInner(items, target, 0, &cursor);
+}
+
+fn treeViewFindInner(items: []TreeItem, target: usize, depth: usize, cursor: *usize) ?FlatNode {
+    for (items) |*item| {
+        if (cursor.* == target) {
+            return .{ .item = item, .depth = depth, .has_children = item.children.len > 0 };
+        }
+        cursor.* += 1;
+        if (item.expanded) {
+            if (treeViewFindInner(item.children, target, depth + 1, cursor)) |found| return found;
         }
     }
+    return null;
+}
+
+/// Estado de teclado pendente. O commit ocorre também nos caminhos de erro
+/// posteriores, mantendo mutações já aceitas sem afetar a navegação S1.
+const TreePending = std.AutoHashMapUnmanaged(*TreeItem, bool);
+
+fn treeViewCommit(pending: *TreePending) void {
+    var it = pending.iterator();
+    while (it.next()) |entry| {
+        entry.key_ptr.*.expanded = entry.value_ptr.*;
+    }
+}
+
+fn treeViewToggle(
+    pending: *TreePending,
+    allocator: std.mem.Allocator,
+    item: *TreeItem,
+) error{OutOfMemory}!void {
+    const current = pending.get(item) orelse item.expanded;
+    try pending.put(allocator, item, !current);
 }
 
 /// Conta nós visíveis totais.
@@ -107,12 +128,13 @@ pub fn beginTreeView(
     if (items.len == 0) return error.InvalidArgument;
     if (!std.math.isFinite(scroll_offset.*)) return error.InvalidArgument;
 
-    // Achatamento da árvore visível
-    var flat = std.ArrayList(FlatNode).empty;
-    defer flat.deinit(ctx.allocator);
-    treeViewFlatten(items, &flat, 0, ctx.allocator);
-
-    const visible_count = flat.items.len;
+    // Somente contagem; nenhuma lista proporcional ao total de nós visíveis.
+    const visible_count = treeViewCountVisible(items);
+    var pending: TreePending = .empty;
+    defer {
+        treeViewCommit(&pending);
+        pending.deinit(ctx.allocator);
+    }
     if (selected.* >= visible_count) selected.* = visible_count - 1;
     if (visible_count == 0) selected.* = 0;
 
@@ -137,7 +159,7 @@ pub fn beginTreeView(
         const rel_y = p.y - bounds.y + scroll_offset.*;
         const idx: usize = @as(usize, @intFromFloat(@floor(rel_y / style.item_height)));
         if (idx < visible_count) {
-            const flat_node = flat.items[idx];
+            const flat_node = treeViewFind(items, idx).?;
             // Verifica se clicou no expansor
             const expander_x = bounds.x + @as(f32, @floatFromInt(flat_node.depth)) * style.indent;
             const expander_rect = types.Rect.init(expander_x, bounds.y + @as(f32, @floatFromInt(idx)) * style.item_height - scroll_offset.*, style.expander_size, style.expander_size);
@@ -163,14 +185,10 @@ pub fn beginTreeView(
         }
     }
 
-    // Re-achata após possível toggle: limpa e reutiliza o mesmo ArrayList.
-    // O colapso pode encolher a lista no meio do frame: re-deriva limites
-    // e seleção ANTES de qualquer indexação (sem isso, o desenho lê além
-    // do fim e o Zig com safety aborta).
-    flat.clearRetainingCapacity();
-    treeViewFlatten(items, &flat, 0, ctx.allocator);
-    if (selected.* >= flat.items.len and flat.items.len > 0) selected.* = flat.items.len - 1;
-    last_visible = @min(flat.items.len, last_visible);
+    // Snapshot S1: após o mouse e antes do teclado.
+    const keyboard_visible_count = treeViewCountVisible(items);
+    if (selected.* >= keyboard_visible_count and keyboard_visible_count > 0) selected.* = keyboard_visible_count - 1;
+    last_visible = @min(keyboard_visible_count, last_visible);
 
     // Teclado com foco
     if (ctx.hasFocus(id)) {
@@ -186,7 +204,7 @@ pub fn beginTreeView(
                     }
                 },
                 .down => {
-                    if (selected.* + 1 < flat.items.len) {
+                    if (selected.* + 1 < keyboard_visible_count) {
                         selected.* += 1;
                         res.changed = true;
                     }
@@ -198,22 +216,22 @@ pub fn beginTreeView(
                     }
                 },
                 .end => {
-                    if (selected.* != flat.items.len - 1) {
-                        selected.* = flat.items.len - 1;
+                    if (selected.* != keyboard_visible_count - 1) {
+                        selected.* = keyboard_visible_count - 1;
                         res.changed = true;
                     }
                 },
                 .left => {
                     // Colapsa se expandido; senão vai para o pai
-                    if (selected.* < flat.items.len) {
-                        const flat_node = flat.items[selected.*];
+                    if (selected.* < keyboard_visible_count) {
+                        const flat_node = treeViewFind(items, selected.*).?;
                         if (flat_node.has_children) {
-                            flat_node.item.expanded = !flat_node.item.expanded;
+                            try treeViewToggle(&pending, ctx.allocator, flat_node.item);
                         } else if (flat_node.depth > 0) {
                             // Vai para o pai (simplificação: primeiro ancestral visível acima)
                             var p: usize = selected.*;
-                            while (p > 0 and flat.items[p].depth >= flat_node.depth) p -= 1;
-                            if (p < flat.items.len and flat.items[p].depth < flat_node.depth) {
+                            while (p > 0 and treeViewFind(items, p).?.depth >= flat_node.depth) p -= 1;
+                            if (p < keyboard_visible_count and treeViewFind(items, p).?.depth < flat_node.depth) {
                                 selected.* = p;
                                 res.changed = true;
                             }
@@ -222,19 +240,19 @@ pub fn beginTreeView(
                 },
                 .right => {
                     // Expande se tem filhos
-                    if (selected.* < flat.items.len) {
-                        const flat_node = flat.items[selected.*];
+                    if (selected.* < keyboard_visible_count) {
+                        const flat_node = treeViewFind(items, selected.*).?;
                         if (flat_node.has_children) {
-                            flat_node.item.expanded = !flat_node.item.expanded;
+                            try treeViewToggle(&pending, ctx.allocator, flat_node.item);
                         }
                     }
                 },
                 .enter, .space => {
                     // Alterna expansão
-                    if (selected.* < flat.items.len) {
-                        const flat_node = flat.items[selected.*];
+                    if (selected.* < keyboard_visible_count) {
+                        const flat_node = treeViewFind(items, selected.*).?;
                         if (flat_node.has_children) {
-                            flat_node.item.expanded = !flat_node.item.expanded;
+                            try treeViewToggle(&pending, ctx.allocator, flat_node.item);
                         }
                     }
                 },
@@ -260,7 +278,7 @@ pub fn beginTreeView(
     if (ctx.mouse_pos) |p| {
         const rel_y = p.y - bounds.y + scroll_offset.*;
         const idx: usize = @as(usize, @intFromFloat(@floor(rel_y / style.item_height)));
-        if (idx < flat.items.len) {
+        if (idx < keyboard_visible_count) {
             res.hovered_index = idx;
         }
     }
@@ -283,7 +301,7 @@ pub fn beginTreeView(
     while (i < last_visible) : (i += 1) {
         const y = bounds.y + @as(f32, @floatFromInt(i)) * style.item_height - scroll_offset.*;
         const item_rect = types.Rect.init(bounds.x, y, bounds.w, style.item_height);
-        const flat_node = flat.items[i];
+        const flat_node = treeViewFind(items, i).?;
         const is_selected = i == selected.*;
         const is_hovered = res.hovered_index == i and !is_selected;
 
@@ -322,6 +340,9 @@ pub fn beginTreeView(
             error.InvalidMetrics => return error.InvalidArgument,
         };
     }
+
+    // S2: o desenho acima ainda usa S1; a scrollbar vê os toggles do teclado.
+    treeViewCommit(&pending);
 
     // Scrollbar
     const content_h = treeViewContentHeight(items, style);
