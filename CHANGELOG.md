@@ -7,6 +7,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+## [1.25.0] - 2026-10-17
+
+MINOR estável, 100% compatível: **texto completo** no `textarea` (undo/redo,
+clipboard interno e quebra suave por codepoint) e **draw moderno** no
+contrato de desenho — retângulo de cantos arredondados (SDF com bordas
+anti-serrilhadas), gradiente linear, sombra projetada e blur de backdrop
+separável. Todas as adições são retrocompatíveis (comandos e variantes
+novos) e verificadas pelo rasterizador de referência.
+
+### Adicionado
+
 - `draw/commands` + `software/raster`: **blur de backdrop** (M93, aditivo)
   — novo comando `blur` (`rect`, `radius`) e helper `DrawList.backdropBlur`:
   box blur **separável** (H depois V) que desfoca o que já foi desenhado
