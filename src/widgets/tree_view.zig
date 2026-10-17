@@ -1048,3 +1048,36 @@ test "TreeView hover outside bounds never selects a row" {
     try testing.expect(right.hovered_index == null);
     ctx.endFrame();
 }
+
+test "TreeView keyboard End renders the newly scrolled viewport" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+
+    var items: [40]TreeItem = undefined;
+    for (&items) |*item| {
+        item.* = .{ .label = "row", .children = &[_]TreeItem{} };
+    }
+    const bounds = types.Rect.init(0, 0, 240, style.item_height * 3);
+    const id = id_mod.Id.fromString("test:tree-keyboard-scroll");
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(100, style.item_height / 2) },
+    });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    const result = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expectEqual(@as(usize, items.len - 1), selected);
+    try testing.expect(result.changed);
+    try testing.expect(scroll > 0);
+    try testing.expectEqual(scroll, result.scroll_offset);
+    try testing.expect(ctx.drawCommands().len > 3);
+    ctx.endFrame();
+}
