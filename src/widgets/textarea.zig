@@ -12,6 +12,12 @@
 //! - Navegação: ←/→ (codepoint), ↑/↓ (linha, mesma coluna), `Home`/`End`
 //!   (linha; com Ctrl = início/fim do texto), `PageUp`/`PageDown`.
 //!   `Shift`+navegação estende a seleção; `Ctrl+A` seleciona tudo.
+//! - Undo/redo e área de transferência (M88, aditivo): `Ctrl+Z`/`Ctrl+Y`
+//!   (ou `Ctrl+Shift+Z`) desfazem/refazem rajadas de digitação e
+//!   operações isoladas; `Ctrl+C/X/V` copiam/recortam/colam texto
+//!   multilinha (`\n` inclusive). Só nas variantes `textAreaHistory` e
+//!   `textAreaClipboard` (histórico e `Clipboard` em buffers do
+//!   CHAMADOR, zero alocação; tipos em `text/edit.zig`).
 //! - Rolagem: vertical em `scroll_y` (chamador), acompanhando o caret;
 //!   horizontal automática e derivada (sem estado) para manter o caret
 //!   visível na linha corrente.
@@ -28,7 +34,15 @@ const context_mod = @import("../core/context.zig");
 const id_mod = @import("../core/id.zig");
 const style_mod = @import("../style/style.zig");
 const metrics_mod = @import("../text/metrics.zig");
+const edit = @import("../text/edit.zig");
 const input = @import("input.zig");
+
+/// Área de transferência INTERNA e histórico de undo/redo (definidos em
+/// `text/edit.zig`): re-exportados para o chamador não precisar importar
+/// `widgets/text_input`. O `Clipboard` é o MESMO tipo das duas famílias,
+/// então um único buffer serve `text_input` e `textarea`.
+pub const Clipboard = edit.Clipboard;
+pub const TextHistory = edit.TextHistory;
 
 /// Padding interno (px) da área útil (mesmo valor de `text_input`).
 const pad: f32 = 4.0;
@@ -38,6 +52,10 @@ pub const TextAreaResult = struct {
     changed: bool = false,
     overflowed: bool = false,
     selected: bool = false,
+    /// Undo (`Ctrl+Z`) / redo (`Ctrl+Y` ou `Ctrl+Shift+Z`) aplicados
+    /// nesta chamada (só nas variantes com histórico).
+    undone: bool = false,
+    redone: bool = false,
     len: usize = 0,
 };
 
@@ -185,6 +203,7 @@ fn colAtX(font: metrics_mod.FontMetrics, line_text: []const u8, x: f32) usize {
     return i;
 }
 
+/// Área de texto multilinha (M65): seleção e navegação, sem histórico.
 pub fn textArea(
     ctx: *context_mod.Context,
     id: id_mod.Id,
@@ -197,6 +216,74 @@ pub fn textArea(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextAreaResult {
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null);
+}
+
+/// Área de texto com undo/redo (M88, aditivo): `Ctrl+Z` desfaz, `Ctrl+Y`
+/// ou `Ctrl+Shift+Z` refazem; rajadas de digitação agrupam em um passo.
+/// `hist` é `*TextHistory(S, B)` do chamador com `B` cobrindo
+/// `buffer.len` (senão `InvalidArgument`).
+pub fn textAreaHistory(
+    comptime S: usize,
+    comptime B: usize,
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    scroll_y: *f32,
+    hist: *TextHistory(S, B),
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextAreaResult {
+    if (buffer.len > B) return error.InvalidArgument;
+    if (anchor.* > len.*) return error.InvalidArgument;
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, null);
+}
+
+/// Área de texto completa (M88, aditivo): undo/redo + área de
+/// transferência interna (`Ctrl+C/X/V`, tudo-ou-nada, sem OS). `clip` é
+/// `*Clipboard` do chamador (pode ser menor que o texto; copiar/colar
+/// além da capacidade são ignorados com `overflowed`).
+pub fn textAreaClipboard(
+    comptime S: usize,
+    comptime B: usize,
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    scroll_y: *f32,
+    hist: *TextHistory(S, B),
+    clip: *Clipboard,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextAreaResult {
+    if (buffer.len > B) return error.InvalidArgument;
+    if (anchor.* > len.*) return error.InvalidArgument;
+    if (clip.len > clip.buf.len) return error.InvalidArgument;
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, clip);
+}
+
+fn textAreaInner(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    scroll_y: *f32,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+    Hist: type,
+    hist: Hist,
+    clip: ?*Clipboard,
+) context_mod.ContextError!TextAreaResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
     if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
@@ -207,6 +294,7 @@ pub fn textArea(
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
     if (len.* > buffer.len or cursor.* > len.* or anchor.* > len.*) return error.InvalidArgument;
     if (!std.math.isFinite(scroll_y.*)) return error.InvalidArgument;
+    const use_hist = Hist != void;
 
     var res = TextAreaResult{ .len = len.* };
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
@@ -242,9 +330,11 @@ pub fn textArea(
     var moved = false;
 
     // Click dentro: foca e posiciona o caret (âncora colapsa; captura
-    // para arrasto de seleção).
+    // para arrasto de seleção). Troca de foco quebra a rajada do histórico.
+    const had_focus = ctx.hasFocus(id);
     if (fm.pressedInside(bounds)) {
         ctx.focus_owner = id;
+        if (use_hist and !had_focus) hist.closeGroup();
         if (ctx.press_owner == null) {
             if (fm.pressed_pos) |pp| {
                 const line = lineAtY(pp.y, text_top, line_h, nlines0);
@@ -278,22 +368,42 @@ pub fn textArea(
     res.focused = focused;
 
     if (focused) {
+        // Apaga a faixa [lo,hi), colapsa cursor e âncora em lo (o
+        // checkpoint do histórico é feito antes da chamada).
+        const deleteSelection = struct {
+            fn f(buf: []u8, l: *usize, c: *usize, a: *usize) void {
+                const lo = @min(a.*, c.*);
+                const hi = @max(a.*, c.*);
+                std.mem.copyForwards(u8, buf[lo .. l.* - (hi - lo)], buf[hi..l.*]);
+                l.* -= hi - lo;
+                c.* = lo;
+                a.* = lo;
+            }
+        }.f;
+
         for (ctx.pendingEvents()) |ev| {
             switch (ev) {
                 .text => |t| {
                     if (t.codepoint == '\r') continue;
                     var enc: [4]u8 = undefined;
                     const n = encodeUtf8(t.codepoint, &enc) catch continue;
+                    var snapped = false;
                     if (anchor.* != cursor.*) {
-                        const lo = @min(anchor.*, cursor.*);
-                        const hi = @max(anchor.*, cursor.*);
-                        deleteRange(buffer, len, lo, hi);
-                        cursor.* = lo;
-                        anchor.* = lo;
+                        if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
+                        deleteSelection(buffer, len, cursor, anchor);
                         res.changed = true;
+                        snapped = true;
+                        moved = true;
                     }
-                    if (insertBytes(buffer, len, cursor.*, enc[0..n])) {
+                    if (len.* + n <= buffer.len) {
+                        // Rajada de digitação agrupa em um único passo.
+                        if (use_hist) {
+                            if (snapped) hist.markGrouped() else hist.checkpoint(buffer[0..len.*], len.*, cursor.*);
+                        }
+                        std.mem.copyBackwards(u8, buffer[cursor.* + n .. len.* + n], buffer[cursor.*..len.*]);
+                        @memcpy(buffer[cursor.*..][0..n], enc[0..n]);
                         cursor.* += n;
+                        len.* += n;
                         anchor.* = cursor.*;
                         res.changed = true;
                         moved = true;
@@ -303,21 +413,100 @@ pub fn textArea(
                 },
                 .key => |k| {
                     if (!k.pressed) continue;
+                    // Undo/redo consomem o evento antes de todo o resto.
+                    if (use_hist and k.modifiers.ctrl and !k.modifiers.shift and k.key == .z) {
+                        if (hist.undo(buffer, len, cursor, anchor)) {
+                            res.undone = true;
+                            res.changed = true;
+                            moved = true;
+                        }
+                        continue;
+                    }
+                    if (use_hist and k.modifiers.ctrl and
+                        ((!k.modifiers.shift and k.key == .y) or (k.modifiers.shift and k.key == .z)))
+                    {
+                        if (hist.redo(buffer, len, cursor, anchor)) {
+                            res.redone = true;
+                            res.changed = true;
+                            moved = true;
+                        }
+                        continue;
+                    }
+                    // Área de transferência interna (só com clip).
+                    if (clip) |cp| {
+                        if (k.modifiers.ctrl and !k.modifiers.shift and
+                            (k.key == .c or k.key == .x or k.key == .v))
+                        {
+                            if (k.key == .c) {
+                                const lo = @min(anchor.*, cursor.*);
+                                const hi = @max(anchor.*, cursor.*);
+                                if (hi > lo) {
+                                    if (hi - lo <= cp.buf.len) {
+                                        @memcpy(cp.buf[0 .. hi - lo], buffer[lo..hi]);
+                                        cp.len = hi - lo;
+                                    } else {
+                                        res.overflowed = true;
+                                    }
+                                }
+                                continue;
+                            }
+                            if (k.key == .x) {
+                                const lo = @min(anchor.*, cursor.*);
+                                const hi = @max(anchor.*, cursor.*);
+                                if (hi > lo) {
+                                    if (hi - lo <= cp.buf.len) {
+                                        @memcpy(cp.buf[0 .. hi - lo], buffer[lo..hi]);
+                                        cp.len = hi - lo;
+                                    } else {
+                                        res.overflowed = true;
+                                    }
+                                    if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
+                                    deleteSelection(buffer, len, cursor, anchor);
+                                    res.changed = true;
+                                    moved = true;
+                                }
+                                continue;
+                            }
+                            // Colar: substitui a faixa (se houver) e insere.
+                            var snapped = false;
+                            if (anchor.* != cursor.*) {
+                                if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
+                                deleteSelection(buffer, len, cursor, anchor);
+                                res.changed = true;
+                                snapped = true;
+                            }
+                            const n = cp.len;
+                            if (n > 0) {
+                                if (len.* + n <= buffer.len) {
+                                    if (use_hist and !snapped) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
+                                    std.mem.copyBackwards(u8, buffer[cursor.* + n .. len.* + n], buffer[cursor.*..len.*]);
+                                    @memcpy(buffer[cursor.*..][0..n], cp.buf[0..n]);
+                                    cursor.* += n;
+                                    len.* += n;
+                                    anchor.* = cursor.*;
+                                    res.changed = true;
+                                    moved = true;
+                                } else {
+                                    res.overflowed = true;
+                                }
+                            }
+                            continue;
+                        }
+                    }
                     const extend = k.modifiers.shift;
                     // Colapsa a seleção para edições destrutivas.
                     if (anchor.* != cursor.* and (k.key == .backspace or k.key == .delete)) {
-                        const lo = @min(anchor.*, cursor.*);
-                        const hi = @max(anchor.*, cursor.*);
-                        deleteRange(buffer, len, lo, hi);
-                        cursor.* = lo;
-                        anchor.* = lo;
+                        if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
+                        deleteSelection(buffer, len, cursor, anchor);
                         res.changed = true;
                         moved = true;
                         continue;
                     }
                     switch (k.key) {
                         .backspace => {
+                            if (use_hist) hist.closeGroup();
                             if (cursor.* > 0) {
+                                if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
                                 const at = prevCodepoint(buffer, cursor.*);
                                 deleteRange(buffer, len, at, cursor.*);
                                 cursor.* = at;
@@ -327,7 +516,9 @@ pub fn textArea(
                             }
                         },
                         .delete => {
+                            if (use_hist) hist.closeGroup();
                             if (cursor.* < len.*) {
+                                if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
                                 const to = nextCodepoint(buffer, len.*, cursor.*);
                                 deleteRange(buffer, len, cursor.*, to);
                                 anchor.* = cursor.*;
@@ -336,7 +527,11 @@ pub fn textArea(
                             }
                         },
                         .enter => {
-                            if (insertBytes(buffer, len, cursor.*, "\n")) {
+                            // Insere após o checkpoint (snapshot do estado
+                            // anterior); quebra de linha continua a rajada.
+                            if (len.* + 1 <= buffer.len) {
+                                if (use_hist) hist.checkpoint(buffer[0..len.*], len.*, cursor.*);
+                                _ = insertBytes(buffer, len, cursor.*, "\n");
                                 cursor.* += 1;
                                 anchor.* = cursor.*;
                                 res.changed = true;
@@ -346,20 +541,19 @@ pub fn textArea(
                             }
                         },
                         .left => {
-                            if (k.modifiers.ctrl) {
-                                cursor.* = prevCodepoint(buffer, cursor.*);
-                            } else if (cursor.* > 0) {
-                                cursor.* = prevCodepoint(buffer, cursor.*);
-                            }
+                            if (use_hist) hist.closeGroup();
+                            cursor.* = prevCodepoint(buffer, cursor.*);
                             if (!extend) anchor.* = cursor.*;
                             moved = true;
                         },
                         .right => {
+                            if (use_hist) hist.closeGroup();
                             cursor.* = nextCodepoint(buffer, len.*, cursor.*);
                             if (!extend) anchor.* = cursor.*;
                             moved = true;
                         },
                         .up, .down => {
+                            if (use_hist) hist.closeGroup();
                             const cur_line = lineOfOffset(buffer, cursor.*);
                             const cur_col = cursor.* - lineStart(buffer, len.*, cur_line);
                             var target = cur_line;
@@ -373,6 +567,7 @@ pub fn textArea(
                             moved = true;
                         },
                         .page_up, .page_down => {
+                            if (use_hist) hist.closeGroup();
                             const page: usize = if (line_h > 0)
                                 @max(1, @as(usize, @intFromFloat(@floor(view_h / line_h))))
                             else
@@ -391,6 +586,7 @@ pub fn textArea(
                             moved = true;
                         },
                         .home => {
+                            if (use_hist) hist.closeGroup();
                             if (k.modifiers.ctrl) {
                                 cursor.* = 0;
                             } else {
@@ -401,6 +597,7 @@ pub fn textArea(
                             moved = true;
                         },
                         .end => {
+                            if (use_hist) hist.closeGroup();
                             if (k.modifiers.ctrl) {
                                 cursor.* = len.*;
                             } else {
@@ -416,8 +613,12 @@ pub fn textArea(
                                 cursor.* = len.*;
                             }
                         },
-                        .tab => ctx.requestFocusAdvance(if (k.modifiers.shift) .prev else .next),
+                        .tab => {
+                            if (use_hist) hist.closeGroup();
+                            ctx.requestFocusAdvance(if (k.modifiers.shift) .prev else .next);
+                        },
                         .escape => {
+                            if (use_hist) hist.closeGroup();
                             ctx.focus_owner = null;
                             anchor.* = cursor.*;
                             res.focused = false;
@@ -1027,5 +1228,181 @@ test "textArea rejeita bounds não-finitos sem tocar o estado" {
     try stdt.testing.expectError(error.InvalidArgument, textArea(&ctx, id, nan_bounds, &buf, &len, &cursor, &anchor, &scroll, font, style));
     try stdt.testing.expectEqual(@as(usize, 0), len);
     try stdt.testing.expectEqual(@as(f32, 0), scroll);
+    ctx.endFrame();
+}
+
+test "TextArea undo/redo (Ctrl+Z/Y) agrupa rajada e restaura" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 60);
+    const id = id_mod.Id.fromString("test:ta-hist");
+    var buf: [32]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    var hist = TextHistory(8, 32){};
+
+    // Foca (troca de foco quebra a rajada).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try textAreaHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, font, style);
+    ctx.endFrame();
+
+    // Rajada "ab" + Enter + "cd" → um único passo de undo.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'a' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'b' } });
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'c' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'd' } });
+    const r1 = try textAreaHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, font, style);
+    try stdt.testing.expect(r1.changed and !r1.undone and !r1.redone);
+    try stdt.testing.expectEqualStrings("ab\ncd", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 1), hist.undo_top);
+    ctx.endFrame();
+
+    // Ctrl+Z desfaz a rajada inteira.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const ru = try textAreaHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, font, style);
+    try stdt.testing.expect(ru.undone and ru.changed and !ru.redone);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    try stdt.testing.expectEqual(@as(usize, 0), cursor);
+    ctx.endFrame();
+
+    // Ctrl+Shift+Z refaz.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true, .shift = true } } });
+    const rr = try textAreaHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, font, style);
+    try stdt.testing.expect(rr.redone and rr.changed and !rr.undone);
+    try stdt.testing.expectEqualStrings("ab\ncd", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 5), cursor);
+    ctx.endFrame();
+
+    // Ctrl+Y também refaz (após novo undo).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try textAreaHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, font, style);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .y, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const ry = try textAreaHistory(8, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, font, style);
+    try stdt.testing.expect(ry.redone);
+    try stdt.testing.expectEqualStrings("ab\ncd", buf[0..len]);
+    ctx.endFrame();
+
+    // `B` menor que o buffer é recusado (snapshot não cobriria o campo).
+    var small_hist = TextHistory(2, 4){};
+    var big: [8]u8 = undefined;
+    var blen: usize = 0;
+    var bcur: usize = 0;
+    var banch: usize = 0;
+    var bscr: f32 = 0;
+    ctx.beginFrame();
+    try stdt.testing.expectError(error.InvalidArgument, textAreaHistory(2, 4, &ctx, id, bounds, &big, &blen, &bcur, &banch, &bscr, &small_hist, font, style));
+    ctx.endFrame();
+}
+
+test "TextArea clipboard (Ctrl+A/C/X/V) multilinha, overflow e tipo compartilhado" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 60);
+    const id = id_mod.Id.fromString("test:ta-clip");
+    var buf: [64]u8 = undefined;
+    const text = "aa\nbb\ncc";
+    @memcpy(buf[0..text.len], text);
+    var len: usize = text.len;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    var hist = TextHistory(8, 64){};
+    var clipmem: [16]u8 = undefined;
+    var clip = Clipboard{ .buf = &clipmem };
+
+    // O `Clipboard` de `textarea` é o MESMO tipo de `text_input`.
+    comptime {
+        if (Clipboard != @import("../widgets/text_input.zig").Clipboard)
+            @compileError("Clipboard deve ser compartilhado entre text_input e textarea");
+    }
+
+    // Foca.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try textAreaClipboard(8, 64, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &clip, font, style);
+    ctx.endFrame();
+
+    // Ctrl+A + Ctrl+C copia o texto inteiro (com '\n'), sem alterar.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .a, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .c, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const rc = try textAreaClipboard(8, 64, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &clip, font, style);
+    try stdt.testing.expect(!rc.changed and !rc.overflowed);
+    try stdt.testing.expectEqual(@as(usize, text.len), clip.len);
+    try stdt.testing.expectEqualStrings(text, clip.buf[0..clip.len]);
+    try stdt.testing.expect(anchor == 0 and cursor == len);
+    ctx.endFrame();
+
+    // Colapsa no fim e cola: o texto dobra.
+    cursor = len;
+    anchor = len;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .v, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const rv = try textAreaClipboard(8, 64, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &clip, font, style);
+    try stdt.testing.expect(rv.changed and len == text.len * 2);
+    try stdt.testing.expectEqualStrings("aa\nbb\nccaa\nbb\ncc", buf[0..len]);
+    try stdt.testing.expectEqual(len, cursor);
+    ctx.endFrame();
+
+    // Ctrl+Z desfaz a colagem (passo isolado).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try textAreaClipboard(8, 64, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &clip, font, style);
+    try stdt.testing.expectEqual(@as(usize, text.len), len);
+    try stdt.testing.expectEqualStrings(text, buf[0..len]);
+    ctx.endFrame();
+
+    // Ctrl+X sobre uma faixa multilinha copia e remove.
+    anchor = 0;
+    cursor = 5; // "aa\nbb"
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .x, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const rx = try textAreaClipboard(8, 64, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &clip, font, style);
+    try stdt.testing.expect(rx.changed and !rx.selected);
+    try stdt.testing.expectEqualStrings("aa\nbb", clip.buf[0..clip.len]);
+    try stdt.testing.expectEqualStrings("\ncc", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 0), cursor);
+    ctx.endFrame();
+
+    // Copiar faixa maior que a área de transferência: overflow, sem mudança.
+    anchor = 0;
+    cursor = len; // "\ncc" (3 bytes) cabe; força overflow com faixa maior
+    clip.len = 0;
+    var tiny: [1]u8 = undefined;
+    var tiny_clip = Clipboard{ .buf = &tiny };
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .c, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const ro = try textAreaClipboard(8, 64, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &tiny_clip, font, style);
+    try stdt.testing.expect(ro.overflowed and !ro.changed);
+    try stdt.testing.expectEqual(@as(usize, 0), tiny_clip.len);
+    ctx.endFrame();
+
+    // Contratos inválidos: clip.len > clip.buf.len.
+    var bad_clip = Clipboard{ .buf = &clipmem, .len = clipmem.len + 1 };
+    ctx.beginFrame();
+    try stdt.testing.expectError(error.InvalidArgument, textAreaClipboard(8, 64, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &bad_clip, font, style));
     ctx.endFrame();
 }

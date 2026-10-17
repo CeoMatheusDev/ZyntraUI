@@ -27,6 +27,7 @@ const context_mod = @import("../core/context.zig");
 const id_mod = @import("../core/id.zig");
 const style_mod = @import("../style/style.zig");
 const metrics_mod = @import("../text/metrics.zig");
+const edit = @import("../text/edit.zig");
 const input = @import("input.zig");
 
 pub const TextInputResult = struct {
@@ -43,108 +44,11 @@ pub const TextInputResult = struct {
     len: usize = 0,
 };
 
-/// Área de transferência INTERNA (sem OS): o chamador detém `buf` e
-/// `len` (bytes válidos). Copiar/colar nunca alocam; conteúdo maior
-/// que `buf` não é copiado (tudo-ou-nada, sem truncar).
-pub const Clipboard = struct {
-    buf: []u8,
-    len: usize = 0,
-};
-
-/// Histórico de undo/redo com pilhas de snapshots em buffers do
-/// CHAMADOR (zero alocação na lib). `S` = passos guardados, `B` = bytes
-/// por snapshot (deve cobrir `buffer.len` do campo, senão
-/// `InvalidArgument`). Redo esvazia a cada nova mutação.
-pub fn TextHistory(comptime S: usize, comptime B: usize) type {
-    return struct {
-        undo_bytes: [S][B]u8 = undefined,
-        undo_len: [S]usize = std.mem.zeroes([S]usize),
-        undo_cursor: [S]usize = std.mem.zeroes([S]usize),
-        undo_top: usize = 0,
-        redo_bytes: [S][B]u8 = undefined,
-        redo_len: [S]usize = std.mem.zeroes([S]usize),
-        redo_cursor: [S]usize = std.mem.zeroes([S]usize),
-        redo_top: usize = 0,
-        group_open: bool = false,
-
-        const Self = @This();
-
-        fn snapshot(
-            stack_b: *[S][B]u8,
-            stack_l: *[S]usize,
-            stack_c: *[S]usize,
-            top: *usize,
-            buf: []const u8,
-            len: usize,
-            cursor: usize,
-        ) void {
-            if (S == 0) return; // histórico desabilitado: sem passos
-            if (top.* >= S) {
-                // Desloca (descarta o mais antigo); S pequeno, O(S·B).
-                std.mem.copyForwards([B]u8, stack_b[0 .. S - 1], stack_b[1..S]);
-                std.mem.copyForwards(usize, stack_l[0 .. S - 1], stack_l[1..S]);
-                std.mem.copyForwards(usize, stack_c[0 .. S - 1], stack_c[1..S]);
-                top.* = S - 1;
-            }
-            const n = @min(len, B);
-            @memcpy(stack_b[top.*][0..n], buf[0..n]);
-            stack_l[top.*] = n;
-            stack_c[top.*] = @min(cursor, n);
-            top.* += 1;
-        }
-
-        pub fn checkpoint(self: *Self, buf: []const u8, len: usize, cursor: usize) void {
-            // Grupo de digitação: um snapshot por rajada.
-            if (self.group_open) return;
-            snapshot(&self.undo_bytes, &self.undo_len, &self.undo_cursor, &self.undo_top, buf, len, cursor);
-            self.redo_top = 0;
-            self.group_open = true;
-        }
-
-        pub fn checkpointBreak(self: *Self, buf: []const u8, len: usize, cursor: usize) void {
-            // Mutação isolada (sempre novo passo).
-            snapshot(&self.undo_bytes, &self.undo_len, &self.undo_cursor, &self.undo_top, buf, len, cursor);
-            self.redo_top = 0;
-            self.group_open = false;
-        }
-
-        pub fn closeGroup(self: *Self) void {
-            self.group_open = false;
-        }
-
-        /// Reabre a rajada sem novo snapshot (substituição por faixa +
-        /// digitação contam como um passo).
-        pub fn markGrouped(self: *Self) void {
-            self.group_open = true;
-        }
-
-        pub fn undo(self: *Self, buf: []u8, len: *usize, cursor: *usize, anchor: ?*usize) bool {
-            if (self.undo_top == 0) return false;
-            self.undo_top -= 1;
-            snapshot(&self.redo_bytes, &self.redo_len, &self.redo_cursor, &self.redo_top, buf[0..len.*], len.*, cursor.*);
-            const n = self.undo_len[self.undo_top];
-            @memcpy(buf[0..n], self.undo_bytes[self.undo_top][0..n]);
-            len.* = n;
-            cursor.* = self.undo_cursor[self.undo_top];
-            if (anchor) |a| a.* = cursor.*;
-            self.group_open = false;
-            return true;
-        }
-
-        pub fn redo(self: *Self, buf: []u8, len: *usize, cursor: *usize, anchor: ?*usize) bool {
-            if (self.redo_top == 0) return false;
-            self.redo_top -= 1;
-            snapshot(&self.undo_bytes, &self.undo_len, &self.undo_cursor, &self.undo_top, buf[0..len.*], len.*, cursor.*);
-            const n = self.redo_len[self.redo_top];
-            @memcpy(buf[0..n], self.redo_bytes[self.redo_top][0..n]);
-            len.* = n;
-            cursor.* = self.redo_cursor[self.redo_top];
-            if (anchor) |a| a.* = cursor.*;
-            self.group_open = false;
-            return true;
-        }
-    };
-}
+/// Área de transferência INTERNA e histórico de undo/redo: definidos em
+/// `text/edit.zig` (helpers puros compartilhados com `widgets/textarea`) e
+/// re-exportados aqui para preservar a API de `widgets/text_input`.
+pub const Clipboard = edit.Clipboard;
+pub const TextHistory = edit.TextHistory;
 
 /// Codifica `codepoint` (0..0x10FFFF, sem surrogates) em UTF-8.
 /// Chamar só após validar a faixa; fora dela retorna erro.

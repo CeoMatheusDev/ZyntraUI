@@ -60,7 +60,7 @@ src/
 ├── style/         Themes and widget styles
 ├── widgets/       Widget implementations
 ├── dock/          Docking layout model and serialization
-├── text/          UTF-8 metrics and text measurement
+├── text/          UTF-8 metrics, wrapping, and text-edit helpers
 ├── anim/          Optional animation helpers
 ├── software/      Reference software rasterizer
 └── c-abi/         Optional C interface

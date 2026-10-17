@@ -7,6 +7,26 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `widgets/textarea`: **paridade de "texto completo" com `text_input`**
+  (M88, aditivo) — undo/redo e área de transferência interna em variantes
+  novas: `textAreaHistory` (`Ctrl+Z` desfaz, `Ctrl+Y`/`Ctrl+Shift+Z`
+  refazem; rajadas de digitação agrupam em um passo, colar/recortar/apagar
+  faixa são passos isolados) e `textAreaClipboard` (acrescenta
+  `Ctrl+C`/`Ctrl+X`/`Ctrl+V` multilinha, `'\n'` inclusive). O histórico
+  (`TextHistory`) e o `Clipboard` vivem em buffers do CHAMADOR (zero
+  alocação na lib) e `TextAreaResult` ganha `undone`/`redone`.
+- `text/edit` (M88): módulo puro com `Clipboard` e `TextHistory`, antes
+  definidos só em `widgets/text_input`. São re-exportados por
+  `text_input` e `textarea`, então `text_input.Clipboard` e
+  `textarea.Clipboard` são o **mesmo tipo** — um único buffer serve campo
+  de uma linha e área multilinha. `examples/minimal.zig` ganha a demo `m88`.
+
+### Alterado
+
+- `text_input`: `Clipboard`/`TextHistory` passam a ser re-exportados de
+  `text/edit` (API pública inalterada; os tipos continuam idênticos e os
+  utilitários compartilhados com `textarea`).
+
 ## [1.24.0] - 2026-10-17
 
 MINOR estável, 100% compatível: docking completo — divisórias arrastáveis,

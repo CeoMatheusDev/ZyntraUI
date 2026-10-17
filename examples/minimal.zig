@@ -913,4 +913,57 @@ pub fn main() !void {
             dv4_group.active,
         },
     );
+
+    // Texto completo (M88): paridade do textarea — undo/redo (Ctrl+Z/Y) e
+    // area de transferencia interna (Ctrl+C/X/V) multilinha. Historico e
+    // clipboard sao buffers do CHAMADOR (zero alocacao na lib) e o tipo
+    // 'Clipboard' e o MESMO de 'text_input'. Aqui: digita "oi" + Enter +
+    // "Z" (uma rajada), copia tudo, colapsa no fim e cola (dobra o texto);
+    // Ctrl+Z desfaz apenas a colagem.
+    const tc_style = theme.textInputStyle();
+    const tc_bounds = zyntra_ui.Rect.init(300, 620, 240, 60);
+    var tc_buf: [64]u8 = undefined;
+    var tc_len: usize = 0;
+    var tc_cursor: usize = 0;
+    var tc_anchor: usize = 0;
+    var tc_scroll: f32 = 0;
+    var tc_hist = textarea_mod.TextHistory(8, 64){};
+    var tc_clip_mem: [32]u8 = undefined;
+    var tc_clip = textarea_mod.Clipboard{ .buf = &tc_clip_mem };
+    const tc_id = zyntra_ui.Id.fromString("examples/m88:ta");
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(304, 624) },
+    });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'o' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'i' } });
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'Z' } });
+    const tcr1 = try textarea_mod.textAreaClipboard(8, 64, &ctx, tc_id, tc_bounds, &tc_buf, &tc_len, &tc_cursor, &tc_anchor, &tc_scroll, &tc_hist, &tc_clip, font, tc_style);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .a, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .c, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .v, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const tcr2 = try textarea_mod.textAreaClipboard(8, 64, &ctx, tc_id, tc_bounds, &tc_buf, &tc_len, &tc_cursor, &tc_anchor, &tc_scroll, &tc_hist, &tc_clip, font, tc_style);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const tcr3 = try textarea_mod.textAreaClipboard(8, 64, &ctx, tc_id, tc_bounds, &tc_buf, &tc_len, &tc_cursor, &tc_anchor, &tc_scroll, &tc_hist, &tc_clip, font, tc_style);
+    ctx.endFrame();
+    std.debug.print(
+        "m88 textarea typed={d} clip={d} pasted={} undone={} len={d} lines={d}\n",
+        .{
+            tcr1.len,
+            tc_clip.len,
+            tcr2.changed,
+            tcr3.undone,
+            tc_len,
+            textarea_mod.textAreaLineCount(&tc_buf, tc_len),
+        },
+    );
 }
