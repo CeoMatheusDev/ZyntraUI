@@ -7,6 +7,25 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `timeline/view` + `widgets/timeline_view`: **timeline** (M95, aditivo) —
+  modelo puro (sem `Context` e sem alocação) com transformação tempo↔tela
+  (`TimeTransform`: `x = (t - start) * pps`; `zoomAt` mantém a âncora fixa e
+  clampa, `clampStart` mantém a janela em `[0, duration]`), passos canônicos
+  da régua (10 ms … 1 h: menor passo cujo espaçamento em tela caiba no
+  alvo em px), formatação determinística de rótulos (`m:ss`, `h:mm:ss`,
+  `s.d`), `snapTime`, `clampTime`, trilhas/chaves (`Track`/`Keyframe` com
+  `tag` opaco), hit-test de chave (`nearestKey`, tolerância em segundos) e
+  de linha (`trackAtY`). Widget `timelineView` sobre esse modelo: scrub do
+  playhead na régua, arraste de chave por "pega" com ajuste opcional ao
+  passo da régua (o widget atualiza `keys[i].t` e reporta `key_delta`),
+  pan horizontal mantendo o instante "pego" sob o cursor, zoom por roda
+  ancorado no cursor (usa o sinal de `dy`) e teclado com foco (setas movem o
+  playhead, Home/End, Page Up/Down, Tab). Desenho: fundo, linhas de trilha
+  (alternadas), coluna de nomes, separadores, régua (grade, marcas e
+  rótulos), chaves (losango em 4 `.line`) e playhead (linha + alça) — tudo
+  clipado em `bounds` e na área de tempo. Novo `TimelineStyle` +
+  `Theme.timelineStyle()`; `examples/minimal.zig` ganha a demo `m95`.
+
 - `graph/view` + `widgets/graph_view`: **grafo de nós** (M94, aditivo) —
   modelo puro (sem `Context` e sem alocação) com transformação mundo↔tela
   (`Transform`: `tela = mundo * zoom + pan`; `zoomAt` mantém a âncora fixa e

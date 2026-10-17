@@ -470,6 +470,65 @@ pub const GraphStyle = extern struct {
     }
 };
 
+/// Estilo de timeline (M95): régua, trilhas, chaves e playhead
+/// (ver `widgets/timeline_view`).
+///
+/// Unidades: todas as métricas são em px de TELA (a timeline não tem
+/// zoom de geometria; o zoom é o eixo temporal `pps`).
+pub const TimelineStyle = extern struct {
+    /// Fundo da área (transparente ⇒ não desenhado).
+    bg: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Fundo da faixa da régua (transparente ⇒ só as marcas).
+    ruler_bg: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Altura da régua em px (0 ⇒ sem régua nem marcas).
+    ruler_height: f32 = 22.0,
+    /// Cor das marcas da régua.
+    tick: types.Color,
+    /// Cor dos rótulos da régua.
+    tick_label: types.Color,
+    /// Espaçamento-alvo mínimo entre marcas/rótulos (px; <= 0 ⇒ sem régua).
+    min_tick_px: f32 = 80.0,
+    /// Fundo da linha de trilha.
+    track_bg: types.Color,
+    /// Fundo alternado (linhas ímpares; `a == 0` ⇒ sem alternância).
+    track_alt: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Largura da coluna de nomes à esquerda (px; 0 ⇒ sem coluna).
+    name_width: f32 = 0.0,
+    /// Fundo da coluna de nomes (transparente ⇒ trilhas aparecem).
+    names_bg: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Cor do texto do nome da trilha.
+    track_name: types.Color,
+    /// Recuo do nome em px (>= 0).
+    name_pad: f32 = 6.0,
+    /// Linha separadora entre trilhas (transparente ⇒ sem).
+    separator: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Altura de cada trilha em px (> 0).
+    row_height: f32 = 24.0,
+    /// Cor das chaves.
+    key: types.Color,
+    /// Cor da chave selecionada.
+    key_selected: types.Color,
+    /// Meia-diagonal do losango da chave em px (>= 0).
+    key_size: f32 = 6.0,
+    /// Espessura do contorno do losango em px (> 0).
+    key_line_width: f32 = 1.5,
+    /// Cor do playhead (linha + alça).
+    playhead: types.Color,
+    /// Espessura da linha do playhead em px (> 0).
+    playhead_width: f32 = 1.5,
+
+    pub fn isValid(self: TimelineStyle) bool {
+        return std.math.isFinite(self.ruler_height) and self.ruler_height >= 0 and
+            std.math.isFinite(self.min_tick_px) and self.min_tick_px >= 0 and
+            std.math.isFinite(self.name_width) and self.name_width >= 0 and
+            std.math.isFinite(self.name_pad) and self.name_pad >= 0 and
+            std.math.isFinite(self.row_height) and self.row_height > 0 and
+            std.math.isFinite(self.key_size) and self.key_size >= 0 and
+            std.math.isFinite(self.key_line_width) and self.key_line_width > 0 and
+            std.math.isFinite(self.playhead_width) and self.playhead_width > 0;
+    }
+};
+
 /// Estilo de barra de status (M68). Chrome + métricas de
 /// posicionamento dos segmentos (ver `widgets/statusbar`).
 pub const StatusBarStyle = extern struct {
@@ -670,6 +729,31 @@ pub const Theme = extern struct {
         };
     }
 
+    pub fn timelineStyle(self: Theme) TimelineStyle {
+        return .{
+            .bg = self.bg,
+            .ruler_bg = types.Color.rgb(38, 38, 44),
+            .ruler_height = 22.0,
+            .tick = types.Color.rgb(120, 125, 140),
+            .tick_label = self.text,
+            .min_tick_px = 80.0,
+            .track_bg = types.Color.rgb(44, 44, 52),
+            .track_alt = types.Color.rgb(38, 38, 45),
+            .name_width = 90.0,
+            .names_bg = types.Color.rgb(32, 32, 38),
+            .track_name = self.text,
+            .name_pad = 6.0,
+            .separator = types.Color.rgb(70, 70, 80),
+            .row_height = 24.0,
+            .key = types.Color.rgb(255, 190, 70),
+            .key_selected = types.Color.rgb(255, 255, 255),
+            .key_size = 6.0,
+            .key_line_width = 1.5,
+            .playhead = types.Color.rgb(230, 80, 80),
+            .playhead_width = 1.5,
+        };
+    }
+
     pub fn groupBoxStyle(self: Theme) GroupBoxStyle {
         return .{
             .border = self.border,
@@ -853,6 +937,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(light.groupBoxStyle().isValid());
     try stdt.testing.expect(dark.graphStyle().isValid());
     try stdt.testing.expect(light.graphStyle().isValid());
+    try stdt.testing.expect(dark.timelineStyle().isValid());
+    try stdt.testing.expect(light.timelineStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,

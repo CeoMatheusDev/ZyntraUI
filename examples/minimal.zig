@@ -1152,4 +1152,85 @@ pub fn main() !void {
             gv_texts,
         },
     );
+
+    // Timeline (M95): trilhas + chaves + régua + playhead sobre
+    // `timeline/view` (scrub/pan/zoom/arraste de chave). Renderizada num
+    // framebuffer 200x64 para conferir pixels exatos e a estrutura dos
+    // comandos (clip em `bounds`, linhas de grade/marca, chaves em losango
+    // e alça do playhead).
+    var tl_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 200, 64);
+    defer tl_fb.deinit(allocator);
+    tl_fb.clear(zyntra_ui.Color.rgb(255, 255, 255));
+    const tl_style = zyntra_ui.TimelineStyle{
+        .bg = zyntra_ui.Color.rgb(20, 20, 20),
+        .ruler_bg = zyntra_ui.Color.rgb(50, 50, 60),
+        .ruler_height = 16,
+        .tick = zyntra_ui.Color.rgb(120, 125, 140),
+        .tick_label = zyntra_ui.Color.rgb(220, 220, 220),
+        .min_tick_px = 60,
+        .track_bg = zyntra_ui.Color.rgb(35, 35, 45),
+        .track_alt = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        .name_width = 60,
+        .names_bg = zyntra_ui.Color.rgb(28, 28, 34),
+        .track_name = zyntra_ui.Color.rgb(230, 230, 230),
+        .name_pad = 6,
+        .separator = zyntra_ui.Color.rgb(70, 70, 80),
+        .row_height = 20,
+        .key = zyntra_ui.Color.rgb(255, 190, 70),
+        .key_selected = zyntra_ui.Color.rgb(255, 255, 255),
+        .key_size = 6,
+        .key_line_width = 1.5,
+        .playhead = zyntra_ui.Color.rgb(255, 60, 60),
+        .playhead_width = 2,
+    };
+    // Área de tempo: 140 px a 14 px/s ⇒ janela de 10 s = duração; régua em
+    // passos de 5 s (t = 0, 5, 10 ⇒ x = 60, 130, 200).
+    var tl_keys0 = [_]zyntra_ui.TimelineKeyframe{ .{ .t = 2 }, .{ .t = 3.5 }, .{ .t = 8 } };
+    var tl_tracks = [_]zyntra_ui.TimelineTrack{
+        .{ .name = "pos", .keys = &tl_keys0 },
+        .{ .name = "rot" },
+    };
+    var tl_state = zyntra_ui.TimelineViewState{
+        .duration = 10,
+        .playhead = 5,
+        .transform = .{ .pps = 14 },
+    };
+    ctx.beginFrame();
+    _ = try zyntra_ui.widgets.timeline_view.timelineView(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m95:timeline"),
+        zyntra_ui.Rect.init(0, 0, 200, 64),
+        &tl_tracks,
+        &tl_state,
+        .{},
+        tl_style,
+        font,
+    );
+    var tl_cmds: usize = 0;
+    var tl_lines: usize = 0;
+    var tl_texts: usize = 0;
+    for (ctx.drawCommands()) |cmd| {
+        tl_cmds += 1;
+        if (cmd == .line) tl_lines += 1;
+        if (cmd == .text) tl_texts += 1;
+    }
+    _ = try zyntra_ui.software.raster.render(&tl_fb, ctx.drawCommands(), zyntra_ui.Rect.init(0, 0, 200, 64));
+    ctx.endFrame();
+    // Fundo (150,60), régua (90,8), linha de trilha (90,26), coluna de
+    // nomes (5,60) e alça do playhead (130,5). Estrutura: 3 grades + 3
+    // marcas + 1 separador + 3 chaves × 4 + playhead = 20 `.line`; 2 nomes
+    // + 3 rótulos = 5 `.text`.
+    std.debug.print(
+        "m95 timeline bg={d} ruler={d} row={d} name={d} handle={d} cmds={d} lines={d} texts={d}\n",
+        .{
+            tl_fb.get(150, 60)[0],
+            tl_fb.get(90, 8)[0],
+            tl_fb.get(90, 26)[0],
+            tl_fb.get(5, 60)[0],
+            tl_fb.get(130, 5)[0],
+            tl_cmds,
+            tl_lines,
+            tl_texts,
+        },
+    );
 }

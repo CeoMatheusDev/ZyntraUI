@@ -59,6 +59,10 @@ pub const graph = struct {
     pub const view = @import("graph/view.zig");
 };
 
+pub const timeline = struct {
+    pub const view = @import("timeline/view.zig");
+};
+
 pub const widgets = struct {
     pub const button = @import("widgets/button.zig");
     pub const checkbox = @import("widgets/checkbox.zig");
@@ -90,6 +94,7 @@ pub const widgets = struct {
     pub const panel = @import("widgets/panel.zig");
     pub const dock_view = @import("widgets/dock_view.zig");
     pub const graph_view = @import("widgets/graph_view.zig");
+    pub const timeline_view = @import("widgets/timeline_view.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -160,6 +165,7 @@ pub const StatusBar = widgets.statusbar.StatusBar;
 pub const GroupBoxStyle = style.style_mod.GroupBoxStyle;
 pub const PanelStyle = style.style_mod.PanelStyle;
 pub const GraphStyle = style.style_mod.GraphStyle;
+pub const TimelineStyle = style.style_mod.TimelineStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -220,6 +226,15 @@ pub const GraphViewState = widgets.graph_view.GraphViewState;
 pub const GraphViewOptions = widgets.graph_view.GraphViewOptions;
 pub const GraphViewResult = widgets.graph_view.GraphViewResult;
 
+pub const TimelineTimeTransform = timeline.view.TimeTransform;
+pub const TimelineKeyframe = timeline.view.Keyframe;
+pub const TimelineTrack = timeline.view.Track;
+pub const TimelineKeyRef = timeline.view.KeyRef;
+pub const TimelineViewState = widgets.timeline_view.TimelineViewState;
+pub const TimelineViewOptions = widgets.timeline_view.TimelineViewOptions;
+pub const TimelineViewResult = widgets.timeline_view.TimelineViewResult;
+pub const TimelineDragMode = widgets.timeline_view.TimelineDragMode;
+
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
 pub const version_patch = core.types.version_patch;
@@ -245,6 +260,7 @@ test {
     _ = @import("dock/layout.zig");
     _ = @import("dock/serialize.zig");
     _ = @import("graph/view.zig");
+    _ = @import("timeline/view.zig");
     _ = @import("text/metrics.zig");
     _ = @import("text/wrap.zig");
     _ = @import("draw/renderer.zig");
@@ -281,4 +297,5 @@ test {
     _ = @import("widgets/panel.zig");
     _ = @import("widgets/dock_view.zig");
     _ = @import("widgets/graph_view.zig");
+    _ = @import("widgets/timeline_view.zig");
 }
