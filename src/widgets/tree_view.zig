@@ -1002,4 +1002,12 @@ test "TreeView pending keyboard toggles preserve S1 until commit" {
     try testing.expect(items[0].expanded);
     try testing.expectEqual(@as(usize, 3), treeViewCountVisible(&items));
     try testing.expectEqualStrings("child", treeViewFind(&items, 1).?.item.label);
+
+    // Dois toggles adicionais no mesmo snapshot cancelam um ao outro.
+    try treeViewToggle(&pending, testing.allocator, &items[0]);
+    try treeViewToggle(&pending, testing.allocator, &items[0]);
+    try testing.expect(items[0].expanded);
+    treeViewCommit(&pending);
+    try testing.expect(items[0].expanded);
+    try testing.expectEqual(@as(usize, 3), treeViewCountVisible(&items));
 }
