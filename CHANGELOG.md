@@ -5,6 +5,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.22.0] - 2026-10-17
+
+MINOR estável, 100% compatível: GroupBox novo, endurecimento de
+geometria e TreeView sem alocação por nó.
+
 ### Alterado
 
 - `widgets/tree_view`: removida a lista temporária de todos os nós visíveis;
