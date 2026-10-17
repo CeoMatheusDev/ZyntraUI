@@ -7,7 +7,7 @@
 A lightweight, immediate-mode GUI toolkit written in Zig, built around explicit state ownership, deterministic draw commands, and a renderer-independent architecture.
 
 [![Zig](https://img.shields.io/badge/Zig-0.17.0-F7A41D?logo=zig&logoColor=white)](https://ziglang.org/)
-[![Release](https://img.shields.io/badge/release-v1.22.0-2563EB)](https://github.com/CeoMatheusDev/ZyntraUI/releases)
+[![Release](https://img.shields.io/badge/release-v1.23.0-2563EB)](https://github.com/CeoMatheusDev/ZyntraUI/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E)](LICENSE)
 
 [Getting started](#getting-started) · [Features](#why-zyntraui) · [Architecture](#architecture) · [Examples](#examples-and-validation)
@@ -85,7 +85,7 @@ Time-dependent widgets can receive an explicit timestamp, allowing repeatable be
 Add the tagged release to your Zig project:
 
 ```sh
-zig fetch --save https://github.com/CeoMatheusDev/ZyntraUI/archive/refs/tags/v1.22.0.tar.gz
+zig fetch --save https://github.com/CeoMatheusDev/ZyntraUI/archive/refs/tags/v1.23.0.tar.gz
 ```
 
 Then import the module in your consumer's `build.zig`:

@@ -5,6 +5,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.23.0] - 2026-10-17
+
+MINOR estável, 100% compatível: fundação de docking (painel + modelo de
+layout em árvore de splits) e menus com checkmarks/atalhos.
+
 ### Adicionado
 
 - `dock/layout` (M75, Docking passo 2): modelo **puro** de layout em árvore
