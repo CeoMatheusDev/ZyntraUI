@@ -136,14 +136,19 @@ pub fn beginTreeView(
         pending.deinit(ctx.allocator);
     }
     if (visible_count == 0) return error.InvalidArgument;
-    if (selected.* >= visible_count) selected.* = visible_count - 1;
+    const selection_clamped = selected.* >= visible_count;
+    if (selection_clamped) selected.* = visible_count - 1;
 
     const max_scroll = treeViewMaxScroll(items, bounds.h, style);
     scroll_offset.* = std.math.clamp(scroll_offset.*, 0, max_scroll);
 
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
     _ = if (ctx.mouse_pos) |p| bounds.contains(p) else false;
-    var res = TreeViewResult{ .selected = selected.*, .scroll_offset = scroll_offset.* };
+    var res = TreeViewResult{
+        .selected = selected.*,
+        .changed = selection_clamped,
+        .scroll_offset = scroll_offset.*,
+    };
 
     try ctx.registerFocusable(id);
     if (fm.pressedInside(bounds)) {
@@ -1249,5 +1254,33 @@ test "TreeView keyboard collapse clamps scroll to new content height" {
     try testing.expectEqual(@as(f32, 0), treeViewMaxScroll(&items, bounds.h, style));
     try testing.expectEqual(@as(f32, 0), scroll);
     try testing.expectEqual(scroll, result.scroll_offset);
+    ctx.endFrame();
+}
+
+test "TreeView reports initial out-of-range selection clamp" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+
+    var items = [_]TreeItem{
+        .{ .label = "first", .children = &[_]TreeItem{} },
+        .{ .label = "last", .children = &[_]TreeItem{} },
+    };
+    const bounds = types.Rect.init(0, 0, 240, style.item_height * 3);
+    const id = id_mod.Id.fromString("test:tree-initial-selection-clamp");
+    var selected: usize = 100;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    const result = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expectEqual(@as(usize, 1), selected);
+    try testing.expectEqual(selected, result.selected);
+    try testing.expect(result.changed);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    const unchanged = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expect(!unchanged.changed);
     ctx.endFrame();
 }
