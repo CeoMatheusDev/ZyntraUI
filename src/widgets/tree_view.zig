@@ -354,6 +354,10 @@ pub fn beginTreeView(
 
     // S2: o desenho acima ainda usa S1; a scrollbar vê os toggles do teclado.
     treeViewCommit(&pending);
+    // Um colapso por teclado pode reduzir o conteúdo e invalidar o offset S1.
+    // Ajustar somente agora preserva o snapshot do desenho e mantém o estado
+    // retornado e a posição do thumb dentro dos limites do novo conteúdo.
+    scroll_offset.* = @min(scroll_offset.*, treeViewMaxScroll(items, bounds.h, style));
 
     // Scrollbar
     const content_h = treeViewContentHeight(items, style);
