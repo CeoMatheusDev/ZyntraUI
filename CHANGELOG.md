@@ -7,6 +7,13 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `draw/commands` + `software/raster`: **gradiente linear** (M91, aditivo)
+  — novo comando `rect_gradient` (`rect`, eixo `p0`→`p1`, `color0`/
+  `color1`) e helper `DrawList.rectGradient`. O backend de referência
+  projeta cada pixel no eixo (clampado a `[0,1]`), interpola os canais em
+  aritmética inteira determinística (`t` quantizado em 0..255) e deixa o
+  alfa seguir o blending source-over; `p0 == p1` degenera em `color0`
+  sólido. `examples/minimal.zig` ganha a demo `m91`.
 - `draw/commands` + `software/raster`: **retângulo de cantos arredondados**
   (M90, aditivo) — novo comando `rect_rounded` (payload `extern struct`:
   `rect`, `radius`, `color`) e helper `DrawList.rectRounded`. O backend de

@@ -60,6 +60,7 @@ pub fn commandBounds(cmd: commands.DrawCommand) ?types.Rect {
             return .{ .x = c.pos.x, .y = c.pos.y, .w = c.width, .h = c.size };
         },
         .rect_rounded => |c| return c.rect,
+        .rect_gradient => |c| return c.rect,
     }
 }
 
@@ -196,6 +197,16 @@ test "cull usa bounds do retângulo arredondado" {
             .rect = types.Rect.init(10, 10, 20, 20),
             .radius = 4,
             .color = types.Color.rgb(1, 2, 3),
+        } }).?,
+    );
+    try stdt.testing.expectEqual(
+        types.Rect.init(2, 3, 8, 9),
+        commandBounds(.{ .rect_gradient = .{
+            .rect = types.Rect.init(2, 3, 8, 9),
+            .p0 = types.Vec2.init(0, 0),
+            .p1 = types.Vec2.init(0, 10),
+            .color0 = types.Color.rgb(0, 0, 0),
+            .color1 = types.Color.rgb(255, 255, 255),
         } }).?,
     );
     const cmds = [_]commands.DrawCommand{

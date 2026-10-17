@@ -255,6 +255,61 @@ pub const SoftwareFramebuffer = struct {
         }
     }
 
+    /// Interpola um canal (0..255) por `tq` em 0..255 (arredondado).
+    fn lerpChannel(a: u8, b: u8, tq: u32) u8 {
+        return @intCast((@as(u32, a) * (255 - tq) + @as(u32, b) * tq + 127) / 255);
+    }
+
+    /// Gradiente linear dentro de `r`: `color0` em `from`, `color1` em
+    /// `to`; o pixel é projetado no eixo e `t` é clampado a [0,1]
+    /// (quantizado em 0..255 para resultados determinísticos). `from ==
+    /// to` degenera em `color0` sólido; entradas não-finitas saturam em
+    /// no-op.
+    pub fn fillGradient(
+        self: *Self,
+        r: types.Rect,
+        from: types.Vec2,
+        to: types.Vec2,
+        color0: types.Color,
+        color1: types.Color,
+        clip: ?types.Rect,
+    ) void {
+        if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
+            !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
+            !std.math.isFinite(from.x) or !std.math.isFinite(from.y) or
+            !std.math.isFinite(to.x) or !std.math.isFinite(to.y)) return;
+        if (r.w <= 0 or r.h <= 0) return;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const den = dx * dx + dy * dy;
+        const x0 = @max(0, @as(i64, @intFromFloat(@floor(r.x))));
+        const y0 = @max(0, @as(i64, @intFromFloat(@floor(r.y))));
+        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(r.x + r.w))));
+        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(r.y + r.h))));
+        var y = y0;
+        while (y < y_end) : (y += 1) {
+            var x = x0;
+            while (x < x_end) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                const fx: f32 = @floatFromInt(x);
+                const fy: f32 = @floatFromInt(y);
+                const t: f32 = if (den <= 0) 0 else std.math.clamp(
+                    ((fx + 0.5 - from.x) * dx + (fy + 0.5 - from.y) * dy) / den,
+                    0,
+                    1,
+                );
+                const tq: u32 = @intFromFloat(@round(t * 255.0));
+                const c = types.Color{
+                    .r = lerpChannel(color0.r, color1.r, tq),
+                    .g = lerpChannel(color0.g, color1.g, tq),
+                    .b = lerpChannel(color0.b, color1.b, tq),
+                    .a = lerpChannel(color0.a, color1.a, tq),
+                };
+                self.set(@intCast(x), @intCast(y), c);
+            }
+        }
+    }
+
     pub fn strokeRect(self: *Self, r: types.Rect, thickness: f32, clip: ?types.Rect, c: types.Color) void {
         if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
             !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
@@ -330,6 +385,7 @@ pub fn render(fb: *SoftwareFramebuffer, cmds: []const commands.DrawCommand, view
                     .line => |c| fb.strokeLine(c.p0, c.p1, c.thickness, mergeClip(clip, vp), c.color),
                     .circle_filled => |c| fb.fillCircle(c.center, c.radius, mergeClip(clip, vp), c.color),
                     .rect_rounded => |c| fb.fillRoundRect(c.rect, c.radius, mergeClip(clip, vp), c.color),
+                    .rect_gradient => |c| fb.fillGradient(c.rect, c.p0, c.p1, c.color0, c.color1, mergeClip(clip, vp)),
                     else => unreachable,
                 }
                 out.drawn += 1;
@@ -519,6 +575,8 @@ fn fuzzRaster(_: void, smith: *std.testing.Smith) !void {
     fb.strokeRect(r, @abs(bits[2]) + 1, null, c);
     fb.fillRoundRect(r, @abs(bits[3]), null, c);
     fb.fillRoundRect(r, @abs(bits[3]), types.Rect.init(-100, -100, 1000, 1000), c);
+    fb.fillGradient(r, p0, p1, c, c, null);
+    fb.fillGradient(r, p0, p1, c, c, types.Rect.init(-100, -100, 1000, 1000));
 
     // Invariante estrutural: tamanho do buffer intacto.
     try std.testing.expectEqual(@as(usize, 16 * 16 * 4), fb.pixels.len);
@@ -638,4 +696,115 @@ test "render com retângulo arredondado (drawn + cull)" {
     try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(4, 4)); // canto cortado
     try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(12, 12)); // miolo
     try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(20, 20)); // fora
+}
+
+test "raster gradiente linear: horizontal, vertical, degenerado e clip" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+
+    // Horizontal preto→branco em 4 px: t = .125/.375/.625/.875.
+    var fb = try SoftwareFramebuffer.init(gpa, 4, 2);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+    fb.fillGradient(
+        types.Rect.init(0, 0, 4, 2),
+        types.Vec2.init(0, 0),
+        types.Vec2.init(4, 0),
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+        null,
+    );
+    try stdt.testing.expectEqual([4]u8{ 32, 32, 32, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 96, 96, 96, 255 }, fb.get(1, 0));
+    try stdt.testing.expectEqual([4]u8{ 159, 159, 159, 255 }, fb.get(2, 0));
+    try stdt.testing.expectEqual([4]u8{ 223, 223, 223, 255 }, fb.get(3, 0));
+    try stdt.testing.expectEqual([4]u8{ 32, 32, 32, 255 }, fb.get(0, 1)); // eixo horizontal
+
+    // Vertical: eixo (0,0)→(0,2), t = .25 e .75.
+    var fb2 = try SoftwareFramebuffer.init(gpa, 2, 2);
+    defer fb2.deinit(gpa);
+    fb2.clear(types.Color.rgb(0, 0, 0));
+    fb2.fillGradient(
+        types.Rect.init(0, 0, 2, 2),
+        types.Vec2.init(0, 0),
+        types.Vec2.init(0, 2),
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+        null,
+    );
+    try stdt.testing.expectEqual([4]u8{ 64, 64, 64, 255 }, fb2.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 191, 191, 191, 255 }, fb2.get(0, 1));
+
+    // Eixo degenerado (from == to) → color0 sólido.
+    var fb3 = try SoftwareFramebuffer.init(gpa, 3, 1);
+    defer fb3.deinit(gpa);
+    fb3.clear(types.Color.rgb(0, 0, 0));
+    fb3.fillGradient(
+        types.Rect.init(0, 0, 3, 1),
+        types.Vec2.init(1, 0),
+        types.Vec2.init(1, 0),
+        types.Color.rgb(10, 20, 30),
+        types.Color.rgb(200, 200, 200),
+        null,
+    );
+    try stdt.testing.expectEqual([4]u8{ 10, 20, 30, 255 }, fb3.get(1, 0));
+
+    // Fora do eixo clampa em color0/color1.
+    var fb4 = try SoftwareFramebuffer.init(gpa, 3, 1);
+    defer fb4.deinit(gpa);
+    fb4.clear(types.Color.rgb(0, 0, 0));
+    fb4.fillGradient(
+        types.Rect.init(0, 0, 3, 1),
+        types.Vec2.init(0, 0),
+        types.Vec2.init(1, 0),
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+        null,
+    );
+    try stdt.testing.expectEqual([4]u8{ 128, 128, 128, 255 }, fb4.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb4.get(1, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb4.get(2, 0));
+
+    // Clip; alfa herdado; retângulo vazio/não-finito = no-op.
+    var fb5 = try SoftwareFramebuffer.init(gpa, 4, 1);
+    defer fb5.deinit(gpa);
+    fb5.clear(types.Color.rgb(0, 0, 0));
+    fb5.fillGradient(
+        types.Rect.init(0, 0, 4, 1),
+        types.Vec2.init(0, 0),
+        types.Vec2.init(4, 0),
+        types.Color.rgb(255, 0, 0),
+        types.Color.rgb(255, 0, 0),
+        types.Rect.init(1, 0, 2, 1),
+    );
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb5.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb5.get(1, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb5.get(3, 0));
+    fb5.fillGradient(
+        types.Rect.init(0, 0, 4, 1),
+        types.Vec2.init(0, 0),
+        types.Vec2.init(4, 0),
+        .{ .r = 255, .g = 0, .b = 0, .a = 128 },
+        .{ .r = 255, .g = 0, .b = 0, .a = 128 },
+        null,
+    );
+    try stdt.testing.expectEqual([4]u8{ 128, 0, 0, 255 }, fb5.get(0, 0));
+    const before = fb5.get(2, 0);
+    fb5.fillGradient(
+        types.Rect.init(0, 0, 0, 1),
+        types.Vec2.init(0, 0),
+        types.Vec2.init(1, 0),
+        types.Color.rgb(9, 9, 9),
+        types.Color.rgb(9, 9, 9),
+        null,
+    );
+    fb5.fillGradient(
+        types.Rect.init(0, 0, 4, 1),
+        types.Vec2.init(std.math.nan(f32), 0),
+        types.Vec2.init(4, 0),
+        types.Color.rgb(9, 9, 9),
+        types.Color.rgb(9, 9, 9),
+        null,
+    );
+    try stdt.testing.expectEqual(before, fb5.get(2, 0));
 }

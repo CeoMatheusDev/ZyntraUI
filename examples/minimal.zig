@@ -1015,4 +1015,25 @@ pub fn main() !void {
         "m90 rounded corner_r={d} mid={d},{d},{d} edge_r={d}\n",
         .{ rr_corner[0], rr_mid[0], rr_mid[1], rr_mid[2], rr_edge[0] },
     );
+
+    // Draw moderno (M91): gradiente linear no contrato de desenho. Um
+    // framebuffer 4x1 com preto→branco no eixo (0,0)→(4,0): t = 1/8..7/8.
+    var gr_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 4, 1);
+    defer gr_fb.deinit(allocator);
+    gr_fb.clear(zyntra_ui.Color.rgb(0, 0, 0));
+    ctx.beginFrame();
+    try ctx.draw.rectGradient(
+        allocator,
+        zyntra_ui.Rect.init(0, 0, 4, 1),
+        zyntra_ui.Vec2.init(0, 0),
+        zyntra_ui.Vec2.init(4, 0),
+        zyntra_ui.Color.rgb(0, 0, 0),
+        zyntra_ui.Color.rgb(255, 255, 255),
+    );
+    _ = try zyntra_ui.software.raster.render(&gr_fb, ctx.drawCommands(), zyntra_ui.Rect.init(0, 0, 4, 1));
+    ctx.endFrame();
+    std.debug.print(
+        "m91 gradient px0={d} px1={d} px2={d} px3={d}\n",
+        .{ gr_fb.get(0, 0)[0], gr_fb.get(1, 0)[0], gr_fb.get(2, 0)[0], gr_fb.get(3, 0)[0] },
+    );
 }

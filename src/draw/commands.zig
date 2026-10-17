@@ -66,6 +66,17 @@ pub const DrawCommand = union(enum) {
         radius: f32,
         color: types.Color,
     },
+    /// Preenchimento em gradiente LINEAR: `color0` em `p0`, `color1` em
+    /// `p1` (projeção do pixel no eixo `p0→p1`, clampada a [0,1]).
+    /// `p0 == p1` degenera em `color0` sólido. O gradiente fica contido
+    /// em `rect` (clamp nas bordas).
+    rect_gradient: extern struct {
+        rect: types.Rect,
+        p0: types.Vec2,
+        p1: types.Vec2,
+        color0: types.Color,
+        color1: types.Color,
+    },
 
     fn finite(v: f32) bool {
         return std.math.isFinite(v);
@@ -110,6 +121,13 @@ pub const DrawCommand = union(enum) {
                     finite(c.rect.w) and finite(c.rect.h) and
                     c.rect.w >= 0 and c.rect.h >= 0 and
                     finite(c.radius) and c.radius >= 0;
+            },
+            .rect_gradient => |c| {
+                return finite(c.rect.x) and finite(c.rect.y) and
+                    finite(c.rect.w) and finite(c.rect.h) and
+                    c.rect.w >= 0 and c.rect.h >= 0 and
+                    finite(c.p0.x) and finite(c.p0.y) and
+                    finite(c.p1.x) and finite(c.p1.y);
             },
         }
     }
@@ -191,6 +209,25 @@ pub const DrawList = struct {
         try self.push(gpa, .{ .rect_rounded = .{ .rect = rect, .radius = radius, .color = color } });
     }
 
+    /// Gradiente linear `color0` (em `p0`) → `color1` (em `p1`) dentro de `rect`.
+    pub fn rectGradient(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        rect: types.Rect,
+        p0: types.Vec2,
+        p1: types.Vec2,
+        color0: types.Color,
+        color1: types.Color,
+    ) !void {
+        try self.push(gpa, .{ .rect_gradient = .{
+            .rect = rect,
+            .p0 = p0,
+            .p1 = p1,
+            .color0 = color0,
+            .color1 = color1,
+        } });
+    }
+
     /// Enfileira texto copiando os bytes para a arena interna.
     /// Valida UTF-8 no push (backend nunca recebe texto malformado).
     /// Textos que não couberem em offsets `u32` retornam `OutOfMemory`.
@@ -264,6 +301,43 @@ test "DrawList helpers + validação" {
     dl.clearRetainingCapacity();
     try stdt.testing.expectEqual(@as(usize, 0), dl.len());
     try stdt.testing.expect(dl.list.capacity >= cap);
+}
+
+test "DrawList rectGradient + validação" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    try dl.rectGradient(
+        gpa,
+        types.Rect.init(0, 0, 4, 4),
+        types.Vec2.init(0, 0),
+        types.Vec2.init(4, 0),
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+    );
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    try stdt.testing.expect(dl.items()[0].isValid());
+
+    // Eixo não-finito é rejeitado sem enfileirar.
+    try stdt.testing.expectError(error.InvalidCommand, dl.rectGradient(
+        gpa,
+        types.Rect.init(0, 0, 4, 4),
+        types.Vec2.init(std.math.nan(f32), 0),
+        types.Vec2.init(4, 0),
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+    ));
+    try stdt.testing.expectError(error.InvalidCommand, dl.rectGradient(
+        gpa,
+        types.Rect.init(0, 0, -1, 4),
+        types.Vec2.init(0, 0),
+        types.Vec2.init(4, 0),
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+    ));
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
 }
 
 test "DrawList pushText copia, resolve e valida" {
