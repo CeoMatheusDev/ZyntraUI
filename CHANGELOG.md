@@ -7,6 +7,23 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `graph/view` + `widgets/graph_view`: **grafo de nós** (M94, aditivo) —
+  modelo puro (sem `Context` e sem alocação) com transformação mundo↔tela
+  (`Transform`: `tela = mundo * zoom + pan`; `zoomAt` mantém a âncora fixa e
+  clampa), geometria de nós/pinos (entradas na borda esquerda, saídas na
+  direita, distribuição uniforme na altura), arestas (Bézier cúbica com
+  controles horizontais simétricos) e hit-test (o último desenhado vence).
+  Widget `graphView` sobre esse modelo: pan no fundo (delta incremental),
+  arraste e seleção de nó por "pega" em espaço-mundo (sem deriva; o widget
+  atualiza `nodes[i].pos` e reporta `drag_delta`), zoom por roda ancorado no
+  cursor (usa o sinal de `dy`) e teclado com foco (setas, Page Up/Down,
+  Home, Tab). Desenho: fundo, grade "número redondo" derivada do alvo em
+  tela, arestas amostradas em comandos `.line`, nós (realce de seleção e
+  borda por expansão concêntrica, corpo, faixa de título, título escalado
+  pelo zoom e pinos) — tudo clipado em `bounds` (comando `.clip`). Novo
+  `GraphStyle` + `Theme.graphStyle()`; `examples/minimal.zig` ganha a demo
+  `m94`.
+
 ## [1.25.0] - 2026-10-17
 
 MINOR estável, 100% compatível: **texto completo** no `textarea` (undo/redo,

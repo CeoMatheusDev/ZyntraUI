@@ -1074,4 +1074,82 @@ pub fn main() !void {
         "m93 blur px0={d} px1={d} px2={d} px3={d}\n",
         .{ bl_fb.get(0, 0)[0], bl_fb.get(1, 0)[0], bl_fb.get(2, 0)[0], bl_fb.get(3, 0)[0] },
     );
+
+    // Grafo de nós (M94): grafo interativo sobre `graph/view` (pan/zoom +
+    // nós/arestas + hit-test). Aqui um nó 40x32 em (8,8) com faixa de
+    // título, 1 entrada e 1 saída, renderizado num framebuffer 96x64 para
+    // conferir pixels exatos e a estrutura dos comandos (clip em `bounds`,
+    // faixa de título, pino e texto).
+    var gv_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 96, 64);
+    defer gv_fb.deinit(allocator);
+    gv_fb.clear(zyntra_ui.Color.rgb(255, 255, 255));
+    const gv_style = zyntra_ui.GraphStyle{
+        .bg = zyntra_ui.Color.rgb(20, 20, 20),
+        .grid = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        .grid_target_px = 16,
+        .node_bg = zyntra_ui.Color.rgb(200, 40, 40),
+        .node_header = zyntra_ui.Color.rgb(40, 200, 40),
+        .node_border = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        .node_selected = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        .node_radius = 0,
+        .header_height = 12,
+        .title = zyntra_ui.Color.rgb(255, 255, 255),
+        .title_pad = 4,
+        .edge = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        .edge_width = 1,
+        .port = zyntra_ui.Color.rgb(40, 40, 220),
+        .port_radius = 3,
+    };
+    var gv_nodes = [_]zyntra_ui.GraphNode{
+        .{
+            .pos = .{ .x = 8, .y = 8 },
+            .size = .{ .x = 40, .y = 32 },
+            .title = "n",
+            .inputs = 1,
+            .outputs = 1,
+        },
+        .{
+            .pos = .{ .x = 72, .y = 8 },
+            .size = .{ .x = 16, .y = 32 },
+            .inputs = 1,
+        },
+    };
+    const gv_edges = [_]zyntra_ui.GraphEdge{.{ .from = 0, .to = 1 }};
+    var gv_state = zyntra_ui.GraphViewState{};
+    ctx.beginFrame();
+    _ = try zyntra_ui.widgets.graph_view.graphView(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m94:graph"),
+        zyntra_ui.Rect.init(0, 0, 96, 64),
+        &gv_nodes,
+        &gv_edges,
+        &gv_state,
+        .{},
+        gv_style,
+        font,
+    );
+    var gv_cmds: usize = 0;
+    var gv_lines: usize = 0;
+    var gv_texts: usize = 0;
+    for (ctx.drawCommands()) |cmd| {
+        gv_cmds += 1;
+        if (cmd == .line) gv_lines += 1;
+        if (cmd == .text) gv_texts += 1;
+    }
+    _ = try zyntra_ui.software.raster.render(&gv_fb, ctx.drawCommands(), zyntra_ui.Rect.init(0, 0, 96, 64));
+    ctx.endFrame();
+    // Corpo (28,24), faixa de título (28,14), pino de entrada (8,24) e
+    // fundo (90,58); a aresta vira `edge_segments` (12) comandos `.line`.
+    std.debug.print(
+        "m94 graph body={d} header={d} port={d} bg={d} cmds={d} lines={d} texts={d}\n",
+        .{
+            gv_fb.get(28, 24)[0],
+            gv_fb.get(28, 14)[1],
+            gv_fb.get(8, 24)[2],
+            gv_fb.get(90, 58)[0],
+            gv_cmds,
+            gv_lines,
+            gv_texts,
+        },
+    );
 }

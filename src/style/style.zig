@@ -416,6 +416,60 @@ pub const DockStyle = extern struct {
     }
 };
 
+/// Estilo do grafo de nós (M94). Unidades:
+/// - **mundo** (escalam com o zoom): `node_radius`, `header_height`,
+///   `title_pad`.
+/// - **tela** (espessura constante): `grid_target_px`,
+///   `node_border_width`, `node_selected_width`, `edge_width`,
+///   `port_radius`.
+pub const GraphStyle = extern struct {
+    /// Fundo da área (transparente, `a == 0` ⇒ não desenhado).
+    bg: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Linhas da grade (transparente ⇒ sem grade).
+    grid: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Espaçamento-alvo da grade em px de tela (<= 0 ⇒ sem grade).
+    grid_target_px: f32 = 32.0,
+    /// Fundo do nó.
+    node_bg: types.Color,
+    /// Faixa de título do nó (transparente ⇒ só o corpo).
+    node_header: types.Color,
+    /// Borda do nó (transparente ou largura 0 ⇒ sem borda).
+    node_border: types.Color,
+    /// Realce externo do nó selecionado.
+    node_selected: types.Color,
+    /// Espessura da borda do nó em px de tela (>= 0).
+    node_border_width: f32 = 1.0,
+    /// Espessura do realce de seleção em px de tela (>= 0).
+    node_selected_width: f32 = 2.0,
+    /// Raio dos cantos do nó em unidades de mundo (0 ⇒ cantos retos).
+    node_radius: f32 = 0.0,
+    /// Altura da faixa de título em unidades de mundo (clampada ao nó).
+    header_height: f32 = 18.0,
+    /// Cor do texto do título.
+    title: types.Color,
+    /// Recuo interno do título em unidades de mundo (>= 0).
+    title_pad: f32 = 8.0,
+    /// Cor das arestas.
+    edge: types.Color,
+    /// Espessura das arestas em px de tela (> 0).
+    edge_width: f32 = 1.5,
+    /// Cor dos pinos (transparente ⇒ sem pinos).
+    port: types.Color,
+    /// Raio do pino em px de tela (>= 0).
+    port_radius: f32 = 3.0,
+
+    pub fn isValid(self: GraphStyle) bool {
+        return std.math.isFinite(self.grid_target_px) and
+            std.math.isFinite(self.node_border_width) and self.node_border_width >= 0 and
+            std.math.isFinite(self.node_selected_width) and self.node_selected_width >= 0 and
+            std.math.isFinite(self.node_radius) and self.node_radius >= 0 and
+            std.math.isFinite(self.header_height) and self.header_height >= 0 and
+            std.math.isFinite(self.title_pad) and self.title_pad >= 0 and
+            std.math.isFinite(self.edge_width) and self.edge_width > 0 and
+            std.math.isFinite(self.port_radius) and self.port_radius >= 0;
+    }
+};
+
 /// Estilo de barra de status (M68). Chrome + métricas de
 /// posicionamento dos segmentos (ver `widgets/statusbar`).
 pub const StatusBarStyle = extern struct {
@@ -591,6 +645,28 @@ pub const Theme = extern struct {
             .padding_y = 4.0,
             .spacing = 6.0,
             .item_height = 20.0,
+        };
+    }
+
+    pub fn graphStyle(self: Theme) GraphStyle {
+        return .{
+            .bg = self.bg,
+            .grid = .{ .r = 255, .g = 255, .b = 255, .a = 18 },
+            .grid_target_px = 32.0,
+            .node_bg = self.surface,
+            .node_header = self.accent,
+            .node_border = self.border,
+            .node_selected = types.Color.rgb(255, 190, 70),
+            .node_border_width = 1.0,
+            .node_selected_width = 2.0,
+            .node_radius = 4.0,
+            .header_height = 18.0,
+            .title = types.Color.rgb(255, 255, 255),
+            .title_pad = 8.0,
+            .edge = types.Color.rgb(160, 170, 195),
+            .edge_width = 1.5,
+            .port = types.Color.rgb(235, 235, 240),
+            .port_radius = 3.0,
         };
     }
 
@@ -775,6 +851,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(light.statusBarStyle().isValid());
     try stdt.testing.expect(dark.groupBoxStyle().isValid());
     try stdt.testing.expect(light.groupBoxStyle().isValid());
+    try stdt.testing.expect(dark.graphStyle().isValid());
+    try stdt.testing.expect(light.graphStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,
