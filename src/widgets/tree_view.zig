@@ -367,7 +367,8 @@ pub fn beginTreeView(
     // Scrollbar
     const content_h = treeViewContentHeight(items, style);
     if (content_h > bounds.h) {
-        const thumb_h = @max(20, bounds.h * bounds.h / content_h);
+        // O mínimo visual de 20 px não pode ultrapassar o próprio viewport.
+        const thumb_h = @min(bounds.h, @max(20, bounds.h * bounds.h / content_h));
         const thumb_y = bounds.y + (bounds.h - thumb_h) * (scroll_offset.* / max_scroll);
         const thumb = types.Rect.init(bounds.x + bounds.w - 4, thumb_y, 4, thumb_h);
         ctx.draw.rectFilled(ctx.allocator, thumb, style.border) catch |err| switch (err) {
@@ -1282,5 +1283,40 @@ test "TreeView reports initial out-of-range selection clamp" {
     ctx.beginFrame();
     const unchanged = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
     try testing.expect(!unchanged.changed);
+    ctx.endFrame();
+}
+
+test "TreeView scrollbar thumb stays within a short viewport" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+
+    var items: [20]TreeItem = undefined;
+    for (&items) |*item| {
+        item.* = .{ .label = "row", .children = &[_]TreeItem{} };
+    }
+    const bounds = types.Rect.init(0, 0, 200, 12);
+    const id = id_mod.Id.fromString("test:tree-short-scrollbar");
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    var found_thumb = false;
+    for (ctx.drawCommands()) |cmd| {
+        switch (cmd) {
+            .rect_filled => |rect| {
+                if (rect.rect.x == bounds.x + bounds.w - 4 and rect.rect.w == 4) {
+                    found_thumb = true;
+                    try testing.expect(rect.rect.h <= bounds.h);
+                    try testing.expect(rect.rect.y >= bounds.y);
+                    try testing.expect(rect.rect.y + rect.rect.h <= bounds.y + bounds.h);
+                }
+            },
+            else => {},
+        }
+    }
+    try testing.expect(found_thumb);
     ctx.endFrame();
 }
