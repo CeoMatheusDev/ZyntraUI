@@ -997,4 +997,22 @@ pub fn main() !void {
         "m89 wrap rows={d} scroll={d} len={d} logical={d}\n",
         .{ ws_rows, ws_scroll, ws_len, textarea_mod.textAreaLineCount(&ws_buf, ws_len) },
     );
+
+    // Draw moderno (M90): retângulo de cantos arredondados (SDF + AA) no
+    // contrato de desenho. Aqui num framebuffer de prova 12x12: canto
+    // cortado (fica preto), miolo cheio e uma aresta parcial (50% = 128).
+    var rr_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 12, 12);
+    defer rr_fb.deinit(allocator);
+    rr_fb.clear(zyntra_ui.Color.rgb(0, 0, 0));
+    ctx.beginFrame();
+    try ctx.draw.rectRounded(allocator, zyntra_ui.Rect.init(1.5, 0, 9, 12), 4.0, zyntra_ui.Color.rgb(255, 0, 0));
+    _ = try zyntra_ui.software.raster.render(&rr_fb, ctx.drawCommands(), zyntra_ui.Rect.init(0, 0, 12, 12));
+    ctx.endFrame();
+    const rr_corner = rr_fb.get(0, 0);
+    const rr_mid = rr_fb.get(6, 6);
+    const rr_edge = rr_fb.get(1, 6);
+    std.debug.print(
+        "m90 rounded corner_r={d} mid={d},{d},{d} edge_r={d}\n",
+        .{ rr_corner[0], rr_mid[0], rr_mid[1], rr_mid[2], rr_edge[0] },
+    );
 }

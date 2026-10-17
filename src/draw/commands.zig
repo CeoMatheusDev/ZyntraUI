@@ -56,6 +56,16 @@ pub const DrawCommand = union(enum) {
         start: u32,
         len: u32,
     },
+    /// Retângulo de cantos arredondados uniformes (`radius` em px,
+    /// clampado a `min(w,h)/2` pelo backend). O backend de referência
+    /// usa distância assinada (SDF) com cobertura fracionária — bordas
+    /// anti-serrilhadas. `radius == 0` degenera num retângulo com
+    /// bordas AA (para bordas exatas use `rect_filled`).
+    rect_rounded: extern struct {
+        rect: types.Rect,
+        radius: f32,
+        color: types.Color,
+    },
 
     fn finite(v: f32) bool {
         return std.math.isFinite(v);
@@ -94,6 +104,12 @@ pub const DrawCommand = union(enum) {
                 return finite(c.pos.x) and finite(c.pos.y) and
                     finite(c.size) and c.size > 0 and
                     finite(c.width) and c.width >= 0;
+            },
+            .rect_rounded => |c| {
+                return finite(c.rect.x) and finite(c.rect.y) and
+                    finite(c.rect.w) and finite(c.rect.h) and
+                    c.rect.w >= 0 and c.rect.h >= 0 and
+                    finite(c.radius) and c.radius >= 0;
             },
         }
     }
@@ -170,6 +186,11 @@ pub const DrawList = struct {
         try self.push(gpa, .{ .circle_filled = .{ .center = center, .color = color, .radius = radius } });
     }
 
+    /// Retângulo de cantos arredondados (bordas AA no backend de referência).
+    pub fn rectRounded(self: *Self, gpa: std.mem.Allocator, rect: types.Rect, radius: f32, color: types.Color) !void {
+        try self.push(gpa, .{ .rect_rounded = .{ .rect = rect, .radius = radius, .color = color } });
+    }
+
     /// Enfileira texto copiando os bytes para a arena interna.
     /// Valida UTF-8 no push (backend nunca recebe texto malformado).
     /// Textos que não couberem em offsets `u32` retornam `OutOfMemory`.
@@ -210,12 +231,26 @@ test "DrawList helpers + validação" {
     try dl.rectOutline(gpa, types.Rect.init(0, 0, 10, 10), types.Color.rgb(0, 255, 0), 1.0);
     try dl.line(gpa, types.Vec2.init(0, 0), types.Vec2.init(5, 5), types.Color.rgb(0, 0, 255), 2.0);
     try dl.circleFilled(gpa, types.Vec2.init(3, 3), 4.0, types.Color.rgb(255, 255, 0));
-    try stdt.testing.expectEqual(@as(usize, 5), dl.len());
+    try dl.rectRounded(gpa, types.Rect.init(0, 0, 10, 10), 3.0, types.Color.rgb(10, 20, 30));
+    try stdt.testing.expectEqual(@as(usize, 6), dl.len());
+    try stdt.testing.expect(dl.items()[5].isValid());
 
     // Inválidos:
     try stdt.testing.expectError(error.InvalidCommand, dl.rectFilled(
         gpa,
         types.Rect.init(0, 0, -1, 5),
+        types.Color.rgb(0, 0, 0),
+    ));
+    try stdt.testing.expectError(error.InvalidCommand, dl.rectRounded(
+        gpa,
+        types.Rect.init(0, 0, 10, 10),
+        -1.0,
+        types.Color.rgb(0, 0, 0),
+    ));
+    try stdt.testing.expectError(error.InvalidCommand, dl.rectRounded(
+        gpa,
+        types.Rect.init(0, 0, 10, 10),
+        std.math.nan(f32),
         types.Color.rgb(0, 0, 0),
     ));
     try stdt.testing.expectError(error.InvalidCommand, dl.line(

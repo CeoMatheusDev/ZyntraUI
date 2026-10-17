@@ -7,6 +7,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `draw/commands` + `software/raster`: **retângulo de cantos arredondados**
+  (M90, aditivo) — novo comando `rect_rounded` (payload `extern struct`:
+  `rect`, `radius`, `color`) e helper `DrawList.rectRounded`. O backend de
+  referência o rasteriza por **distância assinada (SDF)** com cobertura
+  fracionária, produzindo **bordas anti-serrilhadas** (`radius` clampado a
+  `min(w,h)/2`; `radius == 0` degenera num retângulo com bordas AA). O
+  `renderer.commandBounds` usa o próprio `rect` (o raio não expande o
+  bounds), então culling e desenho concordam. `examples/minimal.zig` ganha
+  a demo `m90` (canto cortado, miolo cheio e aresta a 50%).
 - `widgets/textarea`: **quebra suave** (M89, aditivo) — linhas longas
   quebram na largura útil por codepoint (sem rolagem horizontal) nas
   variantes `textAreaWrapped`, `textAreaWrappedHistory` e

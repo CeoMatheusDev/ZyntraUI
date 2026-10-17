@@ -209,6 +209,52 @@ pub const SoftwareFramebuffer = struct {
         }
     }
 
+    /// Cobertura (0..1) do ponto (`px`,`py`) num retângulo de cantos
+    /// arredondados: SDF clássico; `< 0` dentro, `0` na borda. A
+    /// conversão em cobertura usa meia-largura de 1px (borda AA).
+    fn roundRectCoverage(px: f32, py: f32, r: types.Rect, rad: f32) f32 {
+        const hw = r.w / 2;
+        const hh = r.h / 2;
+        const qx = @abs(px - (r.x + hw)) - (hw - rad);
+        const qy = @abs(py - (r.y + hh)) - (hh - rad);
+        const ox = @max(qx, 0);
+        const oy = @max(qy, 0);
+        const d = @sqrt(ox * ox + oy * oy) + @min(@max(qx, qy), 0) - rad;
+        return std.math.clamp(0.5 - d, 0, 1);
+    }
+
+    /// Retângulo de cantos arredondados via SDF: amostra o centro de
+    /// cada pixel e mistura com o alfa ponderado pela cobertura (bordas
+    /// anti-serrilhadas). `radius` clampado a `min(w,h)/2`; entradas
+    /// não-finitas saturam em no-op.
+    pub fn fillRoundRect(self: *Self, r: types.Rect, radius: f32, clip: ?types.Rect, c: types.Color) void {
+        if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
+            !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
+            !std.math.isFinite(radius) or radius < 0) return;
+        if (r.w <= 0 or r.h <= 0 or c.a == 0) return;
+        const rad = @min(radius, @min(r.w, r.h) / 2);
+        const x0 = @max(0, @as(i64, @intFromFloat(@floor(r.x))));
+        const y0 = @max(0, @as(i64, @intFromFloat(@floor(r.y))));
+        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(r.x + r.w))));
+        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(r.y + r.h))));
+        const base_a: f32 = @floatFromInt(c.a);
+        var y = y0;
+        while (y < y_end) : (y += 1) {
+            var x = x0;
+            while (x < x_end) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                const fx: f32 = @floatFromInt(x);
+                const fy: f32 = @floatFromInt(y);
+                const cov = roundRectCoverage(fx + 0.5, fy + 0.5, r, rad);
+                if (cov <= 0) continue;
+                const fa: f32 = @round(cov * base_a);
+                const ea: u8 = @intFromFloat(@min(fa, 255.0));
+                if (ea == 0) continue;
+                self.set(@intCast(x), @intCast(y), .{ .r = c.r, .g = c.g, .b = c.b, .a = ea });
+            }
+        }
+    }
+
     pub fn strokeRect(self: *Self, r: types.Rect, thickness: f32, clip: ?types.Rect, c: types.Color) void {
         if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
             !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
@@ -283,6 +329,7 @@ pub fn render(fb: *SoftwareFramebuffer, cmds: []const commands.DrawCommand, view
                     .rect_outline => |c| fb.strokeRect(c.rect, c.thickness, mergeClip(clip, vp), c.color),
                     .line => |c| fb.strokeLine(c.p0, c.p1, c.thickness, mergeClip(clip, vp), c.color),
                     .circle_filled => |c| fb.fillCircle(c.center, c.radius, mergeClip(clip, vp), c.color),
+                    .rect_rounded => |c| fb.fillRoundRect(c.rect, c.radius, mergeClip(clip, vp), c.color),
                     else => unreachable,
                 }
                 out.drawn += 1;
@@ -470,6 +517,8 @@ fn fuzzRaster(_: void, smith: *std.testing.Smith) !void {
     fb.strokeLine(p0, p1, @abs(bits[0]) + 1, null, c);
     fb.fillCircle(p0, @abs(bits[1]), null, c);
     fb.strokeRect(r, @abs(bits[2]) + 1, null, c);
+    fb.fillRoundRect(r, @abs(bits[3]), null, c);
+    fb.fillRoundRect(r, @abs(bits[3]), types.Rect.init(-100, -100, 1000, 1000), c);
 
     // Invariante estrutural: tamanho do buffer intacto.
     try std.testing.expectEqual(@as(usize, 16 * 16 * 4), fb.pixels.len);
@@ -524,4 +573,69 @@ test "render e cull concordam na fronteira (bounds canônicos)" {
     try stdt.testing.expectEqual(s.submitted, c.submitted);
     // E o pixel da linha inexistente confirma: nada desenhado fora.
     try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(10, 99));
+}
+
+test "raster retângulo arredondado: cantos, AA e clamp do raio" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+
+    // Cantos cortados pelo arco; meio das arestas e miolo cheios.
+    var fb = try SoftwareFramebuffer.init(gpa, 10, 10);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+    fb.fillRoundRect(types.Rect.init(0, 0, 10, 10), 3.0, null, types.Color.rgb(255, 0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(9, 9));
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(5, 5));
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(5, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(0, 5));
+
+    // Borda AA: arestas em x=0.5 e x=3.5 → colunas 0 e 3 a 50%.
+    var fb2 = try SoftwareFramebuffer.init(gpa, 4, 4);
+    defer fb2.deinit(gpa);
+    fb2.clear(types.Color.rgb(0, 0, 0));
+    fb2.fillRoundRect(types.Rect.init(0.5, 0, 3, 4), 0, null, types.Color.rgb(255, 255, 255));
+    try stdt.testing.expectEqual([4]u8{ 128, 128, 128, 255 }, fb2.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb2.get(1, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb2.get(2, 0));
+    try stdt.testing.expectEqual([4]u8{ 128, 128, 128, 255 }, fb2.get(3, 0));
+
+    // Raio clampado a min(w,h)/2: 10x10 com raio 100 vira o círculo inscrito.
+    var fb3 = try SoftwareFramebuffer.init(gpa, 10, 10);
+    defer fb3.deinit(gpa);
+    fb3.clear(types.Color.rgb(0, 0, 0));
+    fb3.fillRoundRect(types.Rect.init(0, 0, 10, 10), 100, null, types.Color.rgb(0, 255, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb3.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 255, 0, 255 }, fb3.get(5, 5));
+
+    // Clip restringe; transparente/não-finito/vazio saturam em no-op.
+    fb3.fillRoundRect(types.Rect.init(0, 0, 10, 10), 2, types.Rect.init(4, 4, 2, 2), types.Color.rgb(255, 0, 255));
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 255, 255 }, fb3.get(4, 4));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb3.get(1, 0));
+    const before = fb3.get(5, 5);
+    fb3.fillRoundRect(types.Rect.init(0, 0, 10, 10), 2, null, .{ .r = 9, .g = 9, .b = 9, .a = 0 });
+    fb3.fillRoundRect(types.Rect.init(std.math.nan(f32), 0, 4, 4), 2, null, types.Color.rgb(9, 9, 9));
+    fb3.fillRoundRect(types.Rect.init(0, 0, 4, 4), std.math.nan(f32), null, types.Color.rgb(9, 9, 9));
+    fb3.fillRoundRect(types.Rect.init(0, 0, 0, 4), 2, null, types.Color.rgb(9, 9, 9));
+    try stdt.testing.expectEqual(before, fb3.get(5, 5));
+}
+
+test "render com retângulo arredondado (drawn + cull)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 40, 40);
+    defer fb.deinit(gpa);
+    const vp = types.Rect.init(0, 0, 40, 40);
+    const cmds = [_]commands.DrawCommand{
+        .{ .clear = .{ .color = types.Color.rgb(0, 0, 0) } },
+        .{ .rect_rounded = .{ .rect = types.Rect.init(4, 4, 16, 16), .radius = 4, .color = types.Color.rgb(255, 0, 0) } },
+        .{ .rect_rounded = .{ .rect = types.Rect.init(500, 500, 16, 16), .radius = 4, .color = types.Color.rgb(0, 255, 0) } },
+    };
+    const s = try render(&fb, &cmds, vp);
+    try stdt.testing.expectEqual(@as(u32, 3), s.submitted);
+    try stdt.testing.expectEqual(@as(u32, 2), s.drawn);
+    try stdt.testing.expectEqual(@as(u32, 1), s.culled);
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(4, 4)); // canto cortado
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(12, 12)); // miolo
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(20, 20)); // fora
 }

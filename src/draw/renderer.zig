@@ -59,6 +59,7 @@ pub fn commandBounds(cmd: commands.DrawCommand) ?types.Rect {
             // Bounds fallback (largura medida no push, altura ~= size).
             return .{ .x = c.pos.x, .y = c.pos.y, .w = c.width, .h = c.size };
         },
+        .rect_rounded => |c| return c.rect,
     }
 }
 
@@ -183,5 +184,25 @@ test "cull usa bounds de texto" {
     };
     const s = cull(&outside, vp);
     try stdt.testing.expectEqual(@as(u32, 0), s.visible);
+    try stdt.testing.expectEqual(@as(u32, 1), s.culled);
+}
+
+test "cull usa bounds do retângulo arredondado" {
+    const stdt = @import("std");
+    const vp = types.Rect.init(0, 0, 100, 100);
+    try stdt.testing.expectEqual(
+        types.Rect.init(10, 10, 20, 20),
+        commandBounds(.{ .rect_rounded = .{
+            .rect = types.Rect.init(10, 10, 20, 20),
+            .radius = 4,
+            .color = types.Color.rgb(1, 2, 3),
+        } }).?,
+    );
+    const cmds = [_]commands.DrawCommand{
+        .{ .rect_rounded = .{ .rect = types.Rect.init(10, 10, 20, 20), .radius = 4, .color = types.Color.rgb(1, 2, 3) } },
+        .{ .rect_rounded = .{ .rect = types.Rect.init(500, 500, 20, 20), .radius = 4, .color = types.Color.rgb(1, 2, 3) } },
+    };
+    const s = cull(&cmds, vp);
+    try stdt.testing.expectEqual(@as(u32, 1), s.visible);
     try stdt.testing.expectEqual(@as(u32, 1), s.culled);
 }
