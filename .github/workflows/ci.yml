@@ -23,11 +23,7 @@ jobs:
         with:
           version: ${{ matrix.zig }}
       - run: zig version
-      - name: Diagnose TreeView formatting
-        run: |
-          zig fmt src/widgets/tree_view.zig
-          git diff -- src/widgets/tree_view.zig
-          exit 1
+      - run: zig fmt --check src/ examples/ build.zig
       - run: zig build test --summary all -Doptimize=${{ matrix.optimize }}
       - run: zig build -Doptimize=${{ matrix.optimize }}
       - run: zig build run-example -Doptimize=${{ matrix.optimize }}
