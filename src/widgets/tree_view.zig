@@ -949,3 +949,33 @@ test "TreeView golden G13: auto-scroll nao recalcula intervalo desenhado" {
     try testing.expectEqual(@as(usize, 3), texts);
     ctx.endFrame();
 }
+
+test "TreeView traversal: preorder skips collapsed descendants without allocations" {
+    const testing = std.testing;
+    var deep = [_]TreeItem{
+        .{ .label = "deep", .children = &[_]TreeItem{} },
+    };
+    var branch = [_]TreeItem{
+        .{ .label = "visible", .children = &deep, .expanded = true },
+        .{ .label = "hidden", .children = &[_]TreeItem{} },
+    };
+    var collapsed_children = [_]TreeItem{
+        .{ .label = "not visible", .children = &[_]TreeItem{} },
+    };
+    var items = [_]TreeItem{
+        .{ .label = "root", .children = &branch, .expanded = true },
+        .{ .label = "collapsed", .children = &collapsed_children },
+        .{ .label = "tail", .children = &[_]TreeItem{} },
+    };
+
+    const expected = [_][]const u8{ "root", "visible", "deep", "hidden", "collapsed", "tail" };
+    try testing.expectEqual(expected.len, treeViewCountVisible(&items));
+    for (expected, 0..) |label, idx| {
+        const found = treeViewFind(&items, idx) orelse return error.TestUnexpectedResult;
+        try testing.expectEqualStrings(label, found.item.label);
+    }
+    try testing.expect(treeViewFind(&items, expected.len) == null);
+    try testing.expectEqual(@as(usize, 0), treeViewFind(&items, 0).?.depth);
+    try testing.expectEqual(@as(usize, 2), treeViewFind(&items, 2).?.depth);
+    try testing.expectEqual(@as(usize, 0), treeViewFind(&items, 5).?.depth);
+}
