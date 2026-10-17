@@ -79,4 +79,34 @@ pub fn main() !void {
     var pxsum: u64 = 0;
     for (fb.pixels) |b| pxsum +%= b;
     std.debug.print("raster frames={d} drawn={d} pxsum={d}\n", .{ RFRAMES, rdrawn, pxsum });
+
+    // TreeView: 2048 nós, viewport de poucas linhas e scroll no meio.
+    // Mede a navegação sob demanda em uma árvore maior que o viewport.
+    const TREE_NODES = 2048;
+    const TREE_FRAMES = 100;
+    var nodes: [TREE_NODES]zyntra_ui.TreeItem = undefined;
+    for (&nodes) |*node| {
+        node.* = .{ .label = "node", .children = &[_]zyntra_ui.TreeItem{} };
+    }
+    var tree_selected: usize = TREE_NODES / 2;
+    const tree_style = zyntra_ui.Theme.darkDefault().treeViewStyle();
+    var tree_scroll: f32 = @as(f32, @floatFromInt(TREE_NODES / 2)) * tree_style.item_height;
+    var tree_checksum: u64 = 0;
+    var tf: usize = 0;
+    while (tf < TREE_FRAMES) : (tf += 1) {
+        ctx.beginFrame();
+        const result = try zyntra_ui.widgets.tree_view.beginTreeView(
+            &ctx,
+            zyntra_ui.Id.fromString("bench:treeview"),
+            zyntra_ui.Rect.init(0, 0, 320, 240),
+            &nodes,
+            &tree_selected,
+            &tree_scroll,
+            tree_style,
+        );
+        tree_checksum +%= @as(u64, @intCast(ctx.drawCommands().len)) + @as(u64, @intCast(result.selected));
+        ctx.endFrame();
+    }
+    std.debug.print("treeview frames={d} nodes={d} checksum={d}\n", .{ TREE_FRAMES, TREE_NODES, tree_checksum });
+
 }
