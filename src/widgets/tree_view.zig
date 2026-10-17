@@ -135,8 +135,8 @@ pub fn beginTreeView(
         treeViewCommit(&pending);
         pending.deinit(ctx.allocator);
     }
+    if (visible_count == 0) return error.InvalidArgument;
     if (selected.* >= visible_count) selected.* = visible_count - 1;
-    if (visible_count == 0) selected.* = 0;
 
     const max_scroll = treeViewMaxScroll(items, bounds.h, style);
     scroll_offset.* = std.math.clamp(scroll_offset.*, 0, max_scroll);
