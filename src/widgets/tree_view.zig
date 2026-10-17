@@ -188,7 +188,11 @@ pub fn beginTreeView(
 
     // Snapshot S1: após mouse e wheel, antes do teclado.
     const keyboard_visible_count = treeViewCountVisible(items);
-    if (selected.* >= keyboard_visible_count and keyboard_visible_count > 0) selected.* = keyboard_visible_count - 1;
+    if (selected.* >= keyboard_visible_count and keyboard_visible_count > 0) {
+        selected.* = keyboard_visible_count - 1;
+        res.changed = true;
+        res.selected = selected.*;
+    }
 
     // Teclado com foco
     if (ctx.hasFocus(id)) {
