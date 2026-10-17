@@ -5,6 +5,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Alterado
+
+- `widgets/tree_view`: removida a lista temporária de todos os nós visíveis;
+  contagem e resolução por índice agora percorrem a árvore sob demanda,
+  mantendo o estado de navegação S1 durante eventos de teclado e
+  aplicando as expansões pendentes antes de calcular a scrollbar S2.
+  Adicionados testes de regressão para pré-ordem, ramos recolhidos,
+  alternâncias consecutivas e consistência dos snapshots. A alteração
+  reduz a memória auxiliar proporcional aos nós visíveis, mas pode
+  aumentar o custo de CPU por consultas repetidas; benchmark pendente.
+
 ### Adicionado
 
 - `examples/app.zig` + `zig build run-app` (M69): mini-app de tarefas
