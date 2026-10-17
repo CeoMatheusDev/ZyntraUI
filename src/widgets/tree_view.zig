@@ -1089,7 +1089,20 @@ test "TreeView keyboard End renders the newly scrolled viewport" {
     try testing.expect(result.changed);
     try testing.expect(scroll > 0);
     try testing.expectEqual(scroll, result.scroll_offset);
-    try testing.expect(ctx.drawCommands().len > 3);
+    // O texto das linhas deve acompanhar o viewport atualizado, não
+    // permanecer nas coordenadas antigas após o salto para o fim.
+    var visible_texts: usize = 0;
+    for (ctx.drawCommands()) |cmd| {
+        switch (cmd) {
+            .text => |t| {
+                try testing.expect(t.pos.y >= bounds.y - style.item_height);
+                try testing.expect(t.pos.y < bounds.y + bounds.h + style.item_height);
+                visible_texts += 1;
+            },
+            else => {},
+        }
+    }
+    try testing.expect(visible_texts > 0);
     ctx.endFrame();
 }
 
