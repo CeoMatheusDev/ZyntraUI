@@ -23,6 +23,7 @@ const types = @import("types.zig");
 const id_mod = @import("id.zig");
 const event_mod = @import("../event/event.zig");
 const draw_mod = @import("../draw/commands.zig");
+const dnd_mod = @import("../dnd/service.zig");
 
 /// Erros públicos do contexto (M1+M2).
 pub const ContextError = error{
@@ -82,6 +83,10 @@ pub const Context = struct {
     /// sobre o registro COMPLETO do frame anterior. Widgets nunca
     /// avançam direto (registro do frame atual ainda incompleto).
     pending_focus_advance: ?FocusDirection = null,
+    /// Serviço de arrastar-e-soltar (M97): payload ativo, alvos
+    /// registrados no frame e resultado do último solto. O `beginFrame`
+    /// resolve o solto do frame anterior. Ver `dnd/service`.
+    dnd: dnd_mod.State = .{},
 
     const Self = @This();
 
@@ -127,6 +132,7 @@ pub const Context = struct {
         self.press_owner = null;
         self.focus_owner = null;
         self.pending_focus_advance = null;
+        self.dnd = .{};
     }
 
     /// Inicia um novo frame: aplica avanço de foco pendente (sobre o
@@ -140,6 +146,7 @@ pub const Context = struct {
             self.applyFocusAdvance(dir);
             self.pending_focus_advance = null;
         }
+        self.dnd.beginFrame(self.mouse_down_left);
         self.events.clearRetainingCapacity();
         self.draw.clearRetainingCapacity();
         self.focusables.clearRetainingCapacity();

@@ -5,6 +5,28 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `dnd/service` + `widgets/drag_ghost`: **arrastar-e-soltar** (M97,
+  aditivo) — serviço por janela que vive no `Context` (campo `dnd`), no
+  mesmo espírito de `press_owner`/`focus_owner`: sem alocação e
+  independente de backend. A origem chama `begin` (payload com `kind`
+  UTF-8, `data` opaco e `label` — todos emprestados) depois de capturar o
+  press; cada alvo candidato chama `accept(ctx, id, bounds)` todo frame e
+  recebe `.none`/`.hover`/`.dropped` (o último alvo registrado vence, isto
+  é, o desenhado por cima). No release, o `beginFrame` seguinte resolve o
+  solto contra o alvo do frame anterior: `lastDrop` fica disponível por um
+  frame (com `target == null` quando não havia alvo) e `droppedOn` entrega
+  o payload a quem recebeu; `cancel` (tipicamente ligado ao Esc) encerra
+  sem alvo, marcando `Drop.cancelled`. Helpers `isDragging`, `payload`,
+  `dragSource`, `dragPosition`, `dragOrigin`, `dragDistance`,
+  `dragExceeds`, `hoverTarget` e contadores `started`/`completed`. Widget
+  `dragGhost` (não interativo, sem `id`/`bounds`): desenha o rótulo do
+  payload ativo junto ao cursor — caixa (arredondada conforme `radius`),
+  borda, sombra opcional e clamp ao `ctx.viewport` para nunca sair da
+  janela. Novo `DragGhostStyle` + `Theme.dragGhostStyle()`;
+  `examples/minimal.zig` ganha a demo `m97` (arraste, fantasma e solto).
+
 ## [1.26.0] - 2026-10-17
 
 MINOR estável, 100% compatível: fecha o bloco "ferramentas profissionais"

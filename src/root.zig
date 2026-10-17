@@ -63,6 +63,10 @@ pub const inspector = struct {
     pub const view = @import("inspector/view.zig");
 };
 
+pub const dnd = struct {
+    pub const service = @import("dnd/service.zig");
+};
+
 pub const timeline = struct {
     pub const view = @import("timeline/view.zig");
 };
@@ -100,6 +104,7 @@ pub const widgets = struct {
     pub const graph_view = @import("widgets/graph_view.zig");
     pub const timeline_view = @import("widgets/timeline_view.zig");
     pub const inspector_view = @import("widgets/inspector_view.zig");
+    pub const drag_ghost = @import("widgets/drag_ghost.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -172,6 +177,7 @@ pub const PanelStyle = style.style_mod.PanelStyle;
 pub const GraphStyle = style.style_mod.GraphStyle;
 pub const TimelineStyle = style.style_mod.TimelineStyle;
 pub const InspectorStyle = style.style_mod.InspectorStyle;
+pub const DragGhostStyle = style.style_mod.DragGhostStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -250,6 +256,12 @@ pub const InspectorViewState = widgets.inspector_view.InspectorViewState;
 pub const InspectorViewOptions = widgets.inspector_view.InspectorViewOptions;
 pub const InspectorViewResult = widgets.inspector_view.InspectorViewResult;
 
+pub const DndPayload = dnd.service.Payload;
+pub const DndDrop = dnd.service.Drop;
+pub const DndAcceptResult = dnd.service.AcceptResult;
+pub const DndState = dnd.service.State;
+pub const DragGhostResult = widgets.drag_ghost.DragGhostResult;
+
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
 pub const version_patch = core.types.version_patch;
@@ -277,6 +289,7 @@ test {
     _ = @import("graph/view.zig");
     _ = @import("timeline/view.zig");
     _ = @import("inspector/view.zig");
+    _ = @import("dnd/service.zig");
     _ = @import("text/metrics.zig");
     _ = @import("text/wrap.zig");
     _ = @import("draw/renderer.zig");
@@ -315,4 +328,5 @@ test {
     _ = @import("widgets/graph_view.zig");
     _ = @import("widgets/timeline_view.zig");
     _ = @import("widgets/inspector_view.zig");
+    _ = @import("widgets/drag_ghost.zig");
 }

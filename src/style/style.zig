@@ -581,6 +581,44 @@ pub const InspectorStyle = extern struct {
     }
 };
 
+/// Estilo do fantasma do arraste (M97; ver `widgets/drag_ghost`).
+///
+/// Unidades: px de TELA.
+pub const DragGhostStyle = extern struct {
+    /// Fundo da caixa.
+    bg: types.Color,
+    /// Borda (transparente ou largura 0 ⇒ sem).
+    border: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Espessura da borda (>= 0).
+    border_width: f32 = 1.0,
+    /// Raio dos cantos (0 ⇒ caixa reta).
+    radius: f32 = 3.0,
+    /// Sombra projetada (transparente ⇒ sem).
+    shadow: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Deslocamento da sombra em px (finito).
+    shadow_offset: f32 = 2.0,
+    /// Raio do desfoque da sombra em px (>= 0).
+    shadow_blur: f32 = 4.0,
+    /// Cor do rótulo.
+    text: types.Color,
+    /// Recuo interno em px (>= 0).
+    pad: f32 = 6.0,
+    /// Deslocamento da caixa em relação ao cursor.
+    offset: types.Vec2 = .{ .x = 10, .y = 10 },
+    /// Largura mínima da caixa em px (>= 0).
+    min_width: f32 = 48.0,
+
+    pub fn isValid(self: DragGhostStyle) bool {
+        return std.math.isFinite(self.border_width) and self.border_width >= 0 and
+            std.math.isFinite(self.radius) and self.radius >= 0 and
+            std.math.isFinite(self.shadow_offset) and
+            std.math.isFinite(self.shadow_blur) and self.shadow_blur >= 0 and
+            std.math.isFinite(self.pad) and self.pad >= 0 and
+            std.math.isFinite(self.offset.x) and std.math.isFinite(self.offset.y) and
+            std.math.isFinite(self.min_width) and self.min_width >= 0;
+    }
+};
+
 /// Estilo de barra de status (M68). Chrome + métricas de
 /// posicionamento dos segmentos (ver `widgets/statusbar`).
 pub const StatusBarStyle = extern struct {
@@ -829,6 +867,22 @@ pub const Theme = extern struct {
         };
     }
 
+    pub fn dragGhostStyle(self: Theme) DragGhostStyle {
+        return .{
+            .bg = self.surface,
+            .border = self.border,
+            .border_width = 1.0,
+            .radius = 3.0,
+            .shadow = types.Color{ .r = 0, .g = 0, .b = 0, .a = 96 },
+            .shadow_offset = 2.0,
+            .shadow_blur = 4.0,
+            .text = self.text,
+            .pad = 6.0,
+            .offset = types.Vec2.init(10, 10),
+            .min_width = 48.0,
+        };
+    }
+
     pub fn groupBoxStyle(self: Theme) GroupBoxStyle {
         return .{
             .border = self.border,
@@ -1016,6 +1070,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(light.timelineStyle().isValid());
     try stdt.testing.expect(dark.inspectorStyle().isValid());
     try stdt.testing.expect(light.inspectorStyle().isValid());
+    try stdt.testing.expect(dark.dragGhostStyle().isValid());
+    try stdt.testing.expect(light.dragGhostStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,

@@ -1318,4 +1318,147 @@ pub fn main() !void {
             insp_texts,
         },
     );
+
+    // Arrastar-e-soltar (M97): serviço `dnd` (no `Context`) + fantasma do
+    // arraste sobre `widgets/drag_ghost`. Duas zonas de solto (A e B) e um
+    // "chip" (fonte). Frame 1 só alimenta o serviço (press + `begin`);
+    // frame 2 arrasta (chip realçado, zona B quente e fantasma sob o
+    // cursor); frame 3 solta (a zona B recebe `.dropped`). Framebuffer
+    // 200x64, zonas 96 de largura com 8 px de vão, chip 40x16 em (8,8) e
+    // cursor do arraste em (120,32).
+    var dnd_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 200, 64);
+    defer dnd_fb.deinit(allocator);
+    const dnd_bg = zyntra_ui.Color.rgb(20, 20, 20);
+    const dnd_zone_a = zyntra_ui.Rect.init(0, 0, 96, 64);
+    const dnd_zone_b = zyntra_ui.Rect.init(104, 0, 96, 64);
+    const dnd_chip = zyntra_ui.Rect.init(8, 8, 40, 16);
+    const dnd_zone_base = zyntra_ui.Color.rgb(30, 30, 36);
+    const dnd_zone_hot = zyntra_ui.Color.rgb(60, 84, 120);
+    const dnd_zone_drop = zyntra_ui.Color.rgb(70, 150, 90);
+    const dnd_chip_base = zyntra_ui.Color.rgb(90, 90, 100);
+    const dnd_chip_drag = zyntra_ui.Color.rgb(140, 140, 160);
+    const dnd_ghost_style = zyntra_ui.DragGhostStyle{
+        .bg = zyntra_ui.Color.rgb(240, 240, 240),
+        .border = zyntra_ui.Color.rgb(20, 20, 20),
+        .border_width = 1,
+        .radius = 3,
+        .shadow = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        .text = zyntra_ui.Color.rgb(16, 16, 16),
+        .pad = 6,
+        .offset = zyntra_ui.Vec2.init(10, 10),
+        .min_width = 48,
+    };
+    const dnd_chip_id = zyntra_ui.Id.fromString("examples/m97:chip");
+    const dnd_zone_a_id = zyntra_ui.Id.fromString("examples/m97:zoneA");
+    const dnd_zone_b_id = zyntra_ui.Id.fromString("examples/m97:zoneB");
+
+    // Frame 1: press no chip ⇒ a fonte inicia o arraste.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{
+        .button = .left,
+        .pressed = true,
+        .pos = .{ .x = 20, .y = 16 },
+    } });
+    try zyntra_ui.dnd.service.begin(&ctx, dnd_chip_id, .{
+        .kind = "chip",
+        .label = "chip",
+    });
+    ctx.endFrame();
+
+    // Frame 2 (arraste: move + release no mesmo lote; o arraste segue
+    // vivo até o `beginFrame` seguinte) e frame 3 (solto já resolvido,
+    // em que a zona B recebe `.dropped`) desenham o mesmo, mudando só a
+    // entrada e o verdicto dos alvos.
+    var dnd_drag_px = [_]u8{ 0, 0, 0, 0, 0 };
+    var dnd_drop_px: u8 = 0;
+    var dnd_cmds: usize = 0;
+    var dnd_texts: usize = 0;
+    var dnd_hover_b = false;
+    var dnd_drop_b = false;
+    var dnd_frame: usize = 0;
+    while (dnd_frame < 2) : (dnd_frame += 1) {
+        ctx.beginFrame();
+        if (dnd_frame == 0) {
+            try ctx.pushEvent(.{ .mouse_move = .{ .pos = .{ .x = 120, .y = 32 } } });
+            try ctx.pushEvent(.{ .mouse_button = .{
+                .button = .left,
+                .pressed = false,
+                .pos = .{ .x = 120, .y = 32 },
+            } });
+        }
+        dnd_fb.clear(zyntra_ui.Color.rgb(255, 255, 255));
+        try ctx.draw.rectFilled(allocator, zyntra_ui.Rect.init(0, 0, 200, 64), dnd_bg);
+        const dnd_va = zyntra_ui.dnd.service.accept(&ctx, dnd_zone_a_id, dnd_zone_a);
+        const dnd_vb = zyntra_ui.dnd.service.accept(&ctx, dnd_zone_b_id, dnd_zone_b);
+        const dnd_col_a = switch (dnd_va) {
+            .none => dnd_zone_base,
+            .hover => dnd_zone_hot,
+            .dropped => dnd_zone_drop,
+        };
+        const dnd_col_b = switch (dnd_vb) {
+            .none => dnd_zone_base,
+            .hover => dnd_zone_hot,
+            .dropped => dnd_zone_drop,
+        };
+        try ctx.draw.rectFilled(allocator, dnd_zone_a, dnd_col_a);
+        try ctx.draw.rectFilled(allocator, dnd_zone_b, dnd_col_b);
+        const dnd_src = zyntra_ui.dnd.service.dragSource(&ctx);
+        const dnd_dragging = dnd_src != null and dnd_src.? == dnd_chip_id;
+        try ctx.draw.rectFilled(
+            allocator,
+            dnd_chip,
+            if (dnd_dragging) dnd_chip_drag else dnd_chip_base,
+        );
+        _ = try zyntra_ui.widgets.drag_ghost.dragGhost(&ctx, dnd_ghost_style, font);
+        if (dnd_frame == 0) {
+            var cmds: usize = 0;
+            var texts: usize = 0;
+            for (ctx.drawCommands()) |cmd| {
+                cmds += 1;
+                if (cmd == .text) texts += 1;
+            }
+            _ = try zyntra_ui.software.raster.render(&dnd_fb, ctx.drawCommands(), zyntra_ui.Rect.init(0, 0, 200, 64));
+            dnd_cmds = cmds;
+            dnd_texts = texts;
+            const dnd_hover = zyntra_ui.dnd.service.hoverTarget(&ctx);
+            dnd_hover_b = dnd_hover != null and dnd_hover.? == dnd_zone_b_id;
+            // Chip arrastando (10,12), zona A base (10,50), zona B quente
+            // (110,10), fantasma (135,50) e a vizinha quente à esquerda
+            // dele (125,50).
+            dnd_drag_px = .{
+                dnd_fb.get(10, 12)[0],
+                dnd_fb.get(10, 50)[0],
+                dnd_fb.get(110, 10)[0],
+                dnd_fb.get(135, 50)[0],
+                dnd_fb.get(125, 50)[0],
+            };
+        } else {
+            _ = try zyntra_ui.software.raster.render(&dnd_fb, ctx.drawCommands(), zyntra_ui.Rect.init(0, 0, 200, 64));
+            const dnd_drop = zyntra_ui.dnd.service.lastDrop(&ctx);
+            dnd_drop_b = dnd_drop != null and dnd_drop.?.target != null and
+                dnd_drop.?.target.? == dnd_zone_b_id;
+            // Zona B entregue e sem fantasma: mesmo pixel (135,50), agora
+            // verde de solto.
+            dnd_drop_px = dnd_fb.get(135, 50)[0];
+        }
+        ctx.endFrame();
+    }
+    // Estrutura do frame de arraste: 5 `rect_filled` (fundo, 2 zonas,
+    // chip e caixa do fantasma) + 1 `rect_outline` (borda do fantasma)
+    // + 1 `.text` (rótulo).
+    std.debug.print(
+        "m97 dnd chip={d} zone={d} hot={d} ghost={d} edge={d} drop={d} hover_b={} drop_b={} cmds={d} texts={d}\n",
+        .{
+            dnd_drag_px[0],
+            dnd_drag_px[1],
+            dnd_drag_px[2],
+            dnd_drag_px[3],
+            dnd_drag_px[4],
+            dnd_drop_px,
+            dnd_hover_b,
+            dnd_drop_b,
+            dnd_cmds,
+            dnd_texts,
+        },
+    );
 }

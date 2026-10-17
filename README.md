@@ -35,13 +35,13 @@ Rather than tying UI logic to a window system or GPU API, ZyntraUI keeps those c
 
 ## Widgets
 
-ZyntraUI provides **30 public widgets**, organized around common interface needs:
+ZyntraUI provides **31 public widgets**, organized around common interface needs:
 
 | Category | Widgets |
 | --- | --- |
 | Input & selection | Button, checkbox, radio, switch, slider, text input, textarea, combo |
 | Views & navigation | Label, wrapped label, list view, tree view, table, tab bar, scroll, splitter, menu, popup, modal, tooltip, node graph, timeline, property inspector |
-| Feedback | Progress, spinner |
+| Feedback | Progress, spinner, drag ghost |
 | Composition | Separator, labeled separator, toolbar, status bar, group box, panel, dock view |
 
 Widgets are exposed through the `widgets` namespace of `@import("zyntra_ui")`. Refer to the in-repository documentation and examples for individual APIs.
@@ -63,6 +63,7 @@ src/
 ├── graph/         Node graph model (transform, geometry, hit-test)
 ├── timeline/      Timeline model (time↔pixel, ruler steps, tracks/keys)
 ├── inspector/     Property inspector model (values, row metrics, formatting)
+├── dnd/           Drag-and-drop service (payload, targets, drop resolution)
 ├── text/          UTF-8 metrics, wrapping, and text-edit helpers
 ├── anim/          Optional animation helpers
 ├── software/      Reference software rasterizer
