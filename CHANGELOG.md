@@ -5,6 +5,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `widgets/menu`: `MenuItem` ganha `checked: ?bool` e `shortcut: ?[]const u8`
+  (aditivo, com defaults). Itens marcáveis reservam uma coluna de tique à
+  esquerda (`true` desenha o tique vetorial, sem fonte/atlas); `shortcut`
+  exibe a dica de atalho alinhada à direita e apagada, sem colidir com o
+  label. O menu continua one-shot: escolher apenas reporta o índice
+  (`chosen`), e o chamador alterna o estado. Menus sem itens marcáveis
+  mantêm o layout anterior (label em `x + 8`), preservando os testes e a
+  aparência atuais. Teste novo cobre tique só no marcado, atalhos e o
+  layout preservado; `examples/minimal.zig` demonstra os itens.
+
 ## [1.22.0] - 2026-10-17
 
 MINOR estável, 100% compatível: GroupBox novo, endurecimento de

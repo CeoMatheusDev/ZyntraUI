@@ -8,6 +8,10 @@
 //!   `Right` foca o filho, `Left` no filho pede o pai (`focus_parent`).
 //!   `hovered_index` + `submenuBounds`/`menuRowRect` posicionam o submenu.
 //! - Itens desabilitados: texto apagado, sem hover/escolha.
+//! - `MenuItem.checked`: coluna de tique à esquerda (reservada só
+//!   quando algum item é marcável; `true` desenha o tique vetorial).
+//! - `MenuItem.shortcut`: dica de atalho alinhada à direita, apagada
+//!   (só exibição; menu é one-shot e o chamador alterna o estado).
 //! `items` vazio → `InvalidArgument`. Labels UTF-8 validados no push.
 
 const std = @import("std");
@@ -21,10 +25,15 @@ const input = @import("input.zig");
 /// Item de menu (fatia do chamador; sem ownership).
 /// `separator` desenha linha divisória (sem hover/escolha); mantém a
 /// altura da linha para não quebrar o mapeamento índice↔linha.
+/// `checked`: `null` = item não marcável; `true` desenha o tique;
+/// `false` reserva a coluna sem desenhar (alinhamento da coluna).
+/// `shortcut`: dica à direita (ex.: "Ctrl+S"); apenas exibição.
 pub const MenuItem = struct {
     label: []const u8,
     enabled: bool = true,
     separator: bool = false,
+    checked: ?bool = null,
+    shortcut: ?[]const u8 = null,
 };
 
 pub const MenuResult = struct {
@@ -248,6 +257,16 @@ fn menuInner(
         error.InvalidCommand => return error.InvalidCommand,
     };
     var i: usize = 0;
+    // Coluna de check: só reservada quando há item marcável, para não
+    // alterar o layout de menus sem checks (compatível).
+    var has_checks = false;
+    for (items) |it| {
+        if (!it.separator and it.checked != null) {
+            has_checks = true;
+            break;
+        }
+    }
+    const label_x = bounds.x + 8 + (if (has_checks) @as(f32, 14) else 0);
     while (i < items.len) : (i += 1) {
         const row = types.Rect{
             .x = bounds.x,
@@ -276,10 +295,38 @@ fn menuInner(
                 error.InvalidCommand => return error.InvalidCommand,
             };
         }
+        if (items[i].checked) |is_checked| {
+            if (is_checked) {
+                // Tique vetorial na coluna à esquerda (sem fonte/atlas).
+                const cx = bounds.x + 13;
+                const cy = row.y + ih / 2;
+                const tick = if (selectable(items[i])) style.text else style.text_disabled;
+                ctx.draw.line(
+                    ctx.allocator,
+                    .{ .x = cx - 4, .y = cy },
+                    .{ .x = cx - 1, .y = cy + 3 },
+                    tick,
+                    1.5,
+                ) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    error.InvalidCommand => return error.InvalidCommand,
+                };
+                ctx.draw.line(
+                    ctx.allocator,
+                    .{ .x = cx - 1, .y = cy + 3 },
+                    .{ .x = cx + 4, .y = cy - 4 },
+                    tick,
+                    1.5,
+                ) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    error.InvalidCommand => return error.InvalidCommand,
+                };
+            }
+        }
         if (items[i].label.len > 0) {
             ctx.draw.pushText(
                 ctx.allocator,
-                .{ .x = bounds.x + 8, .y = row.y + 4 },
+                .{ .x = label_x, .y = row.y + 4 },
                 if (selectable(items[i])) style.text else style.text_disabled,
                 font,
                 items[i].label,
@@ -289,6 +336,33 @@ fn menuInner(
                 error.InvalidUtf8 => return error.InvalidArgument,
                 error.InvalidMetrics => return error.InvalidArgument,
             };
+        }
+        if (items[i].shortcut) |sc| {
+            if (sc.len > 0) {
+                // Dica apagada alinhada à direita; só desenha se não
+                // colidir com o label.
+                const sm = metrics_mod.measure(sc, font) catch return error.InvalidArgument;
+                const sx = bounds.x + row.w - 8 - sm.width;
+                var fits = sx > label_x;
+                if (fits and items[i].label.len > 0) {
+                    const lm = metrics_mod.measure(items[i].label, font) catch return error.InvalidArgument;
+                    fits = sx >= label_x + lm.width + 8;
+                }
+                if (fits) {
+                    ctx.draw.pushText(
+                        ctx.allocator,
+                        .{ .x = sx, .y = row.y + 4 },
+                        style.text_disabled,
+                        font,
+                        sc,
+                    ) catch |err| switch (err) {
+                        error.OutOfMemory => return error.OutOfMemory,
+                        error.InvalidCommand => return error.InvalidCommand,
+                        error.InvalidUtf8 => return error.InvalidArgument,
+                        error.InvalidMetrics => return error.InvalidArgument,
+                    };
+                }
+            }
         }
     }
     ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = .{}, .null_rect = true } }) catch |err| switch (err) {
@@ -688,5 +762,96 @@ test "menu limites: End, normalização, item único, área pequena" {
     for (&big) |*it| it.* = .{ .label = "x" };
     try stdt.testing.expectError(error.InvalidArgument, menu(&ctx, id, types.Rect.init(0, 0, 160, 75), &big, &active2, font, style));
     try stdt.testing.expectEqual(before, ctx.drawCommands().len);
+    ctx.endFrame();
+}
+
+test "menu checkmarks e atalhos: tique só no marcado, atalho à direita" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().menuStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 220, 75);
+    const id = id_mod.Id.fromString("test:menu-check");
+    const items = [_]MenuItem{
+        .{ .label = "Grade", .checked = true, .shortcut = "Ctrl+G" },
+        .{ .label = "Snap", .checked = false, .shortcut = "Ctrl+Shift+S" },
+        .{ .label = "Somente" },
+    };
+    var active: usize = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(5, 5) } });
+    const r = try menu(&ctx, id, bounds, &items, &active, font, style);
+    try stdt.testing.expectEqual(@as(?usize, 0), r.hovered_index);
+
+    var ticks: usize = 0;
+    var saw_grade = false;
+    var saw_ctrl_g = false;
+    var saw_snap = false;
+    var saw_ctrl_shift_s = false;
+    var saw_somente = false;
+    const tb = ctx.draw.text_bytes.items;
+    for (ctx.drawCommands()) |cmd| {
+        switch (cmd) {
+            .line => ticks += 1,
+            .text => |t| {
+                const s = tb[t.start .. t.start + t.len];
+                if (std.mem.eql(u8, s, "Grade")) {
+                    saw_grade = true;
+                    // check reservado: label deslocado p/ a direita (x=22).
+                    try stdt.testing.expectEqual(@as(f32, 22), t.pos.x);
+                } else if (std.mem.eql(u8, s, "Ctrl+G")) {
+                    saw_ctrl_g = true;
+                    try stdt.testing.expect(t.pos.x > 22);
+                } else if (std.mem.eql(u8, s, "Snap")) {
+                    saw_snap = true;
+                } else if (std.mem.eql(u8, s, "Ctrl+Shift+S")) {
+                    saw_ctrl_shift_s = true;
+                } else if (std.mem.eql(u8, s, "Somente")) {
+                    saw_somente = true;
+                }
+            },
+            else => {},
+        }
+    }
+    // Só "Grade" (checked=true) desenha tique (2 segmentos).
+    try stdt.testing.expectEqual(@as(usize, 2), ticks);
+    try stdt.testing.expect(saw_grade and saw_snap and saw_somente);
+    try stdt.testing.expect(saw_ctrl_g and saw_ctrl_shift_s);
+
+    // Escolher um item marcável apenas reporta o índice (one-shot);
+    // o chamador alterna o estado.
+    var active2: usize = 0;
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(30, 5) },
+    });
+    const r2 = try menu(&ctx, id, bounds, &items, &active2, font, style);
+    try stdt.testing.expectEqual(@as(?usize, 0), r2.chosen);
+    ctx.endFrame();
+
+    // Menu sem checks mantém o label em x=8 (layout preservado).
+    const plain = [_]MenuItem{.{ .label = "Open" }};
+    var active3: usize = 0;
+    ctx.beginFrame();
+    _ = try menu(&ctx, id, bounds, &plain, &active3, font, style);
+    var saw_open = false;
+    const tb2 = ctx.draw.text_bytes.items;
+    for (ctx.drawCommands()) |cmd| {
+        switch (cmd) {
+            .text => |t| {
+                const s = tb2[t.start .. t.start + t.len];
+                if (std.mem.eql(u8, s, "Open")) {
+                    saw_open = true;
+                    try stdt.testing.expectEqual(@as(f32, 8), t.pos.x);
+                }
+            },
+            else => {},
+        }
+    }
+    try stdt.testing.expect(saw_open);
     ctx.endFrame();
 }

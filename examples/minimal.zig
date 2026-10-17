@@ -364,10 +364,11 @@ pub fn main() !void {
     std.debug.print("m18 popup open={} draws={d}\n", .{ open, ctx.drawCommands().len });
 
     // Frame 15: menu com 3 itens, click no item 1 ("Save").
+    // Demonstra checkmarks (`checked`) e dicas de atalho (`shortcut`).
     const mitems = [_]zyntra_ui.widgets.menu.MenuItem{
-        .{ .label = "Open" },
-        .{ .label = "Save" },
-        .{ .label = "Quit", .enabled = false },
+        .{ .label = "Open", .checked = true, .shortcut = "Ctrl+O" },
+        .{ .label = "Save", .shortcut = "Ctrl+S" },
+        .{ .label = "Quit", .enabled = false, .shortcut = "Ctrl+Q" },
     };
     var mactive: usize = 0;
     ctx.beginFrame();
