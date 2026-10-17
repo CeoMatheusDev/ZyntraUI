@@ -5,6 +5,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.26.0] - 2026-10-17
+
+MINOR estável, 100% compatível: fecha o bloco "ferramentas profissionais"
+da prioridade #5 com três visualizações novas sobre modelos puros — **grafo
+de nós**, **linha de tempo** e **property inspector**. Todas as adições são
+retrocompatíveis (módulos, tipos, estilos e demos novas) e verificadas por
+testes de unidade e pelo rasterizador de referência.
+
 ### Adicionado
 
 - `inspector/view` + `widgets/inspector_view`: **property inspector**
