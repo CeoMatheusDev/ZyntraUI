@@ -70,10 +70,16 @@ const TreePending = std.AutoHashMapUnmanaged(*TreeItem, bool);
 
 fn treeViewCommit(pending: *TreePending) void {
     var it = pending.iterator();
-    while (it.next()) |entry| entry.key_ptr.*.expanded = entry.value_ptr.*;
+    while (it.next()) |entry| {
+        entry.key_ptr.*.expanded = entry.value_ptr.*;
+    }
 }
 
-fn treeViewToggle(pending: *TreePending, allocator: std.mem.Allocator, item: *TreeItem) error{OutOfMemory}!void {
+fn treeViewToggle(
+    pending: *TreePending,
+    allocator: std.mem.Allocator,
+    item: *TreeItem,
+) error{OutOfMemory}!void {
     const current = pending.get(item) orelse item.expanded;
     try pending.put(allocator, item, !current);
 }
