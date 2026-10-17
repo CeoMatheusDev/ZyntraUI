@@ -7,6 +7,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+## [1.24.0] - 2026-10-17
+
+MINOR estável, 100% compatível: docking completo — divisórias arrastáveis,
+drop de painéis com prévia de zona, painéis acoplados como abas por grupo
+(`widgets/tab_bar` composto pelo chamador) e persistência versionada do
+layout (`dock/serialize`).
+
+### Adicionado
+
 - `dock/serialize` (M79, docking passo 4c): serialização **versionada** do
   `DockLayout` para persistência — `dockSerialize` grava um blob binário
   little-endian (magic `ZDKL`, versão, nós com folhas/abas e splits) e
