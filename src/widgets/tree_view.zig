@@ -185,8 +185,6 @@ pub fn beginTreeView(
 
     // Snapshot S1: após mouse e wheel, antes do teclado.
     const keyboard_visible_count = treeViewCountVisible(items);
-    const first_visible: usize = @as(usize, @intFromFloat(@floor(scroll_offset.* / style.item_height)));
-    var last_visible: usize = @min(keyboard_visible_count, first_visible + @as(usize, @intFromFloat(@ceil(bounds.h / style.item_height))) + 1);
     if (selected.* >= keyboard_visible_count and keyboard_visible_count > 0) selected.* = keyboard_visible_count - 1;
 
     // Teclado com foco
@@ -272,6 +270,11 @@ pub fn beginTreeView(
         }
         scroll_offset.* = std.math.clamp(scroll_offset.*, 0, max_scroll);
     }
+
+    // Janela de desenho calculada após wheel e auto-scroll do teclado.
+    // O snapshot de nós permanece S1 até o commit após o desenho.
+    const first_visible: usize = @as(usize, @intFromFloat(@floor(scroll_offset.* / style.item_height)));
+    const last_visible: usize = @min(keyboard_visible_count, first_visible + @as(usize, @intFromFloat(@ceil(bounds.h / style.item_height))) + 1);
 
     // Hover index (contagem pós-toggle: a lista pode ter encolhido).
     if (ctx.mouse_pos) |p| {
