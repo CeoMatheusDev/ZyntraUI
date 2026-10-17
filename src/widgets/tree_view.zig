@@ -709,3 +709,91 @@ test "TreeView colapso, scroll, contagem e profundidade" {
     try stdt.testing.expectEqual(@as(f32, 48), treeViewContentHeight(&items, style));
     ctx.endFrame();
 }
+
+
+test "TreeView golden G5: Right repetido alterna o mesmo no sem navegar" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+
+    var children = [_]TreeItem{
+        .{ .label = "X1", .children = &[_]TreeItem{} },
+        .{ .label = "X2", .children = &[_]TreeItem{} },
+    };
+    var items = [_]TreeItem{
+        .{ .label = "X", .children = &children, .expanded = false },
+        .{ .label = "Y", .children = &[_]TreeItem{} },
+    };
+    const id = id_mod.Id.fromString("golden:g5");
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    ctx.focus_owner = id;
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    const result = try beginTreeView(&ctx, id, types.Rect.init(0, 0, 300, 120), &items, &selected, &scroll, style);
+
+    try testing.expectEqual(@as(usize, 0), selected);
+    try testing.expectEqual(@as(usize, 0), result.selected);
+    try testing.expect(!result.changed);
+    try testing.expect(!items[0].expanded);
+    var texts: usize = 0;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .text) {
+            const label = ctx.draw.textOf(cmd);
+            if (texts == 0) try testing.expectEqualStrings("X", label);
+            if (texts == 1) try testing.expectEqualStrings("Y", label);
+            texts += 1;
+        }
+    }
+    try testing.expectEqual(@as(usize, 2), texts);
+    ctx.endFrame();
+}
+
+test "TreeView golden G11: Right Down Enter navega na sequencia S1" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+
+    var x_children = [_]TreeItem{.{ .label = "X1", .children = &[_]TreeItem{} }};
+    var y_children = [_]TreeItem{.{ .label = "Y1", .children = &[_]TreeItem{} }};
+    var items = [_]TreeItem{
+        .{ .label = "X", .children = &x_children, .expanded = false },
+        .{ .label = "Y", .children = &y_children, .expanded = false },
+        .{ .label = "Z", .children = &[_]TreeItem{} },
+    };
+    const id = id_mod.Id.fromString("golden:g11");
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    ctx.focus_owner = id;
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
+    const result = try beginTreeView(&ctx, id, types.Rect.init(0, 0, 300, 120), &items, &selected, &scroll, style);
+
+    try testing.expectEqual(@as(usize, 1), selected);
+    try testing.expectEqual(@as(usize, 1), result.selected);
+    try testing.expect(result.changed);
+    try testing.expect(items[0].expanded);
+    try testing.expect(items[1].expanded);
+    var texts: usize = 0;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .text) {
+            const label = ctx.draw.textOf(cmd);
+            switch (texts) {
+                0 => try testing.expectEqualStrings("X", label),
+                1 => try testing.expectEqualStrings("Y", label),
+                2 => try testing.expectEqualStrings("Z", label),
+                else => return error.InvalidArgument,
+            }
+            texts += 1;
+        }
+    }
+    try testing.expectEqual(@as(usize, 3), texts);
+    ctx.endFrame();
+}
