@@ -135,8 +135,8 @@ pub fn beginTreeView(
         treeViewCommit(&pending);
         pending.deinit(ctx.allocator);
     }
+    if (visible_count == 0) return error.InvalidArgument;
     if (selected.* >= visible_count) selected.* = visible_count - 1;
-    if (visible_count == 0) selected.* = 0;
 
     const max_scroll = treeViewMaxScroll(items, bounds.h, style);
     scroll_offset.* = std.math.clamp(scroll_offset.*, 0, max_scroll);
@@ -187,7 +187,7 @@ pub fn beginTreeView(
 
     // Snapshot S1: após o mouse e antes do teclado.
     const keyboard_visible_count = treeViewCountVisible(items);
-    if (selected.* >= keyboard_visible_count and keyboard_visible_count > 0) selected.* = keyboard_visible_count - 1;
+    if (selected.* >= keyboard_visible_count) selected.* = keyboard_visible_count - 1;
     last_visible = @min(keyboard_visible_count, last_visible);
 
     // Teclado com foco
