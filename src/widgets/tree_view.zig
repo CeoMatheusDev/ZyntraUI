@@ -178,8 +178,11 @@ pub fn beginTreeView(
     for (ctx.pendingEvents()) |ev| {
         if (ev != .mouse_wheel) continue;
         const w = ev.mouse_wheel;
-        if (bounds.contains(w.pos)) {
-            scroll_offset.* = std.math.clamp(scroll_offset.* - w.dy * 20, 0, max_scroll);
+        if (bounds.contains(w.pos) and std.math.isFinite(w.dy)) {
+            const next = scroll_offset.* - w.dy * 20;
+            if (std.math.isFinite(next)) {
+                scroll_offset.* = std.math.clamp(next, 0, max_scroll);
+            }
         }
     }
 
@@ -1120,5 +1123,32 @@ test "TreeView wheel scroll updates offset without changing selection" {
     const outside = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
     try testing.expectEqual(previous_scroll, scroll);
     try testing.expectEqual(previous_scroll, outside.scroll_offset);
+    ctx.endFrame();
+}
+
+test "TreeView ignores non-finite wheel delta" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+
+    var items: [20]TreeItem = undefined;
+    for (&items) |*item| {
+        item.* = .{ .label = "row", .children = &[_]TreeItem{} };
+    }
+    const bounds = types.Rect.init(0, 0, 200, style.item_height * 3);
+    const id = id_mod.Id.fromString("test:tree-wheel-nan");
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{
+        .dx = 0,
+        .dy = std.math.nan(f32),
+        .pos = types.Vec2.init(10, 10),
+    } });
+    const result = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expectEqual(@as(f32, 0), scroll);
+    try testing.expectEqual(@as(f32, 0), result.scroll_offset);
     ctx.endFrame();
 }
