@@ -1081,3 +1081,44 @@ test "TreeView keyboard End renders the newly scrolled viewport" {
     try testing.expect(ctx.drawCommands().len > 3);
     ctx.endFrame();
 }
+
+test "TreeView wheel scroll updates offset without changing selection" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+
+    var items: [30]TreeItem = undefined;
+    for (&items) |*item| {
+        item.* = .{ .label = "row", .children = &[_]TreeItem{} };
+    }
+    const bounds = types.Rect.init(20, 20, 220, style.item_height * 3);
+    const id = id_mod.Id.fromString("test:tree-wheel-scroll");
+    var selected: usize = 1;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{
+        .dx = 0,
+        .dy = -3,
+        .pos = types.Vec2.init(40, 40),
+    } });
+    const moved = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expect(scroll > 0);
+    try testing.expectEqual(scroll, moved.scroll_offset);
+    try testing.expectEqual(@as(usize, 1), selected);
+    try testing.expect(!moved.changed);
+    ctx.endFrame();
+
+    const previous_scroll = scroll;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_wheel = .{
+        .dx = 0,
+        .dy = -3,
+        .pos = types.Vec2.init(400, 400),
+    } });
+    const outside = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expectEqual(previous_scroll, scroll);
+    try testing.expectEqual(previous_scroll, outside.scroll_offset);
+    ctx.endFrame();
+}
