@@ -50,6 +50,10 @@ pub const style = struct {
     pub const style_mod = @import("style/style.zig");
 };
 
+pub const dock = struct {
+    pub const layout = @import("dock/layout.zig");
+};
+
 pub const widgets = struct {
     pub const button = @import("widgets/button.zig");
     pub const checkbox = @import("widgets/checkbox.zig");
@@ -170,6 +174,9 @@ pub const TabBarResult = widgets.tab_bar.TabBarResult;
 pub const SplitterResult = widgets.splitter.SplitterResult;
 pub const SplitterOrientation = widgets.splitter.SplitterOrientation;
 pub const SplitterPanes = widgets.splitter.SplitterPanes;
+pub const DockLayout = dock.layout.DockLayout;
+pub const DockOrientation = dock.layout.DockOrientation;
+pub const DockError = dock.layout.DockError;
 pub const PanelOptions = widgets.panel.PanelOptions;
 pub const PanelResult = widgets.panel.PanelResult;
 pub const ListViewResult = widgets.list_view.ListViewResult;
@@ -203,6 +210,7 @@ test {
     _ = @import("draw/commands.zig");
     _ = @import("layout/layout.zig");
     _ = @import("style/style.zig");
+    _ = @import("dock/layout.zig");
     _ = @import("text/metrics.zig");
     _ = @import("text/wrap.zig");
     _ = @import("draw/renderer.zig");

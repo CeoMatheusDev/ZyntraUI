@@ -711,4 +711,43 @@ pub fn main() !void {
         "m74 panel draws={d} content_h={d:.1} left_w={d:.1} right_w={d:.1}\n",
         .{ pn_draws, pni.content.h, panes.a.w, panes.b.w },
     );
+
+    // DockLayout (M75, docking passo 2): a árvore de splits pura produz os
+    // rects dos painéis e das divisórias; cada painel é desenhado com o
+    // chrome de `panel` (passo 1). Estado/layout ficam no chamador.
+    const dock_mod = zyntra_ui.dock.layout;
+    var dock: zyntra_ui.DockLayout = undefined;
+    dock_mod.dockInit(&dock, 0);
+    const dock_b = try dock_mod.dockSplit(&dock, 0, .horizontal, 0.5, 1);
+    _ = try dock_mod.dockSplit(&dock, dock_b, .vertical, 0.5, 2);
+    var dock_panes: [zyntra_ui.DockLayout.max_panes]zyntra_ui.Rect = undefined;
+    var dock_divs: [zyntra_ui.DockLayout.max_panes]zyntra_ui.Rect = undefined;
+    const pane_ids = [_][]const u8{ "examples/m75:p0", "examples/m75:p1", "examples/m75:p2" };
+    const pane_titles = [_][]const u8{ "Esq", "Dir", "Baixo" };
+    var dock_collapsed = false;
+    ctx.beginFrame();
+    const dp_count = try dock_mod.dockPaneRects(&dock, zyntra_ui.Rect.init(600, 20, 260, 200), 8, &dock_panes);
+    const dd_count = try dock_mod.dockDividerRects(&dock, zyntra_ui.Rect.init(600, 20, 260, 200), 8, &dock_divs);
+    var di: usize = 0;
+    while (di < dd_count) : (di += 1) {
+        try ctx.draw.rectFilled(ctx.allocator, dock_divs[di], theme.border);
+    }
+    var pi: usize = 0;
+    while (pi < dp_count and pi < pane_ids.len) : (pi += 1) {
+        _ = try panel_mod.panel(
+            &ctx,
+            zyntra_ui.Id.fromString(pane_ids[pi]),
+            dock_panes[pi],
+            &dock_collapsed,
+            .{ .title = pane_titles[pi], .collapsible = false },
+            font,
+            theme.panelStyle(),
+        );
+    }
+    const dock_draws = ctx.drawCommands().len;
+    ctx.endFrame();
+    std.debug.print(
+        "m75 dock panes={d} dividers={d} draws={d} pane0_h={d:.1}\n",
+        .{ dp_count, dd_count, dock_draws, dock_panes[0].h },
+    );
 }

@@ -7,6 +7,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `dock/layout` (M75, Docking passo 2): modelo **puro** de layout em árvore
+  binária de splits — `DockLayout` (array fixo de nós, até 16 painéis, sem
+  alocação) com `dockInit`, `dockSplit` (achata uma folha em dois lados e
+  devolve o nó da nova folha), `dockSetRatio`, `dockNodePane`,
+  `dockLeafCount`, `dockRemovePane` (dissolve o split pai e recompõe a
+  árvore) e `dockPaneRects`/`dockDividerRects` (geometria determinística
+  com `divider` px entre lados). Erros explícitos (`InvalidIndex`,
+  `NoSpace`, `OutOfBuffer`). Não desenha nem trata eventos: combine com
+  `widgets/panel` (chrome) e `widgets/splitter` (arraste). Testes cobrem
+  splits aninhados, proporções/clamp, remoção com recomposição, limites de
+  capacidade e buffer pequeno; `examples/minimal.zig` demonstra um layout
+  de 3 painéis desenhado com `panel`.
 - `widgets/panel` (M74, Docking passo 1): *shell* de painel acoplável —
   cabeçalho com título (truncado à largura disponível) + controles de
   colapso (chevron) e fechar (`×`, quando `closable`), devolvendo o rect
