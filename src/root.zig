@@ -59,6 +59,10 @@ pub const graph = struct {
     pub const view = @import("graph/view.zig");
 };
 
+pub const inspector = struct {
+    pub const view = @import("inspector/view.zig");
+};
+
 pub const timeline = struct {
     pub const view = @import("timeline/view.zig");
 };
@@ -95,6 +99,7 @@ pub const widgets = struct {
     pub const dock_view = @import("widgets/dock_view.zig");
     pub const graph_view = @import("widgets/graph_view.zig");
     pub const timeline_view = @import("widgets/timeline_view.zig");
+    pub const inspector_view = @import("widgets/inspector_view.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -166,6 +171,7 @@ pub const GroupBoxStyle = style.style_mod.GroupBoxStyle;
 pub const PanelStyle = style.style_mod.PanelStyle;
 pub const GraphStyle = style.style_mod.GraphStyle;
 pub const TimelineStyle = style.style_mod.TimelineStyle;
+pub const InspectorStyle = style.style_mod.InspectorStyle;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -235,6 +241,15 @@ pub const TimelineViewOptions = widgets.timeline_view.TimelineViewOptions;
 pub const TimelineViewResult = widgets.timeline_view.TimelineViewResult;
 pub const TimelineDragMode = widgets.timeline_view.TimelineDragMode;
 
+pub const InspectorKind = inspector.view.Kind;
+pub const InspectorRange = inspector.view.Range;
+pub const InspectorChoice = inspector.view.Choice;
+pub const InspectorValue = inspector.view.Value;
+pub const InspectorProperty = inspector.view.Property;
+pub const InspectorViewState = widgets.inspector_view.InspectorViewState;
+pub const InspectorViewOptions = widgets.inspector_view.InspectorViewOptions;
+pub const InspectorViewResult = widgets.inspector_view.InspectorViewResult;
+
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
 pub const version_patch = core.types.version_patch;
@@ -261,6 +276,7 @@ test {
     _ = @import("dock/serialize.zig");
     _ = @import("graph/view.zig");
     _ = @import("timeline/view.zig");
+    _ = @import("inspector/view.zig");
     _ = @import("text/metrics.zig");
     _ = @import("text/wrap.zig");
     _ = @import("draw/renderer.zig");
@@ -298,4 +314,5 @@ test {
     _ = @import("widgets/dock_view.zig");
     _ = @import("widgets/graph_view.zig");
     _ = @import("widgets/timeline_view.zig");
+    _ = @import("widgets/inspector_view.zig");
 }

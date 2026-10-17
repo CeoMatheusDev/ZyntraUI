@@ -529,6 +529,58 @@ pub const TimelineStyle = extern struct {
     }
 };
 
+/// Estilo de property inspector (M96): linhas nome/valor, editores de
+/// bool/número/escolha (ver `widgets/inspector_view`).
+///
+/// Unidades: px de TELA.
+pub const InspectorStyle = extern struct {
+    /// Fundo da área (transparente ⇒ não desenhado).
+    bg: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Fundo da linha.
+    row_bg: types.Color,
+    /// Fundo alternado (linhas ímpares; `a == 0` ⇒ sem alternância).
+    row_alt: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Realce da linha ativa (transparente ⇒ sem realce).
+    row_active: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Fundo do editor (coluna de valores) em hover/ativa/arraste.
+    editor_bg: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Linha separadora entre linhas (transparente ⇒ sem).
+    separator: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Cor do nome.
+    name: types.Color,
+    /// Largura da coluna de nomes em px (>= 0).
+    name_width: f32 = 120.0,
+    /// Recuo do nome em px (>= 0).
+    name_pad: f32 = 8.0,
+    /// Recuo do editor na coluna de valores em px (>= 0).
+    value_pad: f32 = 6.0,
+    /// Altura de cada linha em px (> 0).
+    row_height: f32 = 24.0,
+    /// Cor do valor editável.
+    value: types.Color,
+    /// Cor do valor somente-leitura (`text`/`readonly`).
+    value_readonly: types.Color,
+    /// Lado da caixa de booleano em px (0 ⇒ sem caixa).
+    check_size: f32 = 12.0,
+    /// Fundo da caixa de booleano.
+    check_bg: types.Color,
+    /// Borda da caixa de booleano (transparente ou largura 0 ⇒ sem).
+    check_border: types.Color,
+    /// Espessura da borda da caixa (>= 0).
+    check_border_width: f32 = 1.0,
+    /// Marca interna da caixa marcada.
+    check_mark: types.Color,
+
+    pub fn isValid(self: InspectorStyle) bool {
+        return std.math.isFinite(self.name_width) and self.name_width >= 0 and
+            std.math.isFinite(self.name_pad) and self.name_pad >= 0 and
+            std.math.isFinite(self.value_pad) and self.value_pad >= 0 and
+            std.math.isFinite(self.row_height) and self.row_height > 0 and
+            std.math.isFinite(self.check_size) and self.check_size >= 0 and
+            std.math.isFinite(self.check_border_width) and self.check_border_width >= 0;
+    }
+};
+
 /// Estilo de barra de status (M68). Chrome + métricas de
 /// posicionamento dos segmentos (ver `widgets/statusbar`).
 pub const StatusBarStyle = extern struct {
@@ -754,6 +806,29 @@ pub const Theme = extern struct {
         };
     }
 
+    pub fn inspectorStyle(self: Theme) InspectorStyle {
+        return .{
+            .bg = self.bg,
+            .row_bg = self.surface,
+            .row_alt = types.Color{ .r = 0, .g = 0, .b = 0, .a = 0 },
+            .row_active = types.Color.rgb(60, 84, 120),
+            .editor_bg = types.Color.rgb(30, 30, 36),
+            .separator = types.Color.rgb(70, 70, 80),
+            .name = self.text,
+            .name_width = 120.0,
+            .name_pad = 8.0,
+            .value_pad = 6.0,
+            .row_height = 24.0,
+            .value = self.text,
+            .value_readonly = self.border,
+            .check_size = 12.0,
+            .check_bg = self.bg,
+            .check_border = self.border,
+            .check_border_width = 1.0,
+            .check_mark = self.accent,
+        };
+    }
+
     pub fn groupBoxStyle(self: Theme) GroupBoxStyle {
         return .{
             .border = self.border,
@@ -939,6 +1014,8 @@ test "Theme defaults + derivados válidos" {
     try stdt.testing.expect(light.graphStyle().isValid());
     try stdt.testing.expect(dark.timelineStyle().isValid());
     try stdt.testing.expect(light.timelineStyle().isValid());
+    try stdt.testing.expect(dark.inspectorStyle().isValid());
+    try stdt.testing.expect(light.inspectorStyle().isValid());
     const bad_btn = ButtonStyle{
         .bg = dark.bg,
         .bg_hover = dark.bg,

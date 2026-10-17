@@ -1233,4 +1233,89 @@ pub fn main() !void {
             tl_texts,
         },
     );
+
+    // Property inspector (M96): lista nome/valor sobre `inspector/view`,
+    // com linha ativa, realce do editor em hover e editores de bool,
+    // real e escolha. Framebuffer 200x64 com 3 linhas de 20 px (coluna de
+    // nomes 80, recuo do valor 6 ⇒ editor em x = 86) para conferir pixels
+    // exatos (fundos, marca do bool e realce do editor) e a estrutura.
+    var insp_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 200, 64);
+    defer insp_fb.deinit(allocator);
+    insp_fb.clear(zyntra_ui.Color.rgb(255, 255, 255));
+    const insp_style = zyntra_ui.InspectorStyle{
+        .bg = zyntra_ui.Color.rgb(20, 20, 20),
+        .row_bg = zyntra_ui.Color.rgb(40, 40, 48),
+        .row_alt = zyntra_ui.Color.rgb(30, 30, 36),
+        .row_active = zyntra_ui.Color.rgb(60, 84, 120),
+        .editor_bg = zyntra_ui.Color.rgb(24, 24, 30),
+        .separator = zyntra_ui.Color.rgb(70, 70, 80),
+        .name = zyntra_ui.Color.rgb(230, 230, 230),
+        .name_width = 80,
+        .name_pad = 6,
+        .value_pad = 6,
+        .row_height = 20,
+        .value = zyntra_ui.Color.rgb(255, 255, 255),
+        .value_readonly = zyntra_ui.Color.rgb(150, 150, 150),
+        .check_size = 12,
+        .check_bg = zyntra_ui.Color.rgb(20, 20, 20),
+        .check_border = zyntra_ui.Color.rgb(200, 200, 200),
+        .check_border_width = 1,
+        .check_mark = zyntra_ui.Color.rgb(255, 200, 0),
+    };
+    var insp_visible = true;
+    var insp_scale: f32 = 1.5;
+    var insp_mode: u32 = 1;
+    const insp_options = [_][]const u8{ "A", "B", "C" };
+    const insp_props = [_]zyntra_ui.InspectorProperty{
+        .{ .name = "visible", .value = .{ .boolean = &insp_visible } },
+        .{ .name = "scale", .value = .{ .real = &insp_scale }, .decimals = 1 },
+        .{
+            .name = "mode",
+            .value = .{
+                .choice = .{ .index = &insp_mode, .options = &insp_options },
+            },
+        },
+    };
+    var insp_state = zyntra_ui.InspectorViewState{ .active = 2 };
+    ctx.beginFrame();
+    // Hover na linha 1 (valor) ⇒ realce do editor na coluna de valores.
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = .{ .x = 120, .y = 30 } } });
+    _ = try zyntra_ui.widgets.inspector_view.inspectorView(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m96:inspector"),
+        zyntra_ui.Rect.init(0, 0, 200, 64),
+        &insp_props,
+        &insp_state,
+        .{},
+        insp_style,
+        font,
+    );
+    var insp_cmds: usize = 0;
+    var insp_lines: usize = 0;
+    var insp_texts: usize = 0;
+    for (ctx.drawCommands()) |cmd| {
+        insp_cmds += 1;
+        if (cmd == .line) insp_lines += 1;
+        if (cmd == .text) insp_texts += 1;
+    }
+    _ = try zyntra_ui.software.raster.render(&insp_fb, ctx.drawCommands(), zyntra_ui.Rect.init(0, 0, 200, 64));
+    ctx.endFrame();
+    // Fundo (150,60), linha 0 (10,10), linha alt 1 (10,30), linha ativa 2
+    // (10,50), marca do bool (92,10) e realce do editor (120,30).
+    // Estrutura: 2 clips + 8 `rect_filled` + 1 `rect_outline` + 2
+    // separadores `.line` + 5 `.text`.
+    std.debug.print(
+        "m96 inspector bg={d} row={d} alt={d} active={d} mark={d} editor={d} cmds={d} lines={d} texts={d}\n",
+        .{
+            insp_fb.get(150, 60)[0],
+            insp_fb.get(10, 10)[0],
+            insp_fb.get(10, 30)[0],
+            insp_fb.get(10, 50)[0],
+            insp_fb.get(92, 10)[0],
+            insp_fb.get(120, 30)[0],
+            insp_cmds,
+            insp_lines,
+            insp_texts,
+        },
+    );
 }

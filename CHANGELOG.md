@@ -7,6 +7,31 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `inspector/view` + `widgets/inspector_view`: **property inspector**
+  (M96, aditivo) — modelo puro (sem `Context` e sem alocação) com
+  descritores de propriedade apontando para a memória do chamador
+  (`Property.value`: `boolean`/`integer`/`real`/`text`/`choice`), faixa
+  opcional de clamp (aplicada quando `min < max`), passo e casas decimais
+  efetivos, formatação determinística de números por aritmética inteira
+  (`formatInt`, `formatReal` com arredondamento e transporte — sem
+  dependência da formatação de ponto flutuante da std), aritmética de
+  edição (`dragValue`, `clampToRange`, `toInt` com saturação),
+  hit-test/métricas de linha (`rowAtY`, `contentHeight`, `maxScroll`) e
+  circulação de escolhas (`cycleIndex`). Widget `inspectorView` sobre esse
+  modelo: linha ativa com captura de press, arraste horizontal de números
+  (passo por pixel, âncora no clique, clamp na faixa; inteiros
+  arredondam), alternância de booleano e circulação de escolha no press,
+  roda com hover para rolagem vertical (clampada em `[0, maxScroll]`,
+  linhas fora da vista são descartadas) e teclado com foco (↑/↓ movem a
+  linha ativa trazendo-a para a vista, ←/→ ajustam o valor com Shift =
+  grosso e Alt = fino, Espaço/Enter alternam booleano e avançam escolha,
+  Tab circula o foco). Desenho: fundo, linhas (alternadas/ativa), realce
+  do editor (coluna de valores) em hover/arraste, separadores, nomes e
+  editores (caixa de booleano com borda e marca, número formatado, opção
+  da escolha ou texto somente-leitura) — tudo clipado em `bounds`. Novo
+  `InspectorStyle` + `Theme.inspectorStyle()`; `examples/minimal.zig` ganha
+  a demo `m96`.
+
 - `timeline/view` + `widgets/timeline_view`: **timeline** (M95, aditivo) —
   modelo puro (sem `Context` e sem alocação) com transformação tempo↔tela
   (`TimeTransform`: `x = (t - start) * pps`; `zoomAt` mantém a âncora fixa e
