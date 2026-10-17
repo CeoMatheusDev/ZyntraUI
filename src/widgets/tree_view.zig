@@ -335,6 +335,9 @@ pub fn beginTreeView(
         };
     }
 
+    // S2: o desenho acima ainda usa S1; a scrollbar vê os toggles do teclado.
+    treeViewCommit(&pending);
+
     // Scrollbar
     const content_h = treeViewContentHeight(items, style);
     if (content_h > bounds.h) {
