@@ -731,7 +731,6 @@ test "TreeView colapso, scroll, contagem e profundidade" {
     ctx.endFrame();
 }
 
-
 test "TreeView golden G5: Right repetido alterna o mesmo no sem navegar" {
     const testing = std.testing;
     const style = style_mod.Theme.darkDefault().treeViewStyle();
@@ -818,7 +817,6 @@ test "TreeView golden G11: Right Down Enter navega na sequencia S1" {
     try testing.expectEqual(@as(usize, 3), texts);
     ctx.endFrame();
 }
-
 
 test "TreeView golden G6: scrollbar usa S2 enquanto linhas usam S1" {
     const testing = std.testing;
