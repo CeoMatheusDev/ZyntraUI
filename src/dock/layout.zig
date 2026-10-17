@@ -1,26 +1,33 @@
 //! ZyntraUI — modelo de layout de docking (dock/layout).
 //!
 //! Modelo M75 (Docking, passo 2): a *estrutura* de um conjunto de painéis
-//! acoplados — uma árvore binária de splits (horizontal/vertical) com
-//! folhas identificadas por id de painel. Puro, sem alocação: a árvore
-//! vive num array fixo dentro de `DockLayout` (o chamador é dono) e todas
-//! as funções são determinísticas.
+//! acoplados — uma árvore binária de splits (horizontal/vertical) cujas
+//! folhas são *grupos* de painéis acoplados como abas (`DockGroup`). Puro,
+//! sem alocação: a árvore vive num array fixo dentro de `DockLayout` (o
+//! chamador é dono) e todas as funções são determinísticas.
 //!
 //! - `dockInit(&layout, pane)` — layout de um único painel.
 //! - `dockSplit(&layout, leaf, orientation, ratio, pane)` — transforma a
-//!   folha em split e devolve o índice da nova folha (item 6, aninhável).
-//! - `dockSetRatio` / `dockNodePane` / `dockLeafCount`.
-//! - `dockRemovePane` — remove o painel e dissolve o split pai (o irmão
-//!   ocupa o lugar), recomprimindo a árvore.
+//!   folha (grupo) em split e devolve o índice da nova folha (item 6,
+//!   aninhável). O grupo original fica num lado e `pane` no outro.
+//! - `dockSetRatio` / `dockNodePane` (painel ativo) / `dockLeafCount`.
+//! - Abas (passo 4a): `dockGroup`/`dockGroupMut` leem o grupo (abas +
+//!   ativo), `dockAddTab`/`dockRemoveTab` anexam/removem abas e
+//!   `dockSetActiveTab` troca a aba visível. Um grupo vazio é dissolvido.
+//! - `dockRemovePane` — remove o painel (aba ou grupo inteiro); se era a
+//!   última aba do grupo, dissolve o split pai (o irmão ocupa o lugar),
+//!   recomprimindo a árvore.
 //! - `dockPaneRects` / `dockDividerRects` — geometria pura (rects dos
-//!   painéis em pré-ordem e das divisórias), com `divider` px entre lados.
+//!   grupos em pré-ordem e das divisórias), com `divider` px entre lados.
 //! - `dockSplits` — pré-ordem dos splits com nó/orientação/ratio/área e
 //!   faixa da divisória (base de `widgets/dock_view`, passo 3).
-//! - `dockPanes` — pré-ordem dos painéis com id + rect (base do hit-test).
+//! - `dockPanes` — pré-ordem dos grupos com nó + abas/ativo + rect (base
+//!   do hit-test e das barras de abas).
 //! - Re-acoplagem (passo 4): `dockDropZone`/`dockZoneRect` resolvem a zona
-//!   sob o cursor e o realce; `dockMovePane` redivide um painel alvo numa
-//!   borda, `dockSwapPanes` troca dois painéis e `dockApplyDrop` despacha
-//!   (borda ⇒ redivide; centro ⇒ troca).
+//!   sob o cursor e o realce; `dockMovePane` redivide um grupo alvo numa
+//!   borda, `dockMergeTab` acopla o painel como aba do grupo alvo,
+//!   `dockSwapPanes` troca dois painéis entre grupos e `dockApplyDrop`
+//!   despacha (borda ⇒ redivide; centro ⇒ vira aba).
 //!
 //! Não desenha nem trata eventos: combine com `widgets/panel` (chrome), e
 //! `widgets/dock_view` (divisórias arrastáveis + drop) para interação. O
@@ -33,10 +40,91 @@ pub const DockOrientation = enum { horizontal, vertical };
 
 pub const DockError = error{ InvalidIndex, NoSpace, OutOfBuffer };
 
+/// Grupo de painéis acoplados como abas (M78, passo 4a): até `max_tabs`
+/// painéis, um deles ativo. Vive na folha da árvore (as abas viajam com
+/// ela em splits/remoções). Invariante: `count >= 1` enquanto o grupo
+/// existe na árvore (grupo vazio é dissolvido).
+pub const DockGroup = struct {
+    /// Abas simultâneas por grupo.
+    pub const max_tabs: usize = 4;
+
+    panes: [max_tabs]u16 = undefined,
+    count: u8 = 0,
+    /// Índice da aba ativa (`0..count`).
+    active: u8 = 0,
+
+    /// Grupo de um único painel.
+    pub fn single(pane: u16) DockGroup {
+        var g = DockGroup{};
+        g.panes[0] = pane;
+        g.count = 1;
+        g.active = 0;
+        return g;
+    }
+
+    /// Abas em ordem (`panes[0..count]`).
+    pub fn tabs(self: *const DockGroup) []const u16 {
+        return self.panes[0..self.count];
+    }
+
+    /// Painel ativo (o que o chamador desenha no corpo do grupo).
+    pub fn activePane(self: *const DockGroup) u16 {
+        if (self.count == 0) return 0; // grupo vazio não persiste na árvore
+        return self.panes[self.active];
+    }
+
+    pub fn isFull(self: *const DockGroup) bool {
+        return self.count >= max_tabs;
+    }
+
+    /// Posição da aba `pane`, ou `null`.
+    pub fn indexOf(self: *const DockGroup, pane: u16) ?usize {
+        var i: usize = 0;
+        while (i < self.count) : (i += 1) {
+            if (self.panes[i] == pane) return i;
+        }
+        return null;
+    }
+
+    /// Anexa `pane` como última aba e a torna ativa. `false` se o grupo
+    /// estiver cheio ou já contiver o painel.
+    pub fn add(self: *DockGroup, pane: u16) bool {
+        if (self.isFull() or self.indexOf(pane) != null) return false;
+        self.panes[self.count] = pane;
+        self.count += 1;
+        self.active = self.count - 1;
+        return true;
+    }
+
+    /// Remove a aba na posição `i` (deslocando as seguintes) e ajusta o
+    /// índice ativo. `false` se `i` estiver fora da faixa.
+    pub fn removeAt(self: *DockGroup, i: usize) bool {
+        if (i >= self.count) return false;
+        var k = i;
+        while (k + 1 < self.count) : (k += 1) self.panes[k] = self.panes[k + 1];
+        self.count -= 1;
+        if (self.count == 0) {
+            self.active = 0;
+        } else if (self.active >= self.count) {
+            self.active = self.count - 1;
+        } else if (i < self.active) {
+            self.active -= 1;
+        }
+        return true;
+    }
+
+    /// Remove a aba `pane`. `false` se não estiver no grupo.
+    pub fn remove(self: *DockGroup, pane: u16) bool {
+        const i = self.indexOf(pane) orelse return false;
+        return self.removeAt(i);
+    }
+};
+
 pub const DockLayout = struct {
-    /// Nós totais da árvore binária (N folhas ⇒ 2N-1 nós ⇒ 16 painéis).
+    /// Nós totais da árvore binária (N grupos ⇒ 2N-1 nós).
     pub const max_nodes: usize = 32;
-    /// Painéis simultâneos máximos (folhas).
+    /// Grupos (folhas) simultâneos máximos. Com abas, o total de painéis
+    /// pode chegar a `max_panes * DockGroup.max_tabs`.
     pub const max_panes: usize = (max_nodes + 1) / 2;
 
     const Split = struct {
@@ -47,7 +135,7 @@ pub const DockLayout = struct {
     };
 
     const Node = union(enum) {
-        leaf: u16,
+        leaf: DockGroup,
         split: Split,
     };
 
@@ -64,9 +152,9 @@ fn clampRatio(ratio: f32) f32 {
     return std.math.clamp(ratio, 0, 1);
 }
 
-/// Inicializa com um único painel (folha na raiz).
+/// Inicializa com um grupo de um único painel (folha na raiz).
 pub fn dockInit(layout: *DockLayout, pane: u16) void {
-    layout.nodes[0] = .{ .leaf = pane };
+    layout.nodes[0] = .{ .leaf = DockGroup.single(pane) };
     layout.len = 1;
     layout.root = 0;
 }
@@ -88,18 +176,67 @@ fn countLeaves(layout: *const DockLayout, node: u8) usize {
     };
 }
 
-/// Painel da folha `leaf_index`, ou `null` se o nó não for folha/índice.
+/// Painel ativo do grupo da folha `leaf_index`, ou `null` se o nó não for
+/// folha/índice. (Um grupo pode ter várias abas: veja `dockGroup`.)
 pub fn dockNodePane(layout: *const DockLayout, leaf_index: usize) ?u16 {
     if (leaf_index >= layout.len) return null;
     return switch (layout.nodes[leaf_index]) {
-        .leaf => |p| p,
+        .leaf => |g| g.activePane(),
         .split => null,
     };
 }
 
-/// Achata o split `leaf_index` (precisa ser folha) em dois lados; o painel
-/// original fica no lado `first` e `pane` no lado `second`. Devolve o
-/// índice do nó da nova folha. `ratio` é clampado a `[0,1]`.
+/// Cópia do grupo da folha `leaf_index` (abas + ativo), ou `null` se o nó
+/// não for folha/índice.
+pub fn dockGroup(layout: *const DockLayout, leaf_index: usize) ?DockGroup {
+    if (leaf_index >= layout.len) return null;
+    return switch (layout.nodes[leaf_index]) {
+        .leaf => |g| g,
+        .split => null,
+    };
+}
+
+/// Painel ativo da folha `leaf_index` como `*DockGroup` mutável (para o
+/// chamador trocar a aba ativa ou mexer nas abas via `DockGroup`), ou
+/// `null` se o nó não for folha/índice.
+pub fn dockGroupMut(layout: *DockLayout, leaf_index: usize) ?*DockGroup {
+    if (leaf_index >= layout.len) return null;
+    return switch (layout.nodes[leaf_index]) {
+        .leaf => |*g| g,
+        .split => null,
+    };
+}
+
+/// Ativa a aba `tab` da folha `leaf_index`. `false` se o nó não for folha
+/// ou `tab` estiver fora da faixa.
+pub fn dockSetActiveTab(layout: *DockLayout, leaf_index: usize, tab: usize) bool {
+    const g = dockGroupMut(layout, leaf_index) orelse return false;
+    if (tab >= g.count) return false;
+    g.active = @intCast(tab);
+    return true;
+}
+
+/// Anexa `pane` como última aba do grupo da folha `leaf_index` (e a
+/// ativa). `false` se o nó não for folha, o grupo estiver cheio
+/// (`DockGroup.max_tabs`) ou já contiver o painel.
+pub fn dockAddTab(layout: *DockLayout, leaf_index: usize, pane: u16) bool {
+    const g = dockGroupMut(layout, leaf_index) orelse return false;
+    return g.add(pane);
+}
+
+/// Remove a aba `pane` do grupo da folha `leaf_index`. Se era a última
+/// aba do grupo, dissolve a folha (o irmão sobe, como
+/// `dockRemovePane`). `false` se não houver mudança.
+pub fn dockRemoveTab(layout: *DockLayout, leaf_index: usize, pane: u16) bool {
+    const g = dockGroupMut(layout, leaf_index) orelse return false;
+    if (g.count <= 1) return dockRemovePane(layout, pane);
+    return g.remove(pane);
+}
+
+/// Achata o split `leaf_index` (precisa ser folha) em dois lados; o grupo
+/// original fica no lado `first` e um grupo novo com `pane` no lado
+/// `second`. Devolve o índice do nó da nova folha. `ratio` é clampado a
+/// `[0,1]`.
 ///
 /// A folha original é realocada para um nó livre (o split ocupa o índice
 /// antigo, preservando a referência do pai quando `leaf_index` é filho).
@@ -113,7 +250,7 @@ pub fn dockSplit(
     return dockSplitOrdered(layout, leaf_index, orientation, ratio, pane, false);
 }
 
-/// Como `dockSplit`, mas `pane_first` decide em qual lado o painel novo
+/// Como `dockSplit`, mas `pane_first` decide em qual lado o grupo novo
 /// fica (`true` ⇒ lado inicial). Devolve o índice da folha de `pane`
 /// (`dockMovePane` precisa dele para posicionar o painel movido).
 pub fn dockSplitOrdered(
@@ -126,14 +263,14 @@ pub fn dockSplitOrdered(
 ) DockError!usize {
     if (leaf_index >= layout.len) return error.InvalidIndex;
     const original = switch (layout.nodes[leaf_index]) {
-        .leaf => |p| p,
+        .leaf => |g| g,
         .split => return error.InvalidIndex,
     };
     if (layout.len + 2 > DockLayout.max_nodes) return error.NoSpace;
     const keep: u8 = @intCast(layout.len);
     const fresh: u8 = @intCast(layout.len + 1);
     layout.nodes[keep] = .{ .leaf = original };
-    layout.nodes[fresh] = .{ .leaf = pane };
+    layout.nodes[fresh] = .{ .leaf = DockGroup.single(pane) };
     layout.nodes[leaf_index] = .{ .split = .{
         .orientation = orientation,
         .ratio = clampRatio(ratio),
@@ -162,11 +299,14 @@ pub fn dockSplitRatio(layout: *const DockLayout, split_index: usize) ?f32 {
     };
 }
 
-/// Remove o painel `pane` e dissolve o split pai: o irmão sobe para o
-/// lugar do pai. Recompressa a árvore (sem órfãos). Falha (e devolve
-/// `false`) se o painel não existir ou for o único.
+/// Remove o painel `pane`: tira a aba do grupo e, se era a última aba,
+/// dissolve a folha (o irmão sobe para o lugar do pai) recompactando a
+/// árvore. Falha (e devolve `false`) se o painel não existir ou for o
+/// único de um layout de um grupo só.
 pub fn dockRemovePane(layout: *DockLayout, pane: u16) bool {
-    if (dockFindPane(layout, pane) == null) return false;
+    const node = dockFindPane(layout, pane) orelse return false;
+    const group = dockGroupMut(layout, node) orelse return false;
+    if (group.count > 1) return group.remove(pane);
     if (dockLeafCount(layout) <= 1) return false;
     var tmp: [DockLayout.max_nodes]DockLayout.Node = undefined;
     var out_len: usize = 0;
@@ -177,22 +317,22 @@ pub fn dockRemovePane(layout: *DockLayout, pane: u16) bool {
     return true;
 }
 
-/// Índice do nó da folha do painel `pane`, ou `null` se não existir
-/// (índices `0..len` são sempre alcançáveis — remoções recompõem).
+/// Índice do nó da folha cujo grupo contém `pane`, ou `null` se não
+/// existir (índices `0..len` são sempre alcançáveis — remoções recompõem).
 pub fn dockFindPane(layout: *const DockLayout, pane: u16) ?usize {
     var i: usize = 0;
     while (i < layout.len) : (i += 1) {
         switch (layout.nodes[i]) {
-            .leaf => |p| if (p == pane) return i,
+            .leaf => |g| if (g.indexOf(pane) != null) return i,
             .split => {},
         }
     }
     return null;
 }
 
-/// Reconstrói a subárvore `node` em `out`, ignorando a folha `skip`.
-/// Pré-ordem: o índice devolvido é o do nó reconstruído. `null` se a
-/// subárvore inteira foi ignorada.
+/// Reconstrói a subárvore `node` em `out`, removendo a aba `skip`. Se um
+/// grupo ficar vazio ele é ignorado. Pré-ordem: o índice devolvido é o do
+/// nó reconstruído. `null` se a subárvore inteira foi ignorada.
 fn rebuildSkipping(
     layout: *const DockLayout,
     node: u8,
@@ -201,10 +341,12 @@ fn rebuildSkipping(
     out_len: *usize,
 ) ?u8 {
     switch (layout.nodes[node]) {
-        .leaf => |p| {
-            if (p == skip) return null;
+        .leaf => |group| {
+            var g = group;
+            _ = g.remove(skip); // no-op se o grupo não tem a aba
+            if (g.count == 0) return null;
             const here: u8 = @intCast(out_len.*);
-            out[out_len.*] = .{ .leaf = p };
+            out[out_len.*] = .{ .leaf = g };
             out_len.* += 1;
             return here;
         },
@@ -226,14 +368,22 @@ fn rebuildSkipping(
     }
 }
 
-/// Painel numa pré-ordem das folhas: id + rect.
+/// Grupo numa pré-ordem das folhas: nó + grupo (abas/ativo) + rect.
 pub const DockPaneInfo = struct {
-    pane: u16,
+    /// Índice do nó da folha (aceito por `dockGroup`/`dockSetActiveTab`).
+    node: u8,
+    /// Grupo (abas + aba ativa) da folha.
+    group: DockGroup,
     rect: types.Rect,
+
+    /// Painel ativo do grupo (o que o corpo deve desenhar).
+    pub fn pane(self: *const DockPaneInfo) u16 {
+        return self.group.activePane();
+    }
 };
 
-/// Ids + rects dos painéis (pré-ordem das folhas) dentro de `bounds`, com
-/// `divider` px reservados entre os lados. Devolve o número de painéis
+/// Grupos (abas + rect) em pré-ordem das folhas, dentro de `bounds`, com
+/// `divider` px reservados entre os lados. Devolve o número de grupos
 /// escritos (1..`DockLayout.max_panes`). `OutOfBuffer` se `out` for menor.
 pub fn dockPanes(
     layout: *const DockLayout,
@@ -260,9 +410,9 @@ fn panesRec(
     n: *usize,
 ) DockError!void {
     switch (layout.nodes[node]) {
-        .leaf => |p| {
+        .leaf => |g| {
             if (n.* >= out.len) return error.OutOfBuffer;
-            out[n.*] = .{ .pane = p, .rect = r };
+            out[n.*] = .{ .node = node, .group = g, .rect = r };
             n.* += 1;
         },
         .split => |s| {
@@ -419,12 +569,12 @@ pub fn dockZoneRect(rect: types.Rect, zone: DockZone) types.Rect {
     };
 }
 
-/// Move o painel `pane` para a borda `zone` do painel `target`: remove
-/// `pane` de onde está (dissolvendo o split pai) e redivide a folha alvo,
-/// com o painel movido no lado correspondente (`.left`/`.top` ⇒ lado
-/// inicial; `.right`/`.bottom` ⇒ lado final). `.center` é recusado (use
-/// `dockSwapPanes`). Devolve `false` sem efeito se a operação for inválida
-/// (`pane == target`, painel inexistente ou layout de painel único).
+/// Move o painel `pane` para a borda `zone` do grupo do painel `target`:
+/// remove `pane` de onde está (aba ou grupo) e redivide o grupo alvo, com
+/// o painel movido no lado correspondente (`.left`/`.top` ⇒ lado inicial;
+/// `.right`/`.bottom` ⇒ lado final). `.center` é recusado (use
+/// `dockMergeTab`). Devolve `false` sem efeito se a operação for inválida
+/// (`pane == target`, painel inexistente ou `pane` no mesmo grupo alvo).
 pub fn dockMovePane(layout: *DockLayout, pane: u16, target: u16, zone: DockZone) bool {
     const orientation: DockOrientation = switch (zone) {
         .left, .right => .vertical,
@@ -437,32 +587,57 @@ pub fn dockMovePane(layout: *DockLayout, pane: u16, target: u16, zone: DockZone)
         .center => return false,
     };
     if (pane == target) return false;
-    if (dockFindPane(layout, pane) == null or dockFindPane(layout, target) == null) return false;
+    const src = dockFindPane(layout, pane) orelse return false;
+    const dst = dockFindPane(layout, target) orelse return false;
+    if (src == dst) return false; // já estão no mesmo grupo
     if (!dockRemovePane(layout, pane)) return false;
     const idx = dockFindPane(layout, target) orelse return false;
     _ = dockSplitOrdered(layout, idx, orientation, 0.5, pane, pane_first) catch return false;
     return true;
 }
 
-/// Troca os painéis `a` e `b` de posição (a estrutura não muda: apenas as
-/// folhas trocam de id, então cada um passa a ocupar o rect do outro).
-/// `false` se algum não existir ou `a == b`.
+/// Troca os painéis `a` e `b` de posição entre grupos (a estrutura não
+/// muda: as abas correspondentes trocam, então cada painel passa a ocupar
+/// o rect do outro). `false` se algum não existir, `a == b` ou os dois
+/// estiverem no mesmo grupo (aí trocar de aba é `dockSetActiveTab`).
 pub fn dockSwapPanes(layout: *DockLayout, a: u16, b: u16) bool {
     if (a == b) return false;
     const ia = dockFindPane(layout, a) orelse return false;
     const ib = dockFindPane(layout, b) orelse return false;
-    layout.nodes[ia] = .{ .leaf = b };
-    layout.nodes[ib] = .{ .leaf = a };
+    if (ia == ib) return false;
+    const ga = dockGroupMut(layout, ia) orelse return false;
+    const gb = dockGroupMut(layout, ib) orelse return false;
+    ga.panes[ga.indexOf(a).?] = b;
+    gb.panes[gb.indexOf(b).?] = a;
     return true;
 }
 
 /// Aplica um drop do painel `pane` sobre `target` na `zone`: borda ⇒
-/// `dockMovePane`; centro ⇒ `dockSwapPanes`.
+/// `dockMovePane` (redivide o grupo alvo); centro ⇒ `dockMergeTab` (o
+/// painel vira aba do grupo alvo).
 pub fn dockApplyDrop(layout: *DockLayout, pane: u16, target: u16, zone: DockZone) bool {
     return switch (zone) {
-        .center => dockSwapPanes(layout, pane, target),
+        .center => dockMergeTab(layout, pane, target),
         else => dockMovePane(layout, pane, target, zone),
     };
+}
+
+/// Acopla `pane` como aba do grupo de `target`: remove o painel de origem
+/// (dissolvendo o grupo dele se ficar vazio) e anexa ao grupo alvo, que
+/// passa a tê-lo ativo. `false` sem efeito se `pane == target`, já forem o
+/// mesmo grupo, o grupo alvo estiver cheio (`DockGroup.max_tabs`) ou algum
+/// painel não existir.
+pub fn dockMergeTab(layout: *DockLayout, pane: u16, target: u16) bool {
+    if (pane == target) return false;
+    const src = dockFindPane(layout, pane) orelse return false;
+    const dst = dockFindPane(layout, target) orelse return false;
+    if (src == dst) return false; // já são abas do mesmo grupo
+    const g = dockGroupMut(layout, dst) orelse return false;
+    if (g.isFull()) return false;
+    if (!dockRemovePane(layout, pane)) return false;
+    // A remoção pode recompactar a árvore: reencontra o grupo alvo.
+    const dst2 = dockFindPane(layout, target) orelse return false;
+    return dockAddTab(layout, dst2, pane);
 }
 
 /// Divide `r`: `first` (proporção), `divider` (`divider` px centrados) e
@@ -647,9 +822,9 @@ test "dock: painéis (id + rect) e busca por id" {
     const nr = try dockPaneRects(&layout, types.Rect.init(0, 0, 400, 300), 8, &rects);
     try stdt.testing.expectEqual(n, nr);
     for (infos[0..n], rects[0..nr]) |info, r| try stdt.testing.expectEqual(r, info.rect);
-    try stdt.testing.expectEqual(@as(u16, 5), infos[0].pane);
-    try stdt.testing.expectEqual(@as(u16, 6), infos[1].pane);
-    try stdt.testing.expectEqual(@as(u16, 7), infos[2].pane);
+    try stdt.testing.expectEqual(@as(u16, 5), infos[0].pane());
+    try stdt.testing.expectEqual(@as(u16, 6), infos[1].pane());
+    try stdt.testing.expectEqual(@as(u16, 7), infos[2].pane());
 
     // `dockFindPane` acha o nó da folha; reforça o contrato de `hasPane`
     // já removido (remoção por id).
@@ -724,11 +899,11 @@ test "dock: mover e trocar painéis (drop)" {
     try stdt.testing.expectEqual(@as(usize, 3), dockLeafCount(&layout));
     var infos: [DockLayout.max_panes]DockPaneInfo = undefined;
     _ = try dockPanes(&layout, bounds, 0, &infos);
-    try stdt.testing.expectEqual(@as(u16, 2), infos[0].pane);
+    try stdt.testing.expectEqual(@as(u16, 2), infos[0].pane());
     try stdt.testing.expectEqual(types.Rect.init(0, 0, 100, 300), infos[0].rect);
-    try stdt.testing.expectEqual(@as(u16, 0), infos[1].pane);
+    try stdt.testing.expectEqual(@as(u16, 0), infos[1].pane());
     try stdt.testing.expectEqual(types.Rect.init(100, 0, 100, 300), infos[1].rect);
-    try stdt.testing.expectEqual(@as(u16, 1), infos[2].pane);
+    try stdt.testing.expectEqual(@as(u16, 1), infos[2].pane());
     try stdt.testing.expectEqual(types.Rect.init(200, 0, 200, 300), infos[2].rect);
 
     // Depois do movimento, o novo split tem ratio 0.5.
@@ -740,20 +915,28 @@ test "dock: mover e trocar painéis (drop)" {
     // Move para baixo do painel 1 (orientação horizontal, lado final).
     try stdt.testing.expect(dockMovePane(&layout, 2, 1, .bottom));
     _ = try dockPanes(&layout, bounds, 0, &infos);
-    try stdt.testing.expectEqual(@as(u16, 0), infos[0].pane);
-    try stdt.testing.expectEqual(@as(u16, 1), infos[1].pane);
-    try stdt.testing.expectEqual(@as(u16, 2), infos[2].pane);
+    try stdt.testing.expectEqual(@as(u16, 0), infos[0].pane());
+    try stdt.testing.expectEqual(@as(u16, 1), infos[1].pane());
+    try stdt.testing.expectEqual(@as(u16, 2), infos[2].pane());
 
-    // Centro ⇒ troca: `dockApplyDrop` delega para `dockSwapPanes`.
+    // Centro ⇒ vira aba do grupo alvo: `dockApplyDrop` chama `dockMergeTab`
+    // (remove o painel de origem e o anexa ativo ao grupo alvo).
     try stdt.testing.expect(dockApplyDrop(&layout, 0, 2, .center));
+    try stdt.testing.expectEqual(@as(usize, 2), dockLeafCount(&layout));
     _ = try dockPanes(&layout, bounds, 0, &infos);
-    try stdt.testing.expectEqual(@as(u16, 2), infos[0].pane);
-    try stdt.testing.expectEqual(@as(u16, 1), infos[1].pane);
-    try stdt.testing.expectEqual(@as(u16, 0), infos[2].pane);
-    try stdt.testing.expect(!dockApplyDrop(&layout, 2, 2, .center));
+    try stdt.testing.expectEqual(@as(u16, 1), infos[0].pane());
+    try stdt.testing.expectEqual(@as(u8, 1), infos[0].group.count);
+    try stdt.testing.expectEqual(@as(u16, 2), infos[1].group.tabs()[0]);
+    try stdt.testing.expectEqual(@as(u16, 0), infos[1].group.tabs()[1]);
+    try stdt.testing.expectEqual(@as(u8, 2), infos[1].group.count);
+    try stdt.testing.expectEqual(@as(u16, 0), infos[1].pane()); // 0 ficou ativo
+    try stdt.testing.expectEqual(@as(u8, 1), infos[1].group.active);
+    try stdt.testing.expect(!dockApplyDrop(&layout, 0, 0, .center)); // si mesmo
+    try stdt.testing.expect(!dockApplyDrop(&layout, 2, 0, .center)); // mesmo grupo
 
-    // Borda ⇒ redivide (via `dockApplyDrop`).
-    try stdt.testing.expect(dockApplyDrop(&layout, 0, 1, .top));
+    // Borda ⇒ redivide o grupo alvo (via `dockApplyDrop`); aqui o painel 2
+    // sai do grupo (que fica com o 0) e ganha grupo próprio acima do 1.
+    try stdt.testing.expect(dockApplyDrop(&layout, 2, 1, .top));
     try stdt.testing.expectEqual(@as(usize, 3), dockLeafCount(&layout));
 
     // Layout de um painel só: nada a mover.
@@ -774,4 +957,108 @@ test "dock: mover e trocar painéis (drop)" {
     try stdt.testing.expect(dockMovePane(&full, moved_pane, 0, .top));
     try stdt.testing.expectEqual(DockLayout.max_panes, dockLeafCount(&full));
     try stdt.testing.expect(full.len <= DockLayout.max_nodes);
+}
+
+test "dock: abas acopladas (grupo, ativo, add/remove/merge)" {
+    const stdt = @import("std");
+    const bounds = types.Rect.init(0, 0, 400, 300);
+
+    var layout: DockLayout = undefined;
+    dockInit(&layout, 0);
+    try stdt.testing.expectEqual(@as(u8, 1), dockGroup(&layout, 0).?.count);
+    try stdt.testing.expectEqual(@as(u16, 0), dockGroup(&layout, 0).?.activePane());
+    try stdt.testing.expectEqualSlices(u16, &.{0}, dockGroup(&layout, 0).?.tabs());
+    try stdt.testing.expectEqual(@as(?DockGroup, null), dockGroup(&layout, 9));
+
+    // Anexa abas (a última vira ativa); duplicata e grupo cheio são
+    // recusados (`max_tabs`).
+    try stdt.testing.expect(dockAddTab(&layout, 0, 1));
+    try stdt.testing.expect(dockAddTab(&layout, 0, 2));
+    try stdt.testing.expectEqual(@as(u16, 2), dockNodePane(&layout, 0).?);
+    try stdt.testing.expect(!dockAddTab(&layout, 0, 2));
+    try stdt.testing.expect(dockAddTab(&layout, 0, 3));
+    try stdt.testing.expect(dockGroup(&layout, 0).?.isFull());
+    try stdt.testing.expect(!dockAddTab(&layout, 0, 4));
+    try stdt.testing.expectEqual(@as(u8, 4), dockGroup(&layout, 0).?.count);
+
+    // Um grupo só: uma folha, `dockPanes` reporta as 4 abas em ordem.
+    var infos: [DockLayout.max_panes]DockPaneInfo = undefined;
+    try stdt.testing.expectEqual(@as(usize, 1), try dockPanes(&layout, bounds, 0, &infos));
+    try stdt.testing.expectEqual(@as(u8, 4), infos[0].group.count);
+    try stdt.testing.expectEqualSlices(u16, &.{ 0, 1, 2, 3 }, infos[0].group.tabs());
+    try stdt.testing.expectEqual(@as(usize, 1), dockLeafCount(&layout));
+
+    // `dockFindPane` acha qualquer aba; remover uma aba do meio ajusta o
+    // índice ativo e não mexe na árvore.
+    try stdt.testing.expectEqual(@as(?usize, 0), dockFindPane(&layout, 3));
+    try stdt.testing.expect(dockRemoveTab(&layout, 0, 1));
+    try stdt.testing.expectEqualSlices(u16, &.{ 0, 2, 3 }, dockGroup(&layout, 0).?.tabs());
+    try stdt.testing.expectEqual(@as(u16, 3), dockGroup(&layout, 0).?.activePane());
+    try stdt.testing.expectEqual(@as(usize, 1), dockLeafCount(&layout));
+    try stdt.testing.expect(!dockRemoveTab(&layout, 0, 99));
+
+    // Aba ativa: foras da faixa são recusados; válida muda o painel ativo.
+    try stdt.testing.expect(!dockSetActiveTab(&layout, 0, 9));
+    try stdt.testing.expect(!dockSetActiveTab(&layout, 7, 0));
+    try stdt.testing.expect(dockSetActiveTab(&layout, 0, 0));
+    try stdt.testing.expectEqual(@as(u16, 0), dockNodePane(&layout, 0).?);
+
+    // Grupo novo ao lado: a folha original (3 abas) fica num lado e o novo
+    // painel no outro.
+    const other = try dockSplit(&layout, 0, .vertical, 0.5, 9);
+    try stdt.testing.expectEqual(@as(usize, 2), dockLeafCount(&layout));
+    const g0 = dockFindPane(&layout, 0).?;
+    try stdt.testing.expectEqual(@as(u8, 3), dockGroup(&layout, g0).?.count);
+    try stdt.testing.expectEqual(@as(u8, 1), dockGroup(&layout, other).?.count);
+
+    // Merge (centro): a aba 2 sai do grupo de 0 e vira aba ativa do 9.
+    try stdt.testing.expect(dockMergeTab(&layout, 2, 9));
+    try stdt.testing.expectEqualSlices(u16, &.{ 0, 3 }, dockGroup(&layout, dockFindPane(&layout, 0).?).?.tabs());
+    try stdt.testing.expectEqualSlices(u16, &.{ 9, 2 }, dockGroup(&layout, dockFindPane(&layout, 9).?).?.tabs());
+    try stdt.testing.expectEqual(@as(u16, 2), dockNodePane(&layout, dockFindPane(&layout, 9).?).?);
+
+    // Mesmo grupo e painel inexistente são recusados.
+    try stdt.testing.expect(!dockMergeTab(&layout, 2, 9));
+    try stdt.testing.expect(!dockMergeTab(&layout, 99, 9));
+
+    // Merge que esvazia o grupo de origem dissolve a folha.
+    try stdt.testing.expect(dockMergeTab(&layout, 0, 9));
+    try stdt.testing.expect(dockMergeTab(&layout, 3, 9));
+    try stdt.testing.expectEqual(@as(usize, 1), dockLeafCount(&layout));
+    try stdt.testing.expectEqualSlices(u16, &.{ 9, 2, 0, 3 }, dockGroup(&layout, 0).?.tabs());
+    try stdt.testing.expect(!dockAddTab(&layout, 0, 5)); // cheio
+
+    // Alvo cheio ⇒ merge recusado sem efeito (nada é removido da origem).
+    var full2: DockLayout = undefined;
+    dockInit(&full2, 0);
+    _ = try dockSplit(&full2, 0, .vertical, 0.5, 1);
+    const f0 = dockFindPane(&full2, 0).?;
+    const f1 = dockFindPane(&full2, 1).?;
+    _ = dockAddTab(&full2, f0, 2);
+    _ = dockAddTab(&full2, f0, 3);
+    _ = dockAddTab(&full2, f0, 4);
+    try stdt.testing.expect(dockGroup(&full2, f0).?.isFull());
+    try stdt.testing.expect(!dockMergeTab(&full2, 1, 0));
+    try stdt.testing.expectEqual(@as(usize, 2), dockLeafCount(&full2));
+    try stdt.testing.expectEqualSlices(u16, &.{ 0, 2, 3, 4 }, dockGroup(&full2, f0).?.tabs());
+    try stdt.testing.expectEqualSlices(u16, &.{1}, dockGroup(&full2, f1).?.tabs());
+
+    // Trocar painéis entre grupos preserva a estrutura; no mesmo grupo é
+    // recusado (lá o que muda é a aba ativa).
+    var sw: DockLayout = undefined;
+    dockInit(&sw, 0);
+    _ = try dockSplit(&sw, 0, .vertical, 0.5, 1);
+    _ = dockAddTab(&sw, dockFindPane(&sw, 0).?, 2);
+    try stdt.testing.expect(dockSwapPanes(&sw, 0, 1));
+    try stdt.testing.expectEqualSlices(u16, &.{ 1, 2 }, dockGroup(&sw, dockFindPane(&sw, 1).?).?.tabs());
+    try stdt.testing.expectEqualSlices(u16, &.{0}, dockGroup(&sw, dockFindPane(&sw, 0).?).?.tabs());
+    try stdt.testing.expect(!dockSwapPanes(&sw, 1, 2));
+    try stdt.testing.expectEqual(@as(usize, 2), dockLeafCount(&sw));
+
+    // Última aba de um layout de um grupo só: recusado (não deixa vazio).
+    var one: DockLayout = undefined;
+    dockInit(&one, 7);
+    try stdt.testing.expect(!dockRemovePane(&one, 7));
+    try stdt.testing.expect(!dockRemoveTab(&one, 0, 7));
+    try stdt.testing.expectEqual(@as(usize, 1), dockLeafCount(&one));
 }

@@ -176,6 +176,7 @@ pub const SplitterResult = widgets.splitter.SplitterResult;
 pub const SplitterOrientation = widgets.splitter.SplitterOrientation;
 pub const SplitterPanes = widgets.splitter.SplitterPanes;
 pub const DockLayout = dock.layout.DockLayout;
+pub const DockGroup = dock.layout.DockGroup;
 pub const DockOrientation = dock.layout.DockOrientation;
 pub const DockError = dock.layout.DockError;
 pub const DockSplitInfo = dock.layout.DockSplitInfo;

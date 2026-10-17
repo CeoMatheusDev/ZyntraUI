@@ -7,6 +7,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `dock/layout`: **abas acopladas por grupo** (M78, docking passo 4a) — a
+  folha da árvore passa a ser um `DockGroup` (até `DockGroup.max_tabs = 4`
+  painéis, com aba ativa): `dockGroup`/`dockGroupMut` leem o grupo,
+  `dockAddTab`/`dockRemoveTab` anexam/removem abas (grupo vazio é dissolvido)
+  e `dockSetActiveTab` troca a aba visível. `dockPanes`/`DockPaneInfo` passam
+  a reportar o grupo (nó + `DockGroup` + rect, com `pane()` = painel ativo) e
+  `dockFindPane` acha qualquer aba; `dockRemovePane` remove a aba ou dissolve
+  o grupo e `dockSwapPanes` troca painéis entre grupos.
 - `dock/layout`: `dockPanes`/`DockPaneInfo` (id + rect dos painéis, pré-ordem)
   e `dockFindPane` (nó da folha por id); `dockPaneRects` passa a delegar em
   `dockPanes` (mesma geometria/erros) e `dockSplitOrdered` permite escolher em
@@ -14,8 +22,8 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - Re-acoplagem de painéis (M77, docking passo 4): `DockZone`
   (`left`/`right`/`top`/`bottom`/`center`), `dockDropZone` (zona sob o cursor,
   com `edge` clampado), `dockZoneRect` (realce), `dockMovePane` (remove o
-  painel e redivide o alvo na borda), `dockSwapPanes` (centro troca) e
-  `dockApplyDrop` (despacha).
+  painel e redivide o grupo alvo na borda), `dockMergeTab` (acopla o painel
+  como aba do grupo alvo, o "drop no centro") e `dockApplyDrop` (despacha).
 - `widgets/dock_view`: `DockViewOptions.dragging` (painel arrastado pelo
   chamador) habilita o **drop de painéis** — `dockView` resolve a zona sob o
   cursor, desenha o realce e aplica o drop no release (`DockViewResult.drop`

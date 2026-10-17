@@ -9,7 +9,8 @@
 //! M77 (Docking, passo 4) acrescenta o **drop de painéis**: o chamador
 //! informa qual painel está arrastando (`DockViewOptions.dragging`) e
 //! `dockView` resolve a zona sob o cursor (borda ⇒ redivide, centro ⇒
-//! troca), desenha o realce e aplica o drop no release
+//! acopla como aba do grupo alvo), desenha o realce e aplica o drop no
+//! release
 //! (`dockApplyDrop`), devolvendo `dropped` para o chamador limpar o
 //! estado de arraste. O gesto de origem (ex.: press no cabeçalho de um
 //! `widgets/panel`) é do chamador.
@@ -155,12 +156,12 @@ pub fn dockView(
         if (dock_mod.dockFindPane(layout, dragged) != null) {
             if (ctx.mouse_pos) |p| {
                 for (infos[0..res.pane_count]) |info| {
-                    if (info.pane == dragged) continue;
+                    if (info.pane() == dragged) continue;
                     if (!info.rect.contains(p)) continue;
                     const zone = dock_mod.dockDropZone(info.rect, p, options.edge_frac);
                     drop = .{
                         .pane = dragged,
-                        .target = info.pane,
+                        .target = info.pane(),
                         .zone = zone,
                         .rect = dock_mod.dockZoneRect(info.rect, zone),
                     };
@@ -550,7 +551,8 @@ test "dockView: drop de painel (borda redivide, centro troca)" {
     try stdt.testing.expectEqual(@as(usize, 3), r3.pane_count);
     ctx.endFrame();
 
-    // Zona `.center` ⇒ troca os painéis de lugar (a geometria não muda).
+    // Zona `.center` ⇒ acopla como aba do grupo alvo: os dois painéis
+    // passam a dividir um grupo (um só rect, com 2 abas).
     var l2: dock_mod.DockLayout = undefined;
     dock_mod.dockInit(&l2, 0);
     _ = try dock_mod.dockSplit(&l2, 0, .horizontal, 0.5, 1);
@@ -561,10 +563,14 @@ test "dockView: drop de painel (borda redivide, centro troca)" {
     });
     const r4 = try dockView(&ctx, id, &l2, bounds, &panes, style, .{ .dragging = 1 });
     try stdt.testing.expectEqual(dock_mod.DockZone.center, r4.dropped.?.zone);
+    try stdt.testing.expectEqual(@as(u16, 0), r4.dropped.?.target);
     try stdt.testing.expect(r4.changed);
+    try stdt.testing.expectEqual(@as(usize, 1), r4.pane_count);
+    try stdt.testing.expectEqual(bounds, panes[0]);
     var infos: [dock_mod.DockLayout.max_panes]dock_mod.DockPaneInfo = undefined;
-    _ = try dock_mod.dockPanes(&l2, bounds, style.divider, &infos);
-    try stdt.testing.expectEqual(@as(u16, 1), infos[0].pane);
-    try stdt.testing.expectEqual(@as(u16, 0), infos[1].pane);
+    try stdt.testing.expectEqual(@as(usize, 1), try dock_mod.dockPanes(&l2, bounds, style.divider, &infos));
+    try stdt.testing.expectEqual(@as(u16, 1), infos[0].pane()); // 1 ficou ativo
+    try stdt.testing.expectEqualSlices(u16, &.{ 0, 1 }, infos[0].group.tabs());
+    try stdt.testing.expectEqual(@as(u8, 2), infos[0].group.count);
     ctx.endFrame();
 }
