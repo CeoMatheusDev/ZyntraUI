@@ -156,22 +156,24 @@ pub fn beginTreeView(
 
     // Click seleciona ou alterna expansor
     if (fm.pressed_pos) |p| {
-        const rel_y = p.y - bounds.y + scroll_offset.*;
-        const idx: usize = @as(usize, @intFromFloat(@floor(rel_y / style.item_height)));
-        if (idx < visible_count) {
-            const flat_node = treeViewFind(items, idx).?;
-            // Verifica se clicou no expansor
-            const expander_x = bounds.x + @as(f32, @floatFromInt(flat_node.depth)) * style.indent;
-            const expander_rect = types.Rect.init(expander_x, bounds.y + @as(f32, @floatFromInt(idx)) * style.item_height - scroll_offset.*, style.expander_size, style.expander_size);
-            if (flat_node.has_children and expander_rect.contains(p)) {
-                // Alterna expansão direto no item (ponteiro exato; sem
-                // busca ambígua por (profundidade, índice do pai)).
-                flat_node.item.expanded = !flat_node.item.expanded;
-                res.toggled_index = idx;
-            } else {
-                res.changed = selected.* != idx;
-                selected.* = idx;
-                res.selected = idx;
+        if (bounds.contains(p)) {
+            const rel_y = p.y - bounds.y + scroll_offset.*;
+            const idx: usize = @as(usize, @intFromFloat(@floor(rel_y / style.item_height)));
+            if (idx < visible_count) {
+                const flat_node = treeViewFind(items, idx).?;
+                // Verifica se clicou no expansor
+                const expander_x = bounds.x + @as(f32, @floatFromInt(flat_node.depth)) * style.indent;
+                const expander_rect = types.Rect.init(expander_x, bounds.y + @as(f32, @floatFromInt(idx)) * style.item_height - scroll_offset.*, style.expander_size, style.expander_size);
+                if (flat_node.has_children and expander_rect.contains(p)) {
+                    // Alterna expansão direto no item (ponteiro exato; sem
+                    // busca ambígua por (profundidade, índice do pai)).
+                    flat_node.item.expanded = !flat_node.item.expanded;
+                    res.toggled_index = idx;
+                } else {
+                    res.changed = selected.* != idx;
+                    selected.* = idx;
+                    res.selected = idx;
+                }
             }
         }
     }
