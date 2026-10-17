@@ -929,7 +929,7 @@ test "TreeView golden G12: wheel preserva intervalo de indices anterior" {
     ctx.endFrame();
 }
 
-test "TreeView golden G13: auto-scroll nao recalcula intervalo desenhado" {
+test "TreeView golden G13: auto-scroll recalcula intervalo desenhado" {
     const testing = std.testing;
     const style = style_mod.Theme.darkDefault().treeViewStyle();
     var ctx = try context_mod.Context.init(testing.allocator, .{});
@@ -956,18 +956,20 @@ test "TreeView golden G13: auto-scroll nao recalcula intervalo desenhado" {
     try testing.expectEqual(@as(usize, 5), result.selected);
     try testing.expectEqual(@as(f32, 96), scroll);
     try testing.expectEqual(@as(f32, 96), result.scroll_offset);
+    // A janela desenhada é recalculada após o auto-scroll do teclado:
+    // scroll no teto (96) e viewport de 48 px (2 linhas de 24 px)
+    // desenham apenas as linhas 4 e 5 ("e" e "f").
     var texts: usize = 0;
     for (ctx.drawCommands()) |cmd| {
         if (cmd != .text) continue;
         switch (texts) {
-            0 => try testing.expectEqualStrings("a", ctx.draw.textOf(cmd)),
-            1 => try testing.expectEqualStrings("b", ctx.draw.textOf(cmd)),
-            2 => try testing.expectEqualStrings("c", ctx.draw.textOf(cmd)),
+            0 => try testing.expectEqualStrings("e", ctx.draw.textOf(cmd)),
+            1 => try testing.expectEqualStrings("f", ctx.draw.textOf(cmd)),
             else => return error.InvalidArgument,
         }
         texts += 1;
     }
-    try testing.expectEqual(@as(usize, 3), texts);
+    try testing.expectEqual(@as(usize, 2), texts);
     ctx.endFrame();
 }
 
@@ -1153,7 +1155,7 @@ test "TreeView wheel scroll updates offset without changing selection" {
     ctx.endFrame();
 }
 
-test "TreeView ignores non-finite wheel delta" {
+test "TreeView wheel não-finito é rejeitado na fronteira (sem tocar scroll)" {
     const testing = std.testing;
     const style = style_mod.Theme.darkDefault().treeViewStyle();
     var ctx = try context_mod.Context.init(testing.allocator, .{});
@@ -1168,12 +1170,16 @@ test "TreeView ignores non-finite wheel delta" {
     var selected: usize = 0;
     var scroll: f32 = 0;
 
+    // `Event.isValid` (M49) rejeita delta não-finito antes de entrar na
+    // fila, então o widget nunca o vê e o offset permanece intacto. A
+    // guarda interna de `beginTreeView` segue como defesa em profundidade.
     ctx.beginFrame();
-    try ctx.pushEvent(.{ .mouse_wheel = .{
+    try testing.expectError(error.InvalidEvent, ctx.pushEvent(.{ .mouse_wheel = .{
         .dx = 0,
         .dy = std.math.nan(f32),
         .pos = types.Vec2.init(10, 10),
-    } });
+    } }));
+
     const result = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
     try testing.expectEqual(@as(f32, 0), scroll);
     try testing.expectEqual(@as(f32, 0), result.scroll_offset);
