@@ -86,3 +86,23 @@ test "progress rejeita bounds não-finitos" {
     try stdt.testing.expectEqual(before, ctx.drawCommands().len);
     ctx.endFrame();
 }
+
+test "progress rejeita frac não-finito (inf e -inf)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().progressStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 20);
+
+    // Coerente com slider/spinner: escalar não-finito é rejeitado na
+    // entrada (nunca clampado) — inf não pode virar preenchimento válido
+    // nem NaN no `t` clampado.
+    ctx.beginFrame();
+    const before = ctx.drawCommands().len;
+    try stdt.testing.expectError(error.InvalidArgument, progress(&ctx, bounds, std.math.inf(f32), style));
+    try stdt.testing.expectError(error.InvalidArgument, progress(&ctx, bounds, -std.math.inf(f32), style));
+    try stdt.testing.expectError(error.InvalidArgument, progress(&ctx, bounds, std.math.nan(f32), style));
+    try stdt.testing.expectEqual(before, ctx.drawCommands().len);
+    ctx.endFrame();
+}

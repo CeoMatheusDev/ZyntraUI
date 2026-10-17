@@ -14,7 +14,8 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   Adicionados testes de regressão para pré-ordem, ramos recolhidos,
   alternâncias consecutivas e consistência dos snapshots. A alteração
   reduz a memória auxiliar proporcional aos nós visíveis, mas pode
-  aumentar o custo de CPU por consultas repetidas; benchmark pendente.
+  aumentar o custo de CPU por consultas repetidas; benchmark adicionado
+  (fase `treeview` do `zig build run-bench`).
 
 ### Adicionado
 
@@ -98,6 +99,20 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `README.md` reescrito (M76): estrutura profissional (princípios,
   tabela dos 25 widgets públicos, arquitetura, exemplos, versionamento)
   sem inventar APIs; mesma tag de fetch e instruções verificadas.
+
+### Corrigido
+
+- `widgets/tree_view`: janela de desenho derivada do offset pós-wheel e
+  pós-auto-scroll do teclado (antes podia usar offset obsoleto e desenhar
+  o intervalo errado); clique e hover limitados ao widget (posição fora
+  dos limites não indexa linha nem seleciona); colapso por mouse/teclado
+  agora clampa a seleção e reporta `changed`; delta de wheel não-finito
+  ignorado; thumb da scrollbar usa a faixa pós-toggle (S2) — a faixa S1
+  podia ser zero após expansão por teclado e gerar `0/0` (thumb NaN →
+  `InvalidCommand`), e clampado ao viewport curto; snapshot visível vazio
+  não indexa. Cobertura de regressão nova para cada caso.
+- `widgets/progress`: cobertura nova para `frac` não-finito (`inf`/`-inf`
+  e `NaN` rejeitados, coerente com `slider`/`spinner`).
 
 ## [1.21.1] - 2026-10-16
 

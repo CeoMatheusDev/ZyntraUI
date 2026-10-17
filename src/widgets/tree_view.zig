@@ -369,7 +369,12 @@ pub fn beginTreeView(
     if (content_h > bounds.h) {
         // O mínimo visual de 20 px não pode ultrapassar o próprio viewport.
         const thumb_h = @min(bounds.h, @max(20, bounds.h * bounds.h / content_h));
-        const thumb_y = bounds.y + (bounds.h - thumb_h) * (scroll_offset.* / max_scroll);
+        // Faixa de rolagem do conteúdo pós-toggle (S2). A `max_scroll` de S1
+        // pode ser zero quando o conteúdo só passou a exceder o viewport após
+        // uma expansão por teclado; dividir por ela daria 0/0 (thumb NaN →
+        // `InvalidCommand`). Aqui `content_h > bounds.h`, então a faixa > 0.
+        const scroll_range = content_h - bounds.h;
+        const thumb_y = bounds.y + (bounds.h - thumb_h) * (scroll_offset.* / scroll_range);
         const thumb = types.Rect.init(bounds.x + bounds.w - 4, thumb_y, 4, thumb_h);
         ctx.draw.rectFilled(ctx.allocator, thumb, style.border) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
@@ -1318,6 +1323,48 @@ test "TreeView scrollbar thumb stays within a short viewport" {
                     try testing.expect(rect.rect.h <= bounds.h);
                     try testing.expect(rect.rect.y >= bounds.y);
                     try testing.expect(rect.rect.y + rect.rect.h <= bounds.y + bounds.h);
+                }
+            },
+            else => {},
+        }
+    }
+    try testing.expect(found_thumb);
+    ctx.endFrame();
+}
+
+test "TreeView expansão por teclado não gera thumb NaN (viewport que cabia)" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+
+    var children: [20]TreeItem = undefined;
+    for (&children) |*c| c.* = .{ .label = "child", .children = &[_]TreeItem{} };
+    var items = [_]TreeItem{
+        .{ .label = "root", .children = &children, .expanded = false },
+    };
+    // O único nó recolhido cabe no viewport (1*24 <= 200): max_scroll S1 = 0.
+    const bounds = types.Rect.init(0, 0, 200, 200);
+    const id = id_mod.Id.fromString("test:tree-expand-nan-thumb");
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    ctx.focus_owner = id;
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+
+    var found_thumb = false;
+    for (ctx.drawCommands()) |cmd| {
+        switch (cmd) {
+            .rect_filled => |rect| {
+                if (rect.rect.x == bounds.x + bounds.w - 4 and rect.rect.w == 4) {
+                    found_thumb = true;
+                    // A divisão da scrollbar (S2) não pode ser por zero
+                    // quando a expansão faz o conteúdo exceder o viewport
+                    // partindo de um estado que já cabia.
+                    try testing.expect(std.math.isFinite(rect.rect.y));
+                    try testing.expect(std.math.isFinite(rect.rect.h));
                 }
             },
             else => {},
