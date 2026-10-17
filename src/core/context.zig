@@ -87,6 +87,11 @@ pub const Context = struct {
     /// registrados no frame e resultado do último solto. O `beginFrame`
     /// resolve o solto do frame anterior. Ver `dnd/service`.
     dnd: dnd_mod.State = .{},
+    /// Rectângulo sujo acumulado neste frame. Começa vazio; widgets
+    /// chamam `mark_dirty` para indicar áreas que foram modificadas.
+    /// No `beginFrame` é limpo; o renderizador pode usá-lo para
+    /// restringir o redesenho a estas regiões.
+    dirty_rect: types.Rect = types.Rect.init(0, 0, 0, 0),
 
     const Self = @This();
 
@@ -113,6 +118,7 @@ pub const Context = struct {
             .frame_index = 0,
             .state = .idle,
             .events = event_mod.EventQueue.initEmpty(),
+            .dirty_rect = types.Rect.init(0, 0, 0, 0),
             .draw = draw_mod.DrawList.initEmpty(),
             .focusables = .empty,
         };
@@ -133,6 +139,7 @@ pub const Context = struct {
         self.focus_owner = null;
         self.pending_focus_advance = null;
         self.dnd = .{};
+        self.dirty_rect = types.Rect.init(0, 0, 0, 0);
     }
 
     /// Inicia um novo frame: aplica avanço de foco pendente (sobre o
@@ -150,6 +157,7 @@ pub const Context = struct {
         self.events.clearRetainingCapacity();
         self.draw.clearRetainingCapacity();
         self.focusables.clearRetainingCapacity();
+        self.clear_dirty();
     }
 
     /// Encerra o frame atual e avança `frame_index` com wrap seguro.
@@ -193,6 +201,27 @@ pub const Context = struct {
     /// Libera o foco de teclado (ex.: click fora, troca de tela).
     pub fn clearFocus(self: *Self) void {
         self.focus_owner = null;
+    }
+
+    /// Marca `rect` como sujo para este frame. As chamadas sucessivas
+    /// fazem union do rectângulo (a área cresce para cobrir todas as
+    /// regiões modificadas).
+    pub fn mark_dirty(self: *Self, rect: types.Rect) void {
+        if (!self.dirty_rect.w > 0 or !self.dirty_rect.h > 0) {
+            self.dirty_rect = rect;
+        } else {
+            self.dirty_rect = types.Rect{
+                .x = @min(self.dirty_rect.x, rect.x),
+                .y = @min(self.dirty_rect.y, rect.y),
+                .w = @max(self.dirty_rect.x + self.dirty_rect.w, rect.x + rect.w) - @min(self.dirty_rect.x, rect.x),
+                .h = @max(self.dirty_rect.y + self.dirty_rect.h, rect.y + rect.h) - @min(self.dirty_rect.y, rect.y),
+            };
+        }
+    }
+
+    /// Limpa o rectângulo sujo (chamado no `beginFrame`).
+    pub fn clear_dirty(self: *Self) void {
+        self.dirty_rect = types.Rect.init(0, 0, 0, 0);
     }
 
     pub fn hasFocus(self: *const Self, id: id_mod.Id) bool {
