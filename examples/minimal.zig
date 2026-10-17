@@ -966,4 +966,35 @@ pub fn main() !void {
             textarea_mod.textAreaLineCount(&tc_buf, tc_len),
         },
     );
+
+    // Texto completo (M89): quebra suave no textarea — linhas longas quebram
+    // na largura util (sem rolagem horizontal) e Up/Down navegam por linha
+    // VISUAL. Aqui: 4 colunas por linha (largura = 4 * advance), caret no
+    // fim e a area mostra ~3 linhas visuais (o resto rola).
+    const ws_style = theme.textInputStyle();
+    const ws_lh = font.lineHeight();
+    const ws_bounds = zyntra_ui.Rect.init(16, 700, 8 + 4 * font.advance, 8 + 3 * ws_lh);
+    var ws_buf: [64]u8 = undefined;
+    const ws_text = "quebra suave de linhas longas";
+    @memcpy(ws_buf[0..ws_text.len], ws_text);
+    var ws_len: usize = ws_text.len;
+    var ws_cursor: usize = ws_text.len;
+    var ws_anchor: usize = ws_text.len;
+    var ws_scroll: f32 = 0;
+    const ws_id = zyntra_ui.Id.fromString("examples/m89:ta");
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(20, 704) },
+    });
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try textarea_mod.textAreaWrapped(&ctx, ws_id, ws_bounds, &ws_buf, &ws_len, &ws_cursor, &ws_anchor, &ws_scroll, font, ws_style);
+    var ws_rows: usize = 0;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .text) ws_rows += 1;
+    }
+    ctx.endFrame();
+    std.debug.print(
+        "m89 wrap rows={d} scroll={d} len={d} logical={d}\n",
+        .{ ws_rows, ws_scroll, ws_len, textarea_mod.textAreaLineCount(&ws_buf, ws_len) },
+    );
 }

@@ -21,12 +21,16 @@
 //! - Rolagem: vertical em `scroll_y` (chamador), acompanhando o caret;
 //!   horizontal automática e derivada (sem estado) para manter o caret
 //!   visível na linha corrente.
+//! - Quebra suave (M89, aditivo): linhas longas quebram na largura útil
+//!   por codepoint (sem rolagem horizontal) nas variantes `textAreaWrapped`,
+//!   `textAreaWrappedHistory` e `textAreaWrappedClipboard`; ↑/↓,
+//!   `Home`/`End` e `PageUp`/`PageDown` passam a operar por linha VISUAL
+//!   (`advance` uniforme ⇒ `max_cols = floor(útil_ws / advance)`).
 //! - Desenho: caixa (`TextInputStyle`) + seleção por linha + textos +
 //!   caret, com clip pareado na área útil.
-//! Escopo v1: **sem quebra suave** (linhas longas sofrem rolagem
-//! horizontal derivada, não wrap). Reusa `TextInputStyle` (mesma
-//! linguagem visual de `text_input`) — sem alterar `text_input.zig`.
-//! `id` não-nulo obrigatório.
+//! Sem quebra suave, linhas longas sofrem rolagem horizontal derivada
+//! (não wrap). Reusa `TextInputStyle` (mesma linguagem visual de
+//! `text_input`) — sem alterar `text_input.zig`. `id` não-nulo obrigatório.
 
 const std = @import("std");
 const types = @import("../core/types.zig");
@@ -115,12 +119,6 @@ fn lineOfOffset(buf: []const u8, offset: usize) usize {
     return line;
 }
 
-fn offsetForLineCol(buf: []const u8, len: usize, line: usize, col: usize) usize {
-    const ls = lineStart(buf, len, line);
-    const le = lineEnd(buf, len, line);
-    return ls + @min(col, le - ls);
-}
-
 fn prevCodepoint(buf: []const u8, pos: usize) usize {
     var i = pos;
     if (i == 0) return 0;
@@ -203,6 +201,133 @@ fn colAtX(font: metrics_mod.FontMetrics, line_text: []const u8, x: f32) usize {
     return i;
 }
 
+// ---- Quebra suave (M89) ------------------------------------------------
+//
+// O caret e o desenho trabalham por CODPOINT com `advance` uniforme
+// (mesmo modelo de `colAtX`/`measure`), então a quebra é por colunas:
+// `max_cols` codepoints por linha visual (>= 1 garante progresso).
+// `max_cols == 0` desliga a quebra — as funções abaixo degeneram para as
+// linhas lógicas (`lineStart`/`lineEnd`), deixando um único caminho.
+
+/// Colunas de codepoint que cabem em `width`. Retorna 0 quando a quebra
+/// não se aplica (largura/`advance` degenerados, largura não-finita ou
+/// absurda) — nesse caso o chamador usa 1 linha visual por linha lógica.
+fn wrapCols(font: metrics_mod.FontMetrics, width: f32) usize {
+    if (!(font.advance > 0) or !std.math.isFinite(font.advance)) return 0;
+    if (!std.math.isFinite(width) or width <= 0) return 0;
+    const cols = @floor(width / font.advance);
+    if (cols < 1) return 1;
+    if (cols >= 1.0e9) return 0; // largura absurda: trata como sem quebra
+    return @intFromFloat(cols);
+}
+
+/// Nº de linhas VISUAIS de `buf[0..len]` (>= 1): `'\n'` força quebra
+/// (último `'\n'` gera linha final vazia) e `max_cols > 0` quebra o
+/// excesso por codepoint. `max_cols == 0` == `textAreaLineCount`.
+fn visualCount(buf: []const u8, len: usize, max_cols: usize) usize {
+    const end = @min(len, buf.len);
+    var n: usize = 1;
+    var cols: usize = 0;
+    var i: usize = 0;
+    while (i < end) {
+        const d = metrics_mod.decodeOne(buf[i..end]) catch {
+            i += 1;
+            continue;
+        };
+        if (d.codepoint == '\n') {
+            n += 1;
+            cols = 0;
+            i += d.len;
+            continue;
+        }
+        if (max_cols > 0 and cols == max_cols) {
+            n += 1;
+            cols = 0;
+        }
+        cols += 1;
+        i += d.len;
+    }
+    return n;
+}
+
+/// Faixa `[start, end)` da linha visual `index` (sem o `'\n'` que a
+/// termina). Índice fora da faixa satura na última linha visual.
+fn visualLineAt(buf: []const u8, len: usize, max_cols: usize, index: usize) struct { start: usize, end: usize } {
+    const end = @min(len, buf.len);
+    var idx: usize = 0;
+    var seg: usize = 0;
+    var cols: usize = 0;
+    var i: usize = 0;
+    while (i < end) {
+        const d = metrics_mod.decodeOne(buf[i..end]) catch {
+            i += 1;
+            continue;
+        };
+        if (d.codepoint == '\n') {
+            if (idx == index) return .{ .start = seg, .end = i };
+            idx += 1;
+            cols = 0;
+            i += d.len;
+            seg = i;
+            continue;
+        }
+        if (max_cols > 0 and cols == max_cols) {
+            if (idx == index) return .{ .start = seg, .end = i };
+            idx += 1;
+            cols = 0;
+            seg = i;
+        }
+        cols += 1;
+        i += d.len;
+    }
+    return .{ .start = seg, .end = end };
+}
+
+/// Posição visual de `offset`: índice da linha visual, byte inicial dela
+/// e coluna (codepoints) dentro dela (para posicionar o caret).
+fn visualPosOf(buf: []const u8, len: usize, max_cols: usize, offset: usize) struct { index: usize, start: usize, col: usize } {
+    const end = @min(len, buf.len);
+    const off = @min(offset, end);
+    var idx: usize = 0;
+    var seg: usize = 0;
+    var cols: usize = 0;
+    var i: usize = 0;
+    while (i < off) {
+        const d = metrics_mod.decodeOne(buf[i..end]) catch {
+            i += 1;
+            continue;
+        };
+        if (d.codepoint == '\n') {
+            idx += 1;
+            cols = 0;
+            i += d.len;
+            seg = i;
+            continue;
+        }
+        if (max_cols > 0 and cols == max_cols) {
+            idx += 1;
+            cols = 0;
+            seg = i;
+        }
+        cols += 1;
+        i += d.len;
+    }
+    return .{ .index = idx, .start = seg, .col = cols };
+}
+
+/// Byte offset do `col`-ésimo codepoint de `buf[start..end]` (clampado a
+/// `end`): usado pela navegação vertical para preservar a coluna.
+fn colByteOffset(buf: []const u8, start: usize, end: usize, col: usize) usize {
+    var i = start;
+    var c: usize = 0;
+    while (i < end and c < col) {
+        const d = metrics_mod.decodeOne(buf[i..end]) catch break;
+        i += d.len;
+        c += 1;
+    }
+    return @min(i, end);
+}
+
 /// Área de texto multilinha (M65): seleção e navegação, sem histórico.
 pub fn textArea(
     ctx: *context_mod.Context,
@@ -216,7 +341,7 @@ pub fn textArea(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextAreaResult {
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null, false);
 }
 
 /// Área de texto com undo/redo (M88, aditivo): `Ctrl+Z` desfaz, `Ctrl+Y`
@@ -240,7 +365,7 @@ pub fn textAreaHistory(
 ) context_mod.ContextError!TextAreaResult {
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, null);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, null, false);
 }
 
 /// Área de texto completa (M88, aditivo): undo/redo + área de
@@ -266,7 +391,71 @@ pub fn textAreaClipboard(
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
     if (clip.len > clip.buf.len) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, clip);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, clip, false);
+}
+
+/// Área de texto com **quebra suave** (M89, aditivo): linhas longas
+/// quebram na largura útil (sem rolagem horizontal) e `↑`/`↓`,
+/// `Home`/`End` operam por linha VISUAL. Sem histórico/clipboard.
+pub fn textAreaWrapped(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    scroll_y: *f32,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextAreaResult {
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null, true);
+}
+
+/// Quebra suave (M89) + undo/redo: `Ctrl+Z` desfaz, `Ctrl+Y`/
+/// `Ctrl+Shift+Z` refazem (mesmas regras de `textAreaHistory`).
+pub fn textAreaWrappedHistory(
+    comptime S: usize,
+    comptime B: usize,
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    scroll_y: *f32,
+    hist: *TextHistory(S, B),
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextAreaResult {
+    if (buffer.len > B) return error.InvalidArgument;
+    if (anchor.* > len.*) return error.InvalidArgument;
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, null, true);
+}
+
+/// Quebra suave (M89) + undo/redo + área de transferência
+/// (`Ctrl+C/X/V`): a variante completa de `textarea`.
+pub fn textAreaWrappedClipboard(
+    comptime S: usize,
+    comptime B: usize,
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    scroll_y: *f32,
+    hist: *TextHistory(S, B),
+    clip: *Clipboard,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextAreaResult {
+    if (buffer.len > B) return error.InvalidArgument;
+    if (anchor.* > len.*) return error.InvalidArgument;
+    if (clip.len > clip.buf.len) return error.InvalidArgument;
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, clip, true);
 }
 
 fn textAreaInner(
@@ -283,6 +472,7 @@ fn textAreaInner(
     Hist: type,
     hist: Hist,
     clip: ?*Clipboard,
+    wrap: bool,
 ) context_mod.ContextError!TextAreaResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
@@ -315,15 +505,20 @@ fn textAreaInner(
         }
     }
 
-    // Offset horizontal derivado (mantém o caret visível) — usado no
-    // desenho e no mapeamento do ponto de clique.
-    const nlines0 = textAreaLineCount(buffer, len.*);
-    const caret_line0 = lineOfOffset(buffer, @min(cursor.*, len.*));
-    const caret_ls0 = lineStart(buffer, len.*, caret_line0);
-    const caret_le0 = lineEnd(buffer, len.*, caret_line0);
-    const caret_pre_w = (metrics_mod.measure(buffer[caret_ls0..@min(cursor.*, caret_le0)], font) catch metrics_mod.TextMetrics{}).width;
-    const caret_full_w = (metrics_mod.measure(buffer[caret_ls0..caret_le0], font) catch metrics_mod.TextMetrics{}).width;
-    const xoff: f32 = if (caret_full_w <= vis_w) 0 else std.math.clamp(caret_pre_w - vis_w, 0, caret_full_w - vis_w);
+    // Quebra suave (M89): `wrap_cols` codepoints por linha visual; 0 =
+    // sem quebra (1 linha visual por linha lógica). Sob quebra não há
+    // rolagem horizontal. O offset horizontal derivado (mantém o caret
+    // visível) só se aplica sem quebra.
+    const wrap_cols: usize = if (wrap) wrapCols(font, vis_w) else 0;
+    const nlines0 = visualCount(buffer, len.*, wrap_cols);
+    const xoff: f32 = if (wrap_cols != 0) 0 else blk: {
+        const caret_line0 = lineOfOffset(buffer, @min(cursor.*, len.*));
+        const caret_ls0 = lineStart(buffer, len.*, caret_line0);
+        const caret_le0 = lineEnd(buffer, len.*, caret_line0);
+        const caret_pre_w = (metrics_mod.measure(buffer[caret_ls0..@min(cursor.*, caret_le0)], font) catch metrics_mod.TextMetrics{}).width;
+        const caret_full_w = (metrics_mod.measure(buffer[caret_ls0..caret_le0], font) catch metrics_mod.TextMetrics{}).width;
+        break :blk if (caret_full_w <= vis_w) 0 else std.math.clamp(caret_pre_w - vis_w, 0, caret_full_w - vis_w);
+    };
     const text_x = bounds.x + pad - xoff;
     const text_top = bounds.y + pad;
 
@@ -337,11 +532,10 @@ fn textAreaInner(
         if (use_hist and !had_focus) hist.closeGroup();
         if (ctx.press_owner == null) {
             if (fm.pressed_pos) |pp| {
-                const line = lineAtY(pp.y, text_top, line_h, nlines0);
-                const ls = lineStart(buffer, len.*, line);
-                const le = lineEnd(buffer, len.*, line);
-                const col = colAtX(font, buffer[ls..le], pp.x - text_x);
-                const at = @min(ls + col, len.*);
+                const vline = lineAtY(pp.y, text_top, line_h, nlines0);
+                const seg = visualLineAt(buffer, len.*, wrap_cols, vline);
+                const col = colAtX(font, buffer[seg.start..seg.end], pp.x - text_x);
+                const at = @min(seg.start + col, len.*);
                 cursor.* = at;
                 anchor.* = at;
                 moved = true;
@@ -352,11 +546,10 @@ fn textAreaInner(
     // Arrasto: o cursor segue o mouse; a âncora fica (extende a seleção).
     if (ctx.press_owner == id and ctx.mouse_down_left and mouse_fresh) {
         if (ctx.mouse_pos) |mp| {
-            const line = lineAtY(mp.y, text_top, line_h, nlines0);
-            const ls = lineStart(buffer, len.*, line);
-            const le = lineEnd(buffer, len.*, line);
-            const col = colAtX(font, buffer[ls..le], mp.x - text_x);
-            cursor.* = @min(ls + col, len.*);
+            const vline = lineAtY(mp.y, text_top, line_h, nlines0);
+            const seg = visualLineAt(buffer, len.*, wrap_cols, vline);
+            const col = colAtX(font, buffer[seg.start..seg.end], mp.x - text_x);
+            cursor.* = @min(seg.start + col, len.*);
             moved = true;
         }
     }
@@ -554,15 +747,15 @@ fn textAreaInner(
                         },
                         .up, .down => {
                             if (use_hist) hist.closeGroup();
-                            const cur_line = lineOfOffset(buffer, cursor.*);
-                            const cur_col = cursor.* - lineStart(buffer, len.*, cur_line);
-                            var target = cur_line;
-                            if (k.key == .up and cur_line > 0) {
-                                target = cur_line - 1;
-                            } else if (k.key == .down and cur_line + 1 < textAreaLineCount(buffer, len.*)) {
-                                target = cur_line + 1;
+                            const cur = visualPosOf(buffer, len.*, wrap_cols, cursor.*);
+                            var target = cur.index;
+                            if (k.key == .up and cur.index > 0) {
+                                target = cur.index - 1;
+                            } else if (k.key == .down and cur.index + 1 < visualCount(buffer, len.*, wrap_cols)) {
+                                target = cur.index + 1;
                             }
-                            cursor.* = offsetForLineCol(buffer, len.*, target, cur_col);
+                            const seg = visualLineAt(buffer, len.*, wrap_cols, target);
+                            cursor.* = colByteOffset(buffer, seg.start, seg.end, cur.col);
                             if (!extend) anchor.* = cursor.*;
                             moved = true;
                         },
@@ -572,16 +765,15 @@ fn textAreaInner(
                                 @max(1, @as(usize, @intFromFloat(@floor(view_h / line_h))))
                             else
                                 1;
-                            const cur_line = lineOfOffset(buffer, cursor.*);
-                            const cur_col = cursor.* - lineStart(buffer, len.*, cur_line);
-                            const total = textAreaLineCount(buffer, len.*);
-                            var target = cur_line;
+                            const cur = visualPosOf(buffer, len.*, wrap_cols, cursor.*);
+                            var target = cur.index;
                             if (k.key == .page_up) {
-                                target = if (cur_line > page) cur_line - page else 0;
+                                target = if (cur.index > page) cur.index - page else 0;
                             } else {
-                                target = @min(total - 1, cur_line + page);
+                                target = @min(visualCount(buffer, len.*, wrap_cols) - 1, cur.index + page);
                             }
-                            cursor.* = offsetForLineCol(buffer, len.*, target, cur_col);
+                            const seg = visualLineAt(buffer, len.*, wrap_cols, target);
+                            cursor.* = colByteOffset(buffer, seg.start, seg.end, cur.col);
                             if (!extend) anchor.* = cursor.*;
                             moved = true;
                         },
@@ -589,6 +781,8 @@ fn textAreaInner(
                             if (use_hist) hist.closeGroup();
                             if (k.modifiers.ctrl) {
                                 cursor.* = 0;
+                            } else if (wrap_cols != 0) {
+                                cursor.* = visualPosOf(buffer, len.*, wrap_cols, cursor.*).start;
                             } else {
                                 const line = lineOfOffset(buffer, cursor.*);
                                 cursor.* = lineStart(buffer, len.*, line);
@@ -600,6 +794,9 @@ fn textAreaInner(
                             if (use_hist) hist.closeGroup();
                             if (k.modifiers.ctrl) {
                                 cursor.* = len.*;
+                            } else if (wrap_cols != 0) {
+                                const vp = visualPosOf(buffer, len.*, wrap_cols, cursor.*);
+                                cursor.* = visualLineAt(buffer, len.*, wrap_cols, vp.index).end;
                             } else {
                                 const line = lineOfOffset(buffer, cursor.*);
                                 cursor.* = lineEnd(buffer, len.*, line);
@@ -636,12 +833,13 @@ fn textAreaInner(
     res.selected = res.focused and anchor.* != cursor.*;
 
     // Rolagem vertical: clampa e acompanha o caret quando houve movimento.
-    const nlines = textAreaLineCount(buffer, len.*);
+    // `nlines` conta LINHAS VISUAIS (quebra suave inclusa).
+    const nlines = visualCount(buffer, len.*, wrap_cols);
     const content_h = @as(f32, @floatFromInt(nlines)) * line_h;
     const max_scroll = @max(0, content_h - view_h);
     scroll_y.* = std.math.clamp(scroll_y.*, 0, max_scroll);
     if (moved and focused and line_h > 0) {
-        const cl = lineOfOffset(buffer, cursor.*);
+        const cl = visualPosOf(buffer, len.*, wrap_cols, cursor.*).index;
         const c_top = @as(f32, @floatFromInt(cl)) * line_h;
         const c_bottom = c_top + line_h;
         if (c_top < scroll_y.*) {
@@ -669,7 +867,7 @@ fn textAreaInner(
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
-    try drawTextAreaContent(ctx, buffer, len.*, cursor.*, anchor.*, res.selected, res.focused, bounds, scroll_y.*, text_top, text_x, line_h, font, style);
+    try drawTextAreaContent(ctx, buffer, len.*, cursor.*, anchor.*, res.selected, res.focused, bounds, scroll_y.*, text_top, text_x, line_h, wrap_cols, font, style);
     ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = .{}, .null_rect = true } }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
@@ -691,10 +889,11 @@ fn drawTextAreaContent(
     text_top: f32,
     text_x: f32,
     line_h: f32,
+    wrap_cols: usize,
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!void {
-    const nlines = textAreaLineCount(buffer, len);
+    const nlines = visualCount(buffer, len, wrap_cols);
     const view_h = @max(0, bounds.h - pad * 2);
     const vis_w = @max(0, bounds.w - pad * 2);
     if (line_h <= 0) return;
@@ -708,8 +907,9 @@ fn drawTextAreaContent(
 
     var i = first;
     while (i < last) : (i += 1) {
-        const ls = lineStart(buffer, len, i);
-        const le = lineEnd(buffer, len, i);
+        const seg = visualLineAt(buffer, len, wrap_cols, i);
+        const ls = seg.start;
+        const le = seg.end;
         const y = text_top + @as(f32, @floatFromInt(i)) * line_h - scroll_y;
 
         if (selected and lo < hi) {
@@ -747,12 +947,10 @@ fn drawTextAreaContent(
     }
 
     if (focused and vis_w > 0) {
-        const cl = lineOfOffset(buffer, @min(cursor, len));
-        const cls = lineStart(buffer, len, cl);
-        const cle = lineEnd(buffer, len, cl);
-        const m = metrics_mod.measure(buffer[cls..@min(cursor, cle)], font) catch return error.InvalidArgument;
-        const cx = text_x + m.width;
-        const cy = text_top + @as(f32, @floatFromInt(cl)) * line_h - scroll_y;
+        const vp = visualPosOf(buffer, len, wrap_cols, @min(cursor, len));
+        // `advance` é uniforme: a coluna visual (codepoints) dá o x exato.
+        const cx = text_x + @as(f32, @floatFromInt(vp.col)) * font.advance;
+        const cy = text_top + @as(f32, @floatFromInt(vp.index)) * line_h - scroll_y;
         ctx.draw.line(
             ctx.allocator,
             .{ .x = cx, .y = cy },
@@ -1404,5 +1602,216 @@ test "TextArea clipboard (Ctrl+A/C/X/V) multilinha, overflow e tipo compartilhad
     var bad_clip = Clipboard{ .buf = &clipmem, .len = clipmem.len + 1 };
     ctx.beginFrame();
     try stdt.testing.expectError(error.InvalidArgument, textAreaClipboard(8, 64, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &bad_clip, font, style));
+    ctx.endFrame();
+}
+
+test "TextArea quebra suave: helpers de linha visual" {
+    const stdt = @import("std");
+    const font = metrics_mod.FontMetrics.withSize(10); // advance = 6
+
+    // wrapCols = floor(width/advance), mínimo 1; degenerado → 0 (sem quebra).
+    try stdt.testing.expectEqual(@as(usize, 3), wrapCols(font, 20));
+    try stdt.testing.expectEqual(@as(usize, 1), wrapCols(font, 5));
+    try stdt.testing.expectEqual(@as(usize, 0), wrapCols(font, 0));
+    try stdt.testing.expectEqual(@as(usize, 0), wrapCols(font, std.math.nan(f32)));
+
+    // Contagem: quebra por codepoint; 0 colunas == linhas lógicas.
+    try stdt.testing.expectEqual(@as(usize, 2), visualCount("abcdef", 6, 3));
+    try stdt.testing.expectEqual(@as(usize, 3), visualCount("abcdef", 6, 2));
+    try stdt.testing.expectEqual(@as(usize, 1), visualCount("abcdef", 6, 0));
+    try stdt.testing.expectEqual(@as(usize, 2), visualCount("ab\n", 3, 0));
+    try stdt.testing.expectEqual(@as(usize, 2), visualCount("a\nb", 3, 0));
+    try stdt.testing.expectEqual(textAreaLineCount("ab\ncd", 5), visualCount("ab\ncd", 5, 0));
+    try stdt.testing.expectEqual(@as(usize, 4), visualCount("ab\ncd", 5, 1));
+
+    // Faixas: [0,3) e [3,6); índice fora satura na última.
+    const l0 = visualLineAt("abcdef", 6, 3, 0);
+    const l1 = visualLineAt("abcdef", 6, 3, 1);
+    try stdt.testing.expect(l0.start == 0 and l0.end == 3);
+    try stdt.testing.expect(l1.start == 3 and l1.end == 6);
+    const over = visualLineAt("abcdef", 6, 3, 99);
+    try stdt.testing.expect(over.start == 3 and over.end == 6);
+    // O '\n' não entra na faixa: "ab\ncd" → [0,2) e [3,5).
+    const h0 = visualLineAt("ab\ncd", 5, 0, 0);
+    const h1 = visualLineAt("ab\ncd", 5, 0, 1);
+    try stdt.testing.expect(h0.start == 0 and h0.end == 2);
+    try stdt.testing.expect(h1.start == 3 and h1.end == 5);
+
+    // Posição visual do caret: offset 4 = coluna 1 da 2ª linha visual.
+    const p = visualPosOf("abcdef", 6, 3, 4);
+    try stdt.testing.expect(p.index == 1 and p.start == 3 and p.col == 1);
+    const e = visualPosOf("abcdef", 6, 3, 6);
+    try stdt.testing.expect(e.index == 1 and e.col == 3);
+
+    // colByteOffset: clampado; multibyte conta por codepoint ("A€B").
+    try stdt.testing.expectEqual(@as(usize, 5), colByteOffset("abcdef", 3, 6, 2));
+    try stdt.testing.expectEqual(@as(usize, 6), colByteOffset("abcdef", 3, 6, 9));
+    try stdt.testing.expectEqual(@as(usize, 4), colByteOffset("A€B", 0, 5, 2));
+}
+
+test "TextArea com quebra suave: render, caret, clique e navegação visual" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10); // advance 6
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const lh = font.lineHeight();
+    // vis_w = 18 → 3 colunas; pad = 4 → text_x = 4 (sem rolagem horizontal).
+    const bounds = types.Rect.init(0, 0, 26, 60);
+    const id = id_mod.Id.fromString("test:ta-wrap");
+    var buf: [32]u8 = undefined;
+    @memcpy(buf[0..6], "abcdef");
+    var len: usize = 6;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+
+    // Foca com clique no 2º glifo da 1ª linha visual → offset 1.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(11, 5) },
+    });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(ctx.hasFocus(id));
+    try stdt.testing.expectEqual(@as(usize, 1), cursor);
+
+    // Duas linhas visuais: "abc" e "def", empilhadas por lineHeight.
+    var ntexts: usize = 0;
+    var y0: f32 = 0;
+    var y1: f32 = 0;
+    var s0: []const u8 = "";
+    var s1: []const u8 = "";
+    var caret_x: f32 = -1;
+    var caret_y: f32 = -1;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .text) {
+            if (ntexts == 0) {
+                y0 = cmd.text.pos.y;
+                s0 = ctx.draw.textOf(cmd);
+            } else if (ntexts == 1) {
+                y1 = cmd.text.pos.y;
+                s1 = ctx.draw.textOf(cmd);
+            }
+            ntexts += 1;
+        } else if (cmd == .line) {
+            caret_x = cmd.line.p0.x;
+            caret_y = cmd.line.p0.y;
+        }
+    }
+    try stdt.testing.expectEqual(@as(usize, 2), ntexts);
+    try stdt.testing.expectEqualStrings("abc", s0);
+    try stdt.testing.expectEqualStrings("def", s1);
+    try stdt.testing.expectEqual(@as(f32, 4), y0);
+    try stdt.testing.expectEqual(@as(f32, 4 + lh), y1);
+    // Caret: coluna 1 da 1ª linha visual → x = 4 + 1*6, y = topo.
+    try stdt.testing.expectEqual(@as(f32, 10), caret_x);
+    try stdt.testing.expectEqual(@as(f32, 4), caret_y);
+    ctx.endFrame();
+
+    // ↓ preserva a coluna (1) e desce uma LINHA VISUAL → offset 4 ("e").
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqual(@as(usize, 4), cursor);
+    try stdt.testing.expectEqual(@as(usize, 4), anchor);
+    ctx.endFrame();
+
+    // End vai ao fim da linha VISUAL corrente (offset 6).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqual(@as(usize, 6), cursor);
+    ctx.endFrame();
+
+    // Clique na 2ª linha visual posiciona o caret no início dela (offset 3).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 4 + lh + 1) },
+    });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqual(@as(usize, 3), cursor);
+    ctx.endFrame();
+}
+
+test "TextArea com quebra suave: rolagem acompanha a linha visual do caret" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const lh = font.lineHeight();
+    // view_h = lh + 1: das 2 linhas visuais só uma cabe → precisa rolar.
+    const bounds = types.Rect.init(0, 0, 26, 8 + lh + 1);
+    const id = id_mod.Id.fromString("test:ta-wrap-scroll");
+    var buf: [32]u8 = undefined;
+    @memcpy(buf[0..6], "abcdef");
+    var len: usize = 6;
+    var cursor: usize = 6;
+    var anchor: usize = 6;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    ctx.endFrame();
+    // Scroll = content_h - view_h = 2*lh - (lh + 1) = lh - 1.
+    try stdt.testing.expectApproxEqAbs(lh - 1.0, scroll, 0.01);
+}
+
+test "TextArea quebra suave + clipboard/histórico combinados" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 26, 60);
+    const id = id_mod.Id.fromString("test:ta-wrap-clip");
+    var buf: [32]u8 = undefined;
+    @memcpy(buf[0..6], "abcdef");
+    var len: usize = 6;
+    var cursor: usize = 6;
+    var anchor: usize = 6;
+    var scroll: f32 = 0;
+    var hist = TextHistory(4, 32){};
+    var clipmem: [16]u8 = undefined;
+    var clip = Clipboard{ .buf = &clipmem };
+
+    // Foca.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) },
+    });
+    _ = try textAreaWrappedClipboard(4, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &clip, font, style);
+    ctx.endFrame();
+
+    // Ctrl+A + Ctrl+C copia tudo (6 bytes), sem alterar o texto.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .a, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    try ctx.pushEvent(.{ .key = .{ .key = .c, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const rc = try textAreaWrappedClipboard(4, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &clip, font, style);
+    try stdt.testing.expect(!rc.changed);
+    try stdt.testing.expectEqualStrings("abcdef", clip.buf[0..clip.len]);
+    try stdt.testing.expect(anchor == 0 and cursor == 6);
+    ctx.endFrame();
+
+    // Digitar substitui a seleção (um passo) e Ctrl+Z restaura tudo.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'Z' } });
+    const rz = try textAreaWrappedClipboard(4, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &clip, font, style);
+    try stdt.testing.expect(rz.changed);
+    try stdt.testing.expectEqualStrings("Z", buf[0..len]);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .z, .pressed = true, .modifiers = .{ .ctrl = true } } });
+    const ru = try textAreaWrappedClipboard(4, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &clip, font, style);
+    try stdt.testing.expect(ru.undone);
+    try stdt.testing.expectEqualStrings("abcdef", buf[0..len]);
     ctx.endFrame();
 }

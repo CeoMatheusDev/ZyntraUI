@@ -7,6 +7,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `widgets/textarea`: **quebra suave** (M89, aditivo) — linhas longas
+  quebram na largura útil por codepoint (sem rolagem horizontal) nas
+  variantes `textAreaWrapped`, `textAreaWrappedHistory` e
+  `textAreaWrappedClipboard` (combinam com undo/redo e `Ctrl+C/X/V`).
+  Com a quebra, `↑`/`↓`, `Home`/`End` e `PageUp`/`PageDown` operam por
+  **linha visual** (a coluna é preservada por codepoint), a altura de
+  conteúdo/rolagem passa a contar linhas visuais e `↑`/`↓` não alteram
+  mais um offset no meio de um codepoint (correção de bug latente na
+  navegação vertical com multibyte). Como `advance` é uniforme, a quebra
+  é `max_cols = floor(largura_útil / advance)` (>= 1 garante progresso).
+  `examples/minimal.zig` ganha a demo `m89`.
 - `widgets/textarea`: **paridade de "texto completo" com `text_input`**
   (M88, aditivo) — undo/redo e área de transferência interna em variantes
   novas: `textAreaHistory` (`Ctrl+Z` desfaz, `Ctrl+Y`/`Ctrl+Shift+Z`
