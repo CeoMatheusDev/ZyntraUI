@@ -95,7 +95,7 @@ pub const Color = extern struct {
 /// Servida sem alteração pela API Zig (`root`) e pela ABI C
 /// (`zyntra_version_*`); assinaturas e layouts inalterados.
 pub const version_major: u32 = 1;
-pub const version_minor: u32 = 26;
+pub const version_minor: u32 = 27;
 pub const version_patch: u32 = 0;
 /// Sufixo de pré-lançamento (vazio quando estável).
 pub const version_prerelease: [:0]const u8 = "";
