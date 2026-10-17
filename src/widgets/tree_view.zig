@@ -278,10 +278,12 @@ pub fn beginTreeView(
 
     // Hover index (contagem pós-toggle: a lista pode ter encolhido).
     if (ctx.mouse_pos) |p| {
-        const rel_y = p.y - bounds.y + scroll_offset.*;
-        const idx: usize = @as(usize, @intFromFloat(@floor(rel_y / style.item_height)));
-        if (idx < keyboard_visible_count) {
-            res.hovered_index = idx;
+        if (bounds.contains(p)) {
+            const rel_y = p.y - bounds.y + scroll_offset.*;
+            const idx: usize = @as(usize, @intFromFloat(@floor(rel_y / style.item_height)));
+            if (idx < keyboard_visible_count) {
+                res.hovered_index = idx;
+            }
         }
     }
 
@@ -1012,4 +1014,37 @@ test "TreeView pending keyboard toggles preserve S1 until commit" {
     treeViewCommit(&pending);
     try testing.expect(items[0].expanded);
     try testing.expectEqual(@as(usize, 3), treeViewCountVisible(&items));
+}
+
+test "TreeView hover outside bounds never selects a row" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(100, 100, 200, 100);
+    const id = id_mod.Id.fromString("test:tree-hover-outside");
+    var items = [_]TreeItem{
+        .{ .label = "first", .children = &[_]TreeItem{} },
+        .{ .label = "second", .children = &[_]TreeItem{} },
+    };
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(120, 50) } });
+    const above = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expect(above.hovered_index == null);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(120, 110) } });
+    const inside = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expectEqual(@as(?usize, 0), inside.hovered_index);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(350, 110) } });
+    const right = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expect(right.hovered_index == null);
+    ctx.endFrame();
 }
