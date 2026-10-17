@@ -23,6 +23,7 @@ const groupbox_mod = @import("zyntra_ui").widgets.groupbox;
 const panel_mod = @import("zyntra_ui").widgets.panel;
 const splitter_mod = @import("zyntra_ui").widgets.splitter;
 const dock_view_mod = @import("zyntra_ui").widgets.dock_view;
+const tab_bar_mod = @import("zyntra_ui").widgets.tab_bar;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -754,13 +755,13 @@ pub fn main() !void {
 
     // DockView (M76, docking passo 3): divisórias arrastáveis ligadas ao
     // DockLayout. `dockView` desenha fundo + faixas, trata o arraste (um
-    // `Id` por divisória) e devolve os rects dos painéis; o chrome de
-    // `panel` é desenhado por cima, na ordem.
+    // `Id` por divisória) e devolve os grupos (nó + abas + rect); o chrome
+    // de `panel` é desenhado por cima, na ordem.
     var dv: zyntra_ui.DockLayout = undefined;
     dock_mod.dockInit(&dv, 0);
     const dv_right = try dock_mod.dockSplit(&dv, 0, .vertical, 0.5, 1);
     _ = try dock_mod.dockSplit(&dv, dv_right, .horizontal, 0.5, 2);
-    var dv_panes: [zyntra_ui.DockLayout.max_panes]zyntra_ui.Rect = undefined;
+    var dv_panes: [zyntra_ui.DockLayout.max_panes]zyntra_ui.DockPaneInfo = undefined;
     const dv_ids = [_][]const u8{ "examples/m76:p0", "examples/m76:p1", "examples/m76:p2" };
     ctx.beginFrame();
     const dvr = try dock_view_mod.dockView(
@@ -777,7 +778,7 @@ pub fn main() !void {
         _ = try panel_mod.panel(
             &ctx,
             zyntra_ui.Id.fromString(dv_ids[dvi]),
-            dv_panes[dvi],
+            dv_panes[dvi].rect,
             &dock_collapsed,
             .{ .title = pane_titles[dvi], .collapsible = false },
             font,
@@ -788,14 +789,14 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print(
         "m76 dockview panes={d} splits={d} draws={d} changed={} pane0_w={d:.1}\n",
-        .{ dvr.pane_count, dvr.split_count, dv_draws, dvr.changed, dv_panes[0].w },
+        .{ dvr.pane_count, dvr.split_count, dv_draws, dvr.changed, dv_panes[0].rect.w },
     );
 
     // DockView drop (M77, docking passo 4): o chamador informa qual painel
     // esta arrastando ('dragging'); 'dockView' resolve a zona sob o cursor
-    // (borda redivide, centro troca), desenha o realce e aplica o drop no
-    // release. Aqui o gesto e simulado: cursor na borda esquerda do painel
-    // 0 e release no frame seguinte.
+    // (borda redivide, centro acopla como aba), desenha o realce e aplica o
+    // drop no release. Aqui o gesto e simulado: cursor na borda esquerda do
+    // painel 0 e release no frame seguinte.
     var dv2: zyntra_ui.DockLayout = undefined;
     dock_mod.dockInit(&dv2, 0);
     const dv2_right = try dock_mod.dockSplit(&dv2, 0, .vertical, 0.5, 1);
@@ -804,7 +805,7 @@ pub fn main() !void {
     const dv2_cursor = zyntra_ui.Vec2.init(dv2_bounds.x + 4, dv2_bounds.y + 60);
     const dv2_id = zyntra_ui.Id.fromString("examples/m77:dock");
     const dv2_opts = zyntra_ui.DockViewOptions{ .dragging = 2 };
-    var dv2_panes: [zyntra_ui.DockLayout.max_panes]zyntra_ui.Rect = undefined;
+    var dv2_panes: [zyntra_ui.DockLayout.max_panes]zyntra_ui.DockPaneInfo = undefined;
 
     ctx.beginFrame();
     try ctx.pushEvent(.{ .mouse_move = .{ .pos = dv2_cursor } });
@@ -817,6 +818,77 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.print(
         "m77 drop preview={} dropped={} panes={d} first_w={d:.1}\n",
-        .{ dv2r1.drop != null, dv2r2.dropped != null, dv2r2.pane_count, dv2_panes[0].w },
+        .{ dv2r1.drop != null, dv2r2.dropped != null, dv2r2.pane_count, dv2_panes[0].rect.w },
+    );
+
+    // Abas acopladas (M78, docking passo 4a): o drop no centro acopla um
+    // painel como aba do grupo alvo; 'dockView' devolve os grupos (abas +
+    // ativa) e o chamador desenha uma 'tab_bar' por grupo, trocando a aba
+    // ativa com 'dockSetActiveTab'. Aqui: dois paineis viram um grupo de 2
+    // abas (drop no centro) e um clique na 1a aba troca o painel visivel.
+    var dv3: zyntra_ui.DockLayout = undefined;
+    dock_mod.dockInit(&dv3, 0);
+    _ = try dock_mod.dockSplit(&dv3, 0, .vertical, 0.5, 1);
+    const dv3_bounds = zyntra_ui.Rect.init(600, 830, 260, 120);
+    const dv3_id = zyntra_ui.Id.fromString("examples/m78:dock");
+    const dv3_titles = [_][]const u8{ "Arquivos", "Busca" };
+    var dv3_panes: [zyntra_ui.DockLayout.max_panes]zyntra_ui.DockPaneInfo = undefined;
+    var dv3_collapsed = false;
+
+    // Frame 1: painel 1 arrastado para o centro do painel 0 (vira aba).
+    const dv3_drop = zyntra_ui.Vec2.init(dv3_bounds.x + 63, dv3_bounds.y + 60);
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = dv3_drop } });
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = false, .pos = dv3_drop } });
+    const dv3r1 = try dock_view_mod.dockView(&ctx, dv3_id, &dv3, dv3_bounds, &dv3_panes, theme.dockStyle(), .{ .dragging = 1 });
+    ctx.endFrame();
+
+    // Frame 2: um grupo de 2 abas; a barra de abas do grupo ocupa o topo e
+    // um clique na 1a aba (titulo "Arquivos") troca a aba ativa.
+    ctx.beginFrame();
+    const dv3r2 = try dock_view_mod.dockView(&ctx, dv3_id, &dv3, dv3_bounds, &dv3_panes, theme.dockStyle(), .{});
+    const dv3_group = dv3_panes[0].group;
+    var dv3_labels: [zyntra_ui.DockGroup.max_tabs][]const u8 = undefined;
+    for (dv3_group.tabs(), 0..) |p, k| dv3_labels[k] = dv3_titles[p];
+    const dv3_bar = zyntra_ui.Rect.init(dv3_panes[0].rect.x, dv3_panes[0].rect.y, dv3_panes[0].rect.w, 22);
+    var dv3_active: usize = dv3_group.active;
+    try ctx.pushEvent(.{
+        .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(dv3_bar.x + 2, dv3_bar.y + 2) },
+    });
+    const dv3_tab = try tab_bar_mod.beginTabBar(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m78:tabs"),
+        dv3_bar,
+        dv3_labels[0..dv3_group.tabs().len],
+        &dv3_active,
+        theme.tabBarStyle(),
+    );
+    if (dv3_tab.changed) _ = dock_mod.dockSetActiveTab(&dv3, dv3_panes[0].node, dv3_tab.active);
+    const dv3_body = zyntra_ui.Rect.init(
+        dv3_panes[0].rect.x,
+        dv3_panes[0].rect.y + dv3_bar.h,
+        dv3_panes[0].rect.w,
+        dv3_panes[0].rect.h - dv3_bar.h,
+    );
+    _ = try panel_mod.panel(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m78:body"),
+        dv3_body,
+        &dv3_collapsed,
+        .{ .title = dv3_titles[dock_mod.dockGroup(&dv3, dv3_panes[0].node).?.activePane()], .collapsible = false },
+        font,
+        theme.panelStyle(),
+    );
+    ctx.endFrame();
+    std.debug.print(
+        "m78 tabs drop={} groups={d} tabs={d} changed={} active={d} title={s}\n",
+        .{
+            dv3r1.dropped != null,
+            dv3r2.pane_count,
+            dock_mod.dockGroup(&dv3, dv3_panes[0].node).?.count,
+            dv3_tab.changed,
+            dock_mod.dockGroup(&dv3, dv3_panes[0].node).?.active,
+            dv3_titles[dock_mod.dockGroup(&dv3, dv3_panes[0].node).?.activePane()],
+        },
     );
 }

@@ -3,16 +3,16 @@
 //! Modelo M76 (Docking, passo 3): liga o modelo puro `dock/layout` à
 //! interação. Desenha o fundo opcional da área e torna **cada divisória
 //! arrastável** (uma por split), atualizando o ratio correspondente via
-//! `dockSetRatio`. Devolve, em pré-ordem, os rects dos painéis para o
-//! chamador desenhar o chrome (`widgets/panel`) por cima.
+//! `dockSetRatio`. Devolve, em pré-ordem, os *grupos* (nó + abas/ativo +
+//! rect) para o chamador desenhar o chrome (`widgets/panel`) e as barras
+//! de abas (`widgets/tab_bar`) por cima.
 //!
 //! M77 (Docking, passo 4) acrescenta o **drop de painéis**: o chamador
 //! informa qual painel está arrastando (`DockViewOptions.dragging`) e
 //! `dockView` resolve a zona sob o cursor (borda ⇒ redivide, centro ⇒
 //! acopla como aba do grupo alvo), desenha o realce e aplica o drop no
-//! release
-//! (`dockApplyDrop`), devolvendo `dropped` para o chamador limpar o
-//! estado de arraste. O gesto de origem (ex.: press no cabeçalho de um
+//! release (`dockApplyDrop`), devolvendo `dropped` para o chamador limpar
+//! o estado de arraste. O gesto de origem (ex.: press no cabeçalho de um
 //! `widgets/panel`) é do chamador.
 //!
 //! Ordem no frame: `dockView` desenha fundo + divisórias e escreve
@@ -28,7 +28,7 @@
 //!   realce do drop.
 //!
 //! `id` não-nulo obrigatório; `bounds` finito e positivo. `panes` precisa
-//! comportar o número de folhas (`OutOfBuffer` caso contrário).
+//! comportar o número de grupos/folhas (`OutOfBuffer` caso contrário).
 
 const std = @import("std");
 const types = @import("../core/types.zig");
@@ -56,7 +56,7 @@ pub const DockViewOptions = struct {
 pub const DockDrop = struct {
     /// Painel arrastado.
     pane: u16,
-    /// Painel alvo (folha sob o cursor).
+    /// Painel ativo do grupo alvo (folha sob o cursor).
     target: u16,
     zone: dock_mod.DockZone,
     /// Rect do realce (zona do alvo).
@@ -64,7 +64,7 @@ pub const DockDrop = struct {
 };
 
 pub const DockViewResult = struct {
-    /// Painéis escritos em `panes` (rects em pré-ordem das folhas).
+    /// Grupos escritos em `panes` (nó + abas/ativo + rect, pré-ordem).
     pane_count: usize = 0,
     /// Divisórias do layout (uma por split).
     split_count: usize = 0,
@@ -115,14 +115,15 @@ fn nudgeRatio(rect: types.Rect, orientation: dock_mod.DockOrientation, ratio: f3
 }
 
 /// Área de docking interativa sobre `layout`, dentro de `bounds`.
-/// Preenche `panes` (rects das folhas) e devolve o resultado do frame.
-/// `options.dragging` habilita o drop de painéis (passo 4).
+/// Preenche `panes` (grupos: nó + abas/ativo + rect das folhas) e devolve o
+/// resultado do frame. `options.dragging` habilita o drop de painéis
+/// (passo 4).
 pub fn dockView(
     ctx: *context_mod.Context,
     id: id_mod.Id,
     layout: *dock_mod.DockLayout,
     bounds: types.Rect,
-    panes: []types.Rect,
+    panes: []dock_mod.DockPaneInfo,
     style: style_mod.DockStyle,
     options: DockViewOptions,
 ) DockViewError!DockViewResult {
@@ -146,7 +147,7 @@ pub fn dockView(
     res.split_count = try dock_mod.dockSplits(layout, bounds, style.divider, &splits);
     res.pane_count = try dock_mod.dockPanes(layout, bounds, style.divider, &infos);
     if (res.pane_count > panes.len) return error.OutOfBuffer;
-    for (infos[0..res.pane_count], 0..) |info, k| panes[k] = info.rect;
+    for (infos[0..res.pane_count], 0..) |info, k| panes[k] = info;
 
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
     // Com um painel em arraste o alvo é resolvido por baixo do cursor e as
@@ -237,7 +238,7 @@ pub fn dockView(
         res.split_count = try dock_mod.dockSplits(layout, bounds, style.divider, &splits);
         res.pane_count = try dock_mod.dockPanes(layout, bounds, style.divider, &infos);
         if (res.pane_count > panes.len) return error.OutOfBuffer;
-        for (infos[0..res.pane_count], 0..) |info, k| panes[k] = info.rect;
+        for (infos[0..res.pane_count], 0..) |info, k| panes[k] = info;
     }
 
     if (style.bg.a > 0) {
@@ -312,7 +313,7 @@ test "dockView: geometria, divisória e clique sem arraste" {
     _ = try dock_mod.dockSplit(&layout, 0, .horizontal, 0.5, 1);
 
     const bounds = types.Rect.init(0, 0, 400, 300);
-    var panes: [dock_mod.DockLayout.max_panes]types.Rect = undefined;
+    var panes: [dock_mod.DockLayout.max_panes]dock_mod.DockPaneInfo = undefined;
     const id = id_mod.Id.fromString("test:dockview");
 
     ctx.beginFrame();
@@ -322,8 +323,8 @@ test "dockView: geometria, divisória e clique sem arraste" {
     try stdt.testing.expect(!r0.changed);
     try stdt.testing.expectEqual(@as(?usize, null), r0.hovered);
     try stdt.testing.expectEqual(@as(?usize, null), r0.dragging);
-    try stdt.testing.expectEqual(types.Rect.init(0, 0, 400, 147), panes[0]);
-    try stdt.testing.expectEqual(types.Rect.init(0, 153, 400, 147), panes[1]);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 400, 147), panes[0].rect);
+    try stdt.testing.expectEqual(types.Rect.init(0, 153, 400, 147), panes[1].rect);
     // Fundo + divisória desenhados.
     try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len);
     ctx.endFrame();
@@ -343,7 +344,7 @@ test "dockView: geometria, divisória e clique sem arraste" {
     try stdt.testing.expectError(error.InvalidArgument, dockView(&ctx, id, &layout, types.Rect.init(std.math.nan(f32), 0, 10, 10), &panes, style, .{}));
     const bad = style_mod.DockStyle{ .divider = -1, .divider_idle = .{}, .divider_hover = .{}, .divider_drag = .{} };
     try stdt.testing.expectError(error.InvalidArgument, dockView(&ctx, id, &layout, bounds, &panes, bad, .{}));
-    var tiny: [1]types.Rect = undefined;
+    var tiny: [1]dock_mod.DockPaneInfo = undefined;
     try stdt.testing.expectError(error.OutOfBuffer, dockView(&ctx, id, &layout, bounds, &tiny, style, .{}));
     // `edge_frac` fora de [0,0.5] é inválido; arrastar painel inexistente não
     // produz alvo.
@@ -365,7 +366,7 @@ test "dockView: arraste atualiza o ratio e a geometria no mesmo frame" {
     _ = try dock_mod.dockSplit(&layout, 0, .horizontal, 0.5, 1);
 
     const bounds = types.Rect.init(0, 0, 400, 300);
-    var panes: [dock_mod.DockLayout.max_panes]types.Rect = undefined;
+    var panes: [dock_mod.DockLayout.max_panes]dock_mod.DockPaneInfo = undefined;
     const id = id_mod.Id.fromString("test:dockview-drag");
 
     // Press na faixa (y=150) captura; a posição já define o ratio (0.5).
@@ -386,7 +387,7 @@ test "dockView: arraste atualiza o ratio e a geometria no mesmo frame" {
     try stdt.testing.expectEqual(@as(?usize, 0), r1.dragging);
     try stdt.testing.expect(r1.changed);
     try stdt.testing.expectApproxEqAbs(@as(f32, 0.7), dock_mod.dockSplitRatio(&layout, 0).?, 0.0001);
-    try stdt.testing.expectEqual(types.Rect.init(0, 0, 400, 207), panes[0]);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 400, 207), panes[0].rect);
     try stdt.testing.expectEqual(@as(?usize, 0), r1.hovered);
     ctx.endFrame();
 
@@ -417,7 +418,7 @@ test "dockView: teclado (setas/Home/End) e layout aninhado" {
     _ = try dock_mod.dockSplit(&layout, right, .horizontal, 0.5, 2);
 
     const bounds = types.Rect.init(0, 0, 400, 300);
-    var panes: [dock_mod.DockLayout.max_panes]types.Rect = undefined;
+    var panes: [dock_mod.DockLayout.max_panes]dock_mod.DockPaneInfo = undefined;
     const id = id_mod.Id.fromString("test:dockview-keys");
 
     ctx.beginFrame();
@@ -425,9 +426,9 @@ test "dockView: teclado (setas/Home/End) e layout aninhado" {
     try stdt.testing.expectEqual(@as(usize, 3), r0.pane_count);
     try stdt.testing.expectEqual(@as(usize, 2), r0.split_count);
     // Pré-ordem: pane0 (esq) e depois as duas metades da direita.
-    try stdt.testing.expectEqual(types.Rect.init(0, 0, 197, 300), panes[0]);
-    try stdt.testing.expectEqual(types.Rect.init(203, 0, 197, 147), panes[1]);
-    try stdt.testing.expectEqual(types.Rect.init(203, 153, 197, 147), panes[2]);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 197, 300), panes[0].rect);
+    try stdt.testing.expectEqual(types.Rect.init(203, 0, 197, 147), panes[1].rect);
+    try stdt.testing.expectEqual(types.Rect.init(203, 153, 197, 147), panes[2].rect);
     ctx.endFrame();
 
     // Foca a divisória interna (índice 1, horizontal em y=147) e move com
@@ -461,7 +462,7 @@ test "dockView: teclado (setas/Home/End) e layout aninhado" {
     const r3 = try dockView(&ctx, id, &layout, bounds, &panes, style, .{});
     try stdt.testing.expect(r3.changed);
     try stdt.testing.expectApproxEqAbs(@as(f32, 0), dock_mod.dockSplitRatio(&layout, right).?, 0.0001);
-    try stdt.testing.expectEqual(@as(f32, 0), panes[1].h);
+    try stdt.testing.expectEqual(@as(f32, 0), panes[1].rect.h);
     ctx.endFrame();
 
     // Tab agenda o avanço do foco para o próximo `beginFrame` (a raiz).
@@ -498,7 +499,7 @@ test "dockView: drop de painel (borda redivide, centro troca)" {
     _ = try dock_mod.dockSplit(&layout, right, .horizontal, 0.5, 2);
 
     const bounds = types.Rect.init(0, 0, 400, 300);
-    var panes: [dock_mod.DockLayout.max_panes]types.Rect = undefined;
+    var panes: [dock_mod.DockLayout.max_panes]dock_mod.DockPaneInfo = undefined;
     const id = id_mod.Id.fromString("test:dockview-drop");
     const drag = DockViewOptions{ .dragging = 2 };
 
@@ -531,9 +532,9 @@ test "dockView: drop de painel (borda redivide, centro troca)" {
     try stdt.testing.expectEqual(dock_mod.DockZone.left, r1.dropped.?.zone);
     try stdt.testing.expectEqual(@as(u16, 0), r1.dropped.?.target);
     try stdt.testing.expectEqual(@as(usize, 3), r1.pane_count);
-    try stdt.testing.expectEqual(types.Rect.init(0, 0, 95.5, 300), panes[0]);
-    try stdt.testing.expectEqual(types.Rect.init(101.5, 0, 95.5, 300), panes[1]);
-    try stdt.testing.expectEqual(types.Rect.init(203, 0, 197, 300), panes[2]);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 95.5, 300), panes[0].rect);
+    try stdt.testing.expectEqual(types.Rect.init(101.5, 0, 95.5, 300), panes[1].rect);
+    try stdt.testing.expectEqual(types.Rect.init(203, 0, 197, 300), panes[2].rect);
     ctx.endFrame();
 
     // Sobre a faixa da divisória (x=197..203) não há alvo ⇒ release sem
@@ -566,11 +567,11 @@ test "dockView: drop de painel (borda redivide, centro troca)" {
     try stdt.testing.expectEqual(@as(u16, 0), r4.dropped.?.target);
     try stdt.testing.expect(r4.changed);
     try stdt.testing.expectEqual(@as(usize, 1), r4.pane_count);
-    try stdt.testing.expectEqual(bounds, panes[0]);
-    var infos: [dock_mod.DockLayout.max_panes]dock_mod.DockPaneInfo = undefined;
-    try stdt.testing.expectEqual(@as(usize, 1), try dock_mod.dockPanes(&l2, bounds, style.divider, &infos));
-    try stdt.testing.expectEqual(@as(u16, 1), infos[0].pane()); // 1 ficou ativo
-    try stdt.testing.expectEqualSlices(u16, &.{ 0, 1 }, infos[0].group.tabs());
-    try stdt.testing.expectEqual(@as(u8, 2), infos[0].group.count);
+    try stdt.testing.expectEqual(bounds, panes[0].rect);
+    // O `dockView` reporta o grupo formado: nó, aba ativa e abas em ordem.
+    try stdt.testing.expectEqual(@as(u8, 0), panes[0].node);
+    try stdt.testing.expectEqual(@as(u16, 1), panes[0].pane()); // 1 ficou ativo
+    try stdt.testing.expectEqualSlices(u16, &.{ 0, 1 }, panes[0].group.tabs());
+    try stdt.testing.expectEqual(@as(u8, 2), panes[0].group.count);
     ctx.endFrame();
 }

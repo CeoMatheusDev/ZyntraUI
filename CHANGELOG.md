@@ -29,7 +29,9 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   cursor, desenha o realce e aplica o drop no release (`DockViewResult.drop`
   prévia, `dropped` aplicado), recalculando a geometria no mesmo frame;
   `DockStyle.drop_preview`/`drop_border` (via `Theme.dockStyle()`) e
-  `DockViewOptions.edge_frac`. `examples/minimal.zig` ganha a demo `m77`.
+  `DockViewOptions.edge_frac`. `panes` (saída) passa a receber os *grupos*
+  (`DockPaneInfo`: nó + abas/ativo + rect), habilitando `widgets/tab_bar` por
+  grupo. `examples/minimal.zig` ganha as demos `m77` (drop) e `m78` (abas).
 - `dock/layout`: `dockSplits` + `DockSplitInfo` (M76, docking passo 3) —
   pré-ordem dos splits com o nó (aceito por `dockSetRatio`), orientação,
   ratio, área do split e faixa da divisória, na mesma geometria de
