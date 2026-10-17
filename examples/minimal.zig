@@ -22,6 +22,7 @@ const statusbar_mod = @import("zyntra_ui").widgets.statusbar;
 const groupbox_mod = @import("zyntra_ui").widgets.groupbox;
 const panel_mod = @import("zyntra_ui").widgets.panel;
 const splitter_mod = @import("zyntra_ui").widgets.splitter;
+const dock_view_mod = @import("zyntra_ui").widgets.dock_view;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -749,5 +750,43 @@ pub fn main() !void {
     std.debug.print(
         "m75 dock panes={d} dividers={d} draws={d} pane0_h={d:.1}\n",
         .{ dp_count, dd_count, dock_draws, dock_panes[0].h },
+    );
+
+    // DockView (M76, docking passo 3): divisórias arrastáveis ligadas ao
+    // DockLayout. `dockView` desenha fundo + faixas, trata o arraste (um
+    // `Id` por divisória) e devolve os rects dos painéis; o chrome de
+    // `panel` é desenhado por cima, na ordem.
+    var dv: zyntra_ui.DockLayout = undefined;
+    dock_mod.dockInit(&dv, 0);
+    const dv_right = try dock_mod.dockSplit(&dv, 0, .vertical, 0.5, 1);
+    _ = try dock_mod.dockSplit(&dv, dv_right, .horizontal, 0.5, 2);
+    var dv_panes: [zyntra_ui.DockLayout.max_panes]zyntra_ui.Rect = undefined;
+    const dv_ids = [_][]const u8{ "examples/m76:p0", "examples/m76:p1", "examples/m76:p2" };
+    ctx.beginFrame();
+    const dvr = try dock_view_mod.dockView(
+        &ctx,
+        zyntra_ui.Id.fromString("examples/m76:dock"),
+        &dv,
+        zyntra_ui.Rect.init(600, 460, 260, 200),
+        &dv_panes,
+        theme.dockStyle(),
+    );
+    var dvi: usize = 0;
+    while (dvi < dvr.pane_count and dvi < pane_ids.len) : (dvi += 1) {
+        _ = try panel_mod.panel(
+            &ctx,
+            zyntra_ui.Id.fromString(dv_ids[dvi]),
+            dv_panes[dvi],
+            &dock_collapsed,
+            .{ .title = pane_titles[dvi], .collapsible = false },
+            font,
+            theme.panelStyle(),
+        );
+    }
+    const dv_draws = ctx.drawCommands().len;
+    ctx.endFrame();
+    std.debug.print(
+        "m76 dockview panes={d} splits={d} draws={d} changed={} pane0_w={d:.1}\n",
+        .{ dvr.pane_count, dvr.split_count, dv_draws, dvr.changed, dv_panes[0].w },
     );
 }

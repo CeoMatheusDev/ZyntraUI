@@ -14,10 +14,12 @@
 //!   ocupa o lugar), recomprimindo a árvore.
 //! - `dockPaneRects` / `dockDividerRects` — geometria pura (rects dos
 //!   painéis em pré-ordem e das divisórias), com `divider` px entre lados.
+//! - `dockSplits` — pré-ordem dos splits com nó/orientação/ratio/área e
+//!   faixa da divisória (base de `widgets/dock_view`, passo 3).
 //!
 //! Não desenha nem trata eventos: combine com `widgets/panel` (chrome) e
-//! `widgets/splitter` (arraste) para interação. O descarte do layout
-//! (persistência/versão) fica para um passo seguinte.
+//! `widgets/dock_view` (divisórias arrastáveis) para interação. O descarte
+//! do layout (persistência/versão) fica para um passo seguinte.
 
 const std = @import("std");
 const types = @import("../core/types.zig");
@@ -282,6 +284,58 @@ fn dividerRectsRec(
 
 const Sides = struct { first: types.Rect, second: types.Rect, divider: types.Rect };
 
+/// Informação de um split para interação/desenho (M76): o índice do nó
+/// (aceito por `dockSetRatio`), a orientação, o ratio atual, a área total
+/// do split (base do clamp do arraste) e a faixa da divisória.
+pub const DockSplitInfo = struct {
+    node: u8,
+    orientation: DockOrientation,
+    ratio: f32,
+    rect: types.Rect,
+    divider: types.Rect,
+};
+
+/// Infos dos splits (pré-ordem: pai antes dos filhos), dentro de `bounds`,
+/// com `divider` px entre os lados. Devolve quantos foram escritos
+/// (`≤ folhas - 1`). `OutOfBuffer` se `out` for menor.
+pub fn dockSplits(
+    layout: *const DockLayout,
+    bounds: types.Rect,
+    divider: f32,
+    out: []DockSplitInfo,
+) DockError!usize {
+    var n: usize = 0;
+    try splitsRec(layout, layout.root, bounds, sanitizeDivider(divider), out, &n);
+    return n;
+}
+
+fn splitsRec(
+    layout: *const DockLayout,
+    node: u8,
+    r: types.Rect,
+    divider: f32,
+    out: []DockSplitInfo,
+    n: *usize,
+) DockError!void {
+    switch (layout.nodes[node]) {
+        .leaf => {},
+        .split => |s| {
+            const sides = splitSides(r, s.orientation, s.ratio, divider);
+            if (n.* >= out.len) return error.OutOfBuffer;
+            out[n.*] = .{
+                .node = node,
+                .orientation = s.orientation,
+                .ratio = s.ratio,
+                .rect = r,
+                .divider = sides.divider,
+            };
+            n.* += 1;
+            try splitsRec(layout, s.first, sides.first, divider, out, n);
+            try splitsRec(layout, s.second, sides.second, divider, out, n);
+        },
+    }
+}
+
 /// Divide `r`: `first` (proporção), `divider` (`divider` px centrados) e
 /// `second`. A divisória é clampada dentro de `r`.
 fn splitSides(r: types.Rect, orientation: DockOrientation, ratio: f32, divider: f32) Sides {
@@ -348,6 +402,20 @@ test "dock: init, split, proporção e rects (horizontal/vertical)" {
     // Pré-ordem dos splits: raiz (y=146) e depois o filho (x=196).
     try stdt.testing.expectEqual(types.Rect.init(0, 146, 400, 8), divs[0]);
     try stdt.testing.expectEqual(types.Rect.init(196, 154, 8, 146), divs[1]);
+
+    // Infos dos splits (mesma pré-ordem): nó, orientação, área, divisória.
+    var infos: [DockLayout.max_panes]DockSplitInfo = undefined;
+    const ni = try dockSplits(&layout, bounds, 8, &infos);
+    try stdt.testing.expectEqual(@as(usize, 2), ni);
+    try stdt.testing.expectEqual(@as(u8, 0), infos[0].node);
+    try stdt.testing.expectEqual(DockOrientation.horizontal, infos[0].orientation);
+    try stdt.testing.expectApproxEqAbs(@as(f32, 0.5), infos[0].ratio, 0.0001);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 400, 300), infos[0].rect);
+    try stdt.testing.expectEqual(types.Rect.init(0, 146, 400, 8), infos[0].divider);
+    try stdt.testing.expectEqual(@as(u8, @intCast(leaf_b)), infos[1].node);
+    try stdt.testing.expectEqual(DockOrientation.vertical, infos[1].orientation);
+    try stdt.testing.expectEqual(types.Rect.init(0, 154, 400, 146), infos[1].rect);
+    try stdt.testing.expectEqual(types.Rect.init(196, 154, 8, 146), infos[1].divider);
 
     // Proporção ajustável; não-split/clamp.
     dockSetRatio(&layout, 0, 0.25);
@@ -418,6 +486,8 @@ test "dock: limites, erros e buffer pequeno" {
     var tiny: [1]types.Rect = undefined;
     try stdt.testing.expectError(error.OutOfBuffer, dockPaneRects(&layout, types.Rect.init(0, 0, 100, 100), 4, &tiny));
     try stdt.testing.expectError(error.OutOfBuffer, dockDividerRects(&layout, types.Rect.init(0, 0, 100, 100), 4, &tiny));
+    var tiny_info: [1]DockSplitInfo = undefined;
+    try stdt.testing.expectError(error.OutOfBuffer, dockSplits(&layout, types.Rect.init(0, 0, 100, 100), 4, &tiny_info));
 
     // Proporções degeneradas: lados nunca negativos e divisória dentro
     // dos limites.

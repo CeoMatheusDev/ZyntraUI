@@ -386,6 +386,31 @@ pub const PanelStyle = extern struct {
     }
 };
 
+/// Estilo de área de docking interativa (M76). Espessura e cores das
+/// divisórias + fundo/borda opcionais da área. A espessura é única para
+/// todo o layout (mesma métrica usada pela geometria de `dock/layout`).
+pub const DockStyle = extern struct {
+    /// Espessura da faixa da divisória em px (0 ⇒ fina demais p/ hit-test).
+    divider: f32 = 6.0,
+    /// Cor da divisória em repouso.
+    divider_idle: types.Color,
+    /// Cor da divisória sob o mouse.
+    divider_hover: types.Color,
+    /// Cor da divisória durante o arraste.
+    divider_drag: types.Color,
+    /// Fundo da área de docking (transparente, `a == 0` ⇒ não desenhado).
+    bg: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Borda da área (transparente ou `border_width == 0` ⇒ não desenhada).
+    border: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Espessura da borda em px (>= 0).
+    border_width: f32 = 1.0,
+
+    pub fn isValid(self: DockStyle) bool {
+        return std.math.isFinite(self.divider) and self.divider >= 0 and
+            std.math.isFinite(self.border_width) and self.border_width >= 0;
+    }
+};
+
 /// Estilo de barra de status (M68). Chrome + métricas de
 /// posicionamento dos segmentos (ver `widgets/statusbar`).
 pub const StatusBarStyle = extern struct {
@@ -588,6 +613,18 @@ pub const Theme = extern struct {
             .padding_x = 8.0,
             .padding_y = 8.0,
             .control_size = 18.0,
+        };
+    }
+
+    pub fn dockStyle(self: Theme) DockStyle {
+        return .{
+            .divider = 6.0,
+            .divider_idle = self.border,
+            .divider_hover = types.Color.rgb(80, 80, 90),
+            .divider_drag = self.accent,
+            .bg = self.bg,
+            .border = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+            .border_width = 1.0,
         };
     }
 

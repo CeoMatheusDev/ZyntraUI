@@ -83,6 +83,7 @@ pub const widgets = struct {
     pub const statusbar = @import("widgets/statusbar.zig");
     pub const groupbox = @import("widgets/groupbox.zig");
     pub const panel = @import("widgets/panel.zig");
+    pub const dock_view = @import("widgets/dock_view.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -177,6 +178,10 @@ pub const SplitterPanes = widgets.splitter.SplitterPanes;
 pub const DockLayout = dock.layout.DockLayout;
 pub const DockOrientation = dock.layout.DockOrientation;
 pub const DockError = dock.layout.DockError;
+pub const DockSplitInfo = dock.layout.DockSplitInfo;
+pub const DockStyle = style.style_mod.DockStyle;
+pub const DockViewResult = widgets.dock_view.DockViewResult;
+pub const DockViewError = widgets.dock_view.DockViewError;
 pub const PanelOptions = widgets.panel.PanelOptions;
 pub const PanelResult = widgets.panel.PanelResult;
 pub const ListViewResult = widgets.list_view.ListViewResult;
@@ -245,4 +250,5 @@ test {
     _ = @import("widgets/statusbar.zig");
     _ = @import("widgets/groupbox.zig");
     _ = @import("widgets/panel.zig");
+    _ = @import("widgets/dock_view.zig");
 }

@@ -5,6 +5,24 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `dock/layout`: `dockSplits` + `DockSplitInfo` (M76, docking passo 3) —
+  pré-ordem dos splits com o nó (aceito por `dockSetRatio`), orientação,
+  ratio, área do split e faixa da divisória, na mesma geometria de
+  `dockPaneRects`; base para tornar cada divisória arrastável.
+- `widgets/dock_view` (M76, docking passo 3): `dockView` liga o
+  `DockLayout` à interação — desenha o fundo/borda opcionais da área e
+  torna **cada divisória arrastável** (mouse: press captura, drag move,
+  release encerra; teclado com foco: setas ±8 px, Home/End aos extremos),
+  atualizando o ratio via `dockSetRatio` e recalculando a geometria no
+  mesmo frame (`changed`, sem lag). Devolve os rects dos painéis em
+  pré-ordem para o chamador desenhar o chrome (`widgets/panel`) por cima;
+  um `Id` por divisória (`Id.child`) ⇒ foco/Tab. `DockViewResult` reporta
+  `pane_count`/`split_count`/`changed`/`hovered`/`dragging`; `DockStyle` +
+  `Theme.dockStyle()` (espessura e cores da divisória, fundo/borda
+  opcionais). `examples/minimal.zig` ganha a demo `m76`.
+
 ## [1.23.0] - 2026-10-17
 
 MINOR estável, 100% compatível: fundação de docking (painel + modelo de
