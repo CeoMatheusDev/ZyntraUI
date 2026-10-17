@@ -7,6 +7,21 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `dock/layout`: `dockPanes`/`DockPaneInfo` (id + rect dos painéis, pré-ordem)
+  e `dockFindPane` (nó da folha por id); `dockPaneRects` passa a delegar em
+  `dockPanes` (mesma geometria/erros) e `dockSplitOrdered` permite escolher em
+  qual lado o painel novo entra.
+- Re-acoplagem de painéis (M77, docking passo 4): `DockZone`
+  (`left`/`right`/`top`/`bottom`/`center`), `dockDropZone` (zona sob o cursor,
+  com `edge` clampado), `dockZoneRect` (realce), `dockMovePane` (remove o
+  painel e redivide o alvo na borda), `dockSwapPanes` (centro troca) e
+  `dockApplyDrop` (despacha).
+- `widgets/dock_view`: `DockViewOptions.dragging` (painel arrastado pelo
+  chamador) habilita o **drop de painéis** — `dockView` resolve a zona sob o
+  cursor, desenha o realce e aplica o drop no release (`DockViewResult.drop`
+  prévia, `dropped` aplicado), recalculando a geometria no mesmo frame;
+  `DockStyle.drop_preview`/`drop_border` (via `Theme.dockStyle()`) e
+  `DockViewOptions.edge_frac`. `examples/minimal.zig` ganha a demo `m77`.
 - `dock/layout`: `dockSplits` + `DockSplitInfo` (M76, docking passo 3) —
   pré-ordem dos splits com o nó (aceito por `dockSetRatio`), orientação,
   ratio, área do split e faixa da divisória, na mesma geometria de

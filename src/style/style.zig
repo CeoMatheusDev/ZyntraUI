@@ -404,6 +404,11 @@ pub const DockStyle = extern struct {
     border: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
     /// Espessura da borda em px (>= 0).
     border_width: f32 = 1.0,
+    /// Realce da zona de acoplamento durante o arraste de um painel
+    /// (transparente ⇒ não desenhado).
+    drop_preview: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    /// Borda do realce do drop (transparente ⇒ não desenhada).
+    drop_border: types.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
 
     pub fn isValid(self: DockStyle) bool {
         return std.math.isFinite(self.divider) and self.divider >= 0 and
@@ -625,6 +630,8 @@ pub const Theme = extern struct {
             .bg = self.bg,
             .border = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
             .border_width = 1.0,
+            .drop_preview = types.Color.init(self.accent.r, self.accent.g, self.accent.b, 80),
+            .drop_border = self.accent,
         };
     }
 

@@ -16,10 +16,15 @@
 //!   painéis em pré-ordem e das divisórias), com `divider` px entre lados.
 //! - `dockSplits` — pré-ordem dos splits com nó/orientação/ratio/área e
 //!   faixa da divisória (base de `widgets/dock_view`, passo 3).
+//! - `dockPanes` — pré-ordem dos painéis com id + rect (base do hit-test).
+//! - Re-acoplagem (passo 4): `dockDropZone`/`dockZoneRect` resolvem a zona
+//!   sob o cursor e o realce; `dockMovePane` redivide um painel alvo numa
+//!   borda, `dockSwapPanes` troca dois painéis e `dockApplyDrop` despacha
+//!   (borda ⇒ redivide; centro ⇒ troca).
 //!
-//! Não desenha nem trata eventos: combine com `widgets/panel` (chrome) e
-//! `widgets/dock_view` (divisórias arrastáveis) para interação. O descarte
-//! do layout (persistência/versão) fica para um passo seguinte.
+//! Não desenha nem trata eventos: combine com `widgets/panel` (chrome), e
+//! `widgets/dock_view` (divisórias arrastáveis + drop) para interação. O
+//! descarte do layout (persistência/versão) fica para um passo seguinte.
 
 const std = @import("std");
 const types = @import("../core/types.zig");
@@ -105,6 +110,20 @@ pub fn dockSplit(
     ratio: f32,
     pane: u16,
 ) DockError!usize {
+    return dockSplitOrdered(layout, leaf_index, orientation, ratio, pane, false);
+}
+
+/// Como `dockSplit`, mas `pane_first` decide em qual lado o painel novo
+/// fica (`true` ⇒ lado inicial). Devolve o índice da folha de `pane`
+/// (`dockMovePane` precisa dele para posicionar o painel movido).
+pub fn dockSplitOrdered(
+    layout: *DockLayout,
+    leaf_index: usize,
+    orientation: DockOrientation,
+    ratio: f32,
+    pane: u16,
+    pane_first: bool,
+) DockError!usize {
     if (leaf_index >= layout.len) return error.InvalidIndex;
     const original = switch (layout.nodes[leaf_index]) {
         .leaf => |p| p,
@@ -118,11 +137,11 @@ pub fn dockSplit(
     layout.nodes[leaf_index] = .{ .split = .{
         .orientation = orientation,
         .ratio = clampRatio(ratio),
-        .first = keep,
-        .second = fresh,
+        .first = if (pane_first) fresh else keep,
+        .second = if (pane_first) keep else fresh,
     } };
     layout.len += 2;
-    return fresh;
+    return if (pane_first) keep else fresh;
 }
 
 /// Ajusta a proporção do split `split_index` (clampada). No-op se não for
@@ -147,7 +166,7 @@ pub fn dockSplitRatio(layout: *const DockLayout, split_index: usize) ?f32 {
 /// lugar do pai. Recompressa a árvore (sem órfãos). Falha (e devolve
 /// `false`) se o painel não existir ou for o único.
 pub fn dockRemovePane(layout: *DockLayout, pane: u16) bool {
-    if (!hasPane(layout, pane)) return false;
+    if (dockFindPane(layout, pane) == null) return false;
     if (dockLeafCount(layout) <= 1) return false;
     var tmp: [DockLayout.max_nodes]DockLayout.Node = undefined;
     var out_len: usize = 0;
@@ -158,17 +177,17 @@ pub fn dockRemovePane(layout: *DockLayout, pane: u16) bool {
     return true;
 }
 
-/// `true` se `pane` é uma folha da árvore (índices `0..len` são sempre
-/// alcançáveis — remoções recompõem).
-fn hasPane(layout: *const DockLayout, pane: u16) bool {
+/// Índice do nó da folha do painel `pane`, ou `null` se não existir
+/// (índices `0..len` são sempre alcançáveis — remoções recompõem).
+pub fn dockFindPane(layout: *const DockLayout, pane: u16) ?usize {
     var i: usize = 0;
     while (i < layout.len) : (i += 1) {
         switch (layout.nodes[i]) {
-            .leaf => |p| if (p == pane) return true,
+            .leaf => |p| if (p == pane) return i,
             .split => {},
         }
     }
-    return false;
+    return null;
 }
 
 /// Reconstrói a subárvore `node` em `out`, ignorando a folha `skip`.
@@ -207,6 +226,53 @@ fn rebuildSkipping(
     }
 }
 
+/// Painel numa pré-ordem das folhas: id + rect.
+pub const DockPaneInfo = struct {
+    pane: u16,
+    rect: types.Rect,
+};
+
+/// Ids + rects dos painéis (pré-ordem das folhas) dentro de `bounds`, com
+/// `divider` px reservados entre os lados. Devolve o número de painéis
+/// escritos (1..`DockLayout.max_panes`). `OutOfBuffer` se `out` for menor.
+pub fn dockPanes(
+    layout: *const DockLayout,
+    bounds: types.Rect,
+    divider: f32,
+    out: []DockPaneInfo,
+) DockError!usize {
+    var n: usize = 0;
+    try panesRec(layout, layout.root, bounds, sanitizeDivider(divider), out, &n);
+    return n;
+}
+
+fn sanitizeDivider(divider: f32) f32 {
+    if (!std.math.isFinite(divider) or divider < 0) return 0;
+    return divider;
+}
+
+fn panesRec(
+    layout: *const DockLayout,
+    node: u8,
+    r: types.Rect,
+    divider: f32,
+    out: []DockPaneInfo,
+    n: *usize,
+) DockError!void {
+    switch (layout.nodes[node]) {
+        .leaf => |p| {
+            if (n.* >= out.len) return error.OutOfBuffer;
+            out[n.*] = .{ .pane = p, .rect = r };
+            n.* += 1;
+        },
+        .split => |s| {
+            const sides = splitSides(r, s.orientation, s.ratio, divider);
+            try panesRec(layout, s.first, sides.first, divider, out, n);
+            try panesRec(layout, s.second, sides.second, divider, out, n);
+        },
+    }
+}
+
 /// Rects dos painéis (pré-ordem das folhas) dentro de `bounds`, com
 /// `divider` px reservados entre os lados. Devolve o número de painéis
 /// escritos (1..`DockLayout.max_panes`). `OutOfBuffer` se `out` for menor.
@@ -216,36 +282,11 @@ pub fn dockPaneRects(
     divider: f32,
     out: []types.Rect,
 ) DockError!usize {
-    var n: usize = 0;
-    try paneRectsRec(layout, layout.root, bounds, sanitizeDivider(divider), out, &n);
+    var tmp: [DockLayout.max_panes]DockPaneInfo = undefined;
+    const n = try dockPanes(layout, bounds, divider, &tmp);
+    if (n > out.len) return error.OutOfBuffer;
+    for (tmp[0..n], 0..) |info, i| out[i] = info.rect;
     return n;
-}
-
-fn sanitizeDivider(divider: f32) f32 {
-    if (!std.math.isFinite(divider) or divider < 0) return 0;
-    return divider;
-}
-
-fn paneRectsRec(
-    layout: *const DockLayout,
-    node: u8,
-    r: types.Rect,
-    divider: f32,
-    out: []types.Rect,
-    n: *usize,
-) DockError!void {
-    switch (layout.nodes[node]) {
-        .leaf => {
-            if (n.* >= out.len) return error.OutOfBuffer;
-            out[n.*] = r;
-            n.* += 1;
-        },
-        .split => |s| {
-            const sides = splitSides(r, s.orientation, s.ratio, divider);
-            try paneRectsRec(layout, s.first, sides.first, divider, out, n);
-            try paneRectsRec(layout, s.second, sides.second, divider, out, n);
-        },
-    }
 }
 
 /// Rects das divisórias (pré-ordem dos splits). `OutOfBuffer` se `out`
@@ -334,6 +375,94 @@ fn splitsRec(
             try splitsRec(layout, s.second, sides.second, divider, out, n);
         },
     }
+}
+
+/// Zona de acoplamento dentro do rect de um painel alvo: uma borda
+/// (redivide o alvo) ou o centro (troca os painéis de lugar).
+pub const DockZone = enum { left, right, top, bottom, center };
+
+/// Zona do `point` dentro do rect de um painel, com `edge` (fração do lado
+/// disparada por vez, clampada a `[0, 0.5]`). Rect degenerado ⇒ `.center`.
+/// Empates (cantos) resolvem na ordem left → right → top → bottom.
+pub fn dockDropZone(rect: types.Rect, point: types.Vec2, edge: f32) DockZone {
+    if (!std.math.isFinite(rect.x) or !std.math.isFinite(rect.y) or
+        !std.math.isFinite(rect.w) or !std.math.isFinite(rect.h) or
+        !std.math.isFinite(point.x) or !std.math.isFinite(point.y))
+    {
+        return .center;
+    }
+    if (rect.w <= 0 or rect.h <= 0) return .center;
+    const e = std.math.clamp(if (std.math.isFinite(edge)) edge else 0.25, 0, 0.5);
+    const dx_left = (point.x - rect.x) / rect.w;
+    const dx_right = 1 - dx_left;
+    const dy_top = (point.y - rect.y) / rect.h;
+    const dy_bottom = 1 - dy_top;
+    const min = @min(@min(dx_left, dx_right), @min(dy_top, dy_bottom));
+    if (min > e) return .center;
+    if (dx_left == min) return .left;
+    if (dx_right == min) return .right;
+    if (dy_top == min) return .top;
+    return .bottom;
+}
+
+/// Rect do realce de uma zona dentro do rect do alvo (metade do lado, ou
+/// o rect inteiro no centro).
+pub fn dockZoneRect(rect: types.Rect, zone: DockZone) types.Rect {
+    const half_w = rect.w / 2;
+    const half_h = rect.h / 2;
+    return switch (zone) {
+        .left => .{ .x = rect.x, .y = rect.y, .w = half_w, .h = rect.h },
+        .right => .{ .x = rect.x + half_w, .y = rect.y, .w = half_w, .h = rect.h },
+        .top => .{ .x = rect.x, .y = rect.y, .w = rect.w, .h = half_h },
+        .bottom => .{ .x = rect.x, .y = rect.y + half_h, .w = rect.w, .h = half_h },
+        .center => rect,
+    };
+}
+
+/// Move o painel `pane` para a borda `zone` do painel `target`: remove
+/// `pane` de onde está (dissolvendo o split pai) e redivide a folha alvo,
+/// com o painel movido no lado correspondente (`.left`/`.top` ⇒ lado
+/// inicial; `.right`/`.bottom` ⇒ lado final). `.center` é recusado (use
+/// `dockSwapPanes`). Devolve `false` sem efeito se a operação for inválida
+/// (`pane == target`, painel inexistente ou layout de painel único).
+pub fn dockMovePane(layout: *DockLayout, pane: u16, target: u16, zone: DockZone) bool {
+    const orientation: DockOrientation = switch (zone) {
+        .left, .right => .vertical,
+        .top, .bottom => .horizontal,
+        .center => return false,
+    };
+    const pane_first = switch (zone) {
+        .left, .top => true,
+        .right, .bottom => false,
+        .center => return false,
+    };
+    if (pane == target) return false;
+    if (dockFindPane(layout, pane) == null or dockFindPane(layout, target) == null) return false;
+    if (!dockRemovePane(layout, pane)) return false;
+    const idx = dockFindPane(layout, target) orelse return false;
+    _ = dockSplitOrdered(layout, idx, orientation, 0.5, pane, pane_first) catch return false;
+    return true;
+}
+
+/// Troca os painéis `a` e `b` de posição (a estrutura não muda: apenas as
+/// folhas trocam de id, então cada um passa a ocupar o rect do outro).
+/// `false` se algum não existir ou `a == b`.
+pub fn dockSwapPanes(layout: *DockLayout, a: u16, b: u16) bool {
+    if (a == b) return false;
+    const ia = dockFindPane(layout, a) orelse return false;
+    const ib = dockFindPane(layout, b) orelse return false;
+    layout.nodes[ia] = .{ .leaf = b };
+    layout.nodes[ib] = .{ .leaf = a };
+    return true;
+}
+
+/// Aplica um drop do painel `pane` sobre `target` na `zone`: borda ⇒
+/// `dockMovePane`; centro ⇒ `dockSwapPanes`.
+pub fn dockApplyDrop(layout: *DockLayout, pane: u16, target: u16, zone: DockZone) bool {
+    return switch (zone) {
+        .center => dockSwapPanes(layout, pane, target),
+        else => dockMovePane(layout, pane, target, zone),
+    };
 }
 
 /// Divide `r`: `first` (proporção), `divider` (`divider` px centrados) e
@@ -501,4 +630,148 @@ test "dock: limites, erros e buffer pequeno" {
     var div_one: [1]types.Rect = undefined;
     try stdt.testing.expectEqual(@as(usize, 1), try dockDividerRects(&l2, types.Rect.init(0, 0, 100, 50), 8, &div_one));
     try stdt.testing.expect(div_one[0].x >= 0 and div_one[0].x + div_one[0].w <= 100);
+}
+
+test "dock: painéis (id + rect) e busca por id" {
+    const stdt = @import("std");
+    var layout: DockLayout = undefined;
+    dockInit(&layout, 5);
+    const b = try dockSplit(&layout, 0, .vertical, 0.5, 6);
+    _ = try dockSplit(&layout, b, .horizontal, 0.5, 7);
+
+    var infos: [DockLayout.max_panes]DockPaneInfo = undefined;
+    const n = try dockPanes(&layout, types.Rect.init(0, 0, 400, 300), 8, &infos);
+    try stdt.testing.expectEqual(@as(usize, 3), n);
+    // Mesma pré-ordem/geometria de `dockPaneRects`.
+    var rects: [DockLayout.max_panes]types.Rect = undefined;
+    const nr = try dockPaneRects(&layout, types.Rect.init(0, 0, 400, 300), 8, &rects);
+    try stdt.testing.expectEqual(n, nr);
+    for (infos[0..n], rects[0..nr]) |info, r| try stdt.testing.expectEqual(r, info.rect);
+    try stdt.testing.expectEqual(@as(u16, 5), infos[0].pane);
+    try stdt.testing.expectEqual(@as(u16, 6), infos[1].pane);
+    try stdt.testing.expectEqual(@as(u16, 7), infos[2].pane);
+
+    // `dockFindPane` acha o nó da folha; reforça o contrato de `hasPane`
+    // já removido (remoção por id).
+    try stdt.testing.expectEqual(@as(?usize, 1), dockFindPane(&layout, 5));
+    try stdt.testing.expectEqual(@as(?u16, 7), dockNodePane(&layout, dockFindPane(&layout, 7).?));
+    try stdt.testing.expectEqual(@as(?usize, null), dockFindPane(&layout, 99));
+    try stdt.testing.expect(!dockRemovePane(&layout, 99));
+}
+
+test "dock: zonas de drop e realce" {
+    const stdt = @import("std");
+    const rect = types.Rect.init(0, 0, 100, 200);
+    const left = types.Vec2.init(5, 100);
+    const right = types.Vec2.init(95, 100);
+    const top = types.Vec2.init(50, 5);
+    const bottom = types.Vec2.init(50, 195);
+    const center = types.Vec2.init(50, 100);
+
+    try stdt.testing.expectEqual(DockZone.left, dockDropZone(rect, left, 0.25));
+    try stdt.testing.expectEqual(DockZone.right, dockDropZone(rect, right, 0.25));
+    try stdt.testing.expectEqual(DockZone.top, dockDropZone(rect, top, 0.25));
+    try stdt.testing.expectEqual(DockZone.bottom, dockDropZone(rect, bottom, 0.25));
+    try stdt.testing.expectEqual(DockZone.center, dockDropZone(rect, center, 0.25));
+
+    // Fora do rect não é o hit-test (é do chamador): a métrica mais próxima
+    // vence (aqui, a borda esquerda).
+    try stdt.testing.expectEqual(DockZone.left, dockDropZone(rect, types.Vec2.init(-10, -10), 0.25));
+    // Limites: `edge = 0` só dispara exatamente na borda; `edge > 0.5` é
+    // clampado (aqui 0.9 ⇒ 0.5, e ainda assim é borda, não centro).
+    try stdt.testing.expectEqual(DockZone.left, dockDropZone(rect, types.Vec2.init(0, 100), 0));
+    try stdt.testing.expectEqual(DockZone.center, dockDropZone(rect, types.Vec2.init(1, 100), 0));
+    try stdt.testing.expectEqual(DockZone.left, dockDropZone(rect, types.Vec2.init(49, 100), 0.5));
+    try stdt.testing.expectEqual(DockZone.left, dockDropZone(rect, types.Vec2.init(30, 110), 0.9));
+    // `edge` não-finito cai no padrão (0.25).
+    try stdt.testing.expectEqual(DockZone.left, dockDropZone(rect, left, std.math.nan(f32)));
+    // Rect degenerado/não-finito ⇒ centro.
+    try stdt.testing.expectEqual(DockZone.center, dockDropZone(types.Rect.init(0, 0, 0, 200), center, 0.25));
+    try stdt.testing.expectEqual(DockZone.center, dockDropZone(types.Rect.init(std.math.nan(f32), 0, 10, 10), center, 0.25));
+
+    // Realce: metade correspondente, ou o rect inteiro no centro.
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 50, 200), dockZoneRect(rect, .left));
+    try stdt.testing.expectEqual(types.Rect.init(50, 0, 50, 200), dockZoneRect(rect, .right));
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 100, 100), dockZoneRect(rect, .top));
+    try stdt.testing.expectEqual(types.Rect.init(0, 100, 100, 100), dockZoneRect(rect, .bottom));
+    try stdt.testing.expectEqual(rect, dockZoneRect(rect, .center));
+}
+
+test "dock: mover e trocar painéis (drop)" {
+    const stdt = @import("std");
+    const bounds = types.Rect.init(0, 0, 400, 300);
+
+    // Painel 0 à esquerda; 1 e 2 empilhados à direita.
+    var layout: DockLayout = undefined;
+    dockInit(&layout, 0);
+    const right = try dockSplit(&layout, 0, .vertical, 0.5, 1);
+    _ = try dockSplit(&layout, right, .horizontal, 0.5, 2);
+
+    // `.center` em `dockMovePane` é recusado (só `dockApplyDrop` troca).
+    try stdt.testing.expect(!dockMovePane(&layout, 2, 0, .center));
+    // Sobre si mesmo / alvo inexistente / painel inexistente: sem efeito.
+    try stdt.testing.expect(!dockMovePane(&layout, 2, 2, .left));
+    try stdt.testing.expect(!dockMovePane(&layout, 2, 99, .left));
+    try stdt.testing.expect(!dockMovePane(&layout, 99, 0, .left));
+    try stdt.testing.expect(!dockSwapPanes(&layout, 2, 2));
+    try stdt.testing.expect(!dockSwapPanes(&layout, 2, 99));
+    try stdt.testing.expectEqual(@as(usize, 3), dockLeafCount(&layout));
+    try stdt.testing.expectEqual(@as(usize, 5), dockNodeCount(&layout));
+
+    // Move o painel 2 para a esquerda do painel 0: dissolve o split dele e
+    // redivide o alvo, com o movido no lado inicial.
+    try stdt.testing.expect(dockMovePane(&layout, 2, 0, .left));
+    try stdt.testing.expectEqual(@as(usize, 3), dockLeafCount(&layout));
+    var infos: [DockLayout.max_panes]DockPaneInfo = undefined;
+    _ = try dockPanes(&layout, bounds, 0, &infos);
+    try stdt.testing.expectEqual(@as(u16, 2), infos[0].pane);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 100, 300), infos[0].rect);
+    try stdt.testing.expectEqual(@as(u16, 0), infos[1].pane);
+    try stdt.testing.expectEqual(types.Rect.init(100, 0, 100, 300), infos[1].rect);
+    try stdt.testing.expectEqual(@as(u16, 1), infos[2].pane);
+    try stdt.testing.expectEqual(types.Rect.init(200, 0, 200, 300), infos[2].rect);
+
+    // Depois do movimento, o novo split tem ratio 0.5.
+    var splits: [DockLayout.max_panes]DockSplitInfo = undefined;
+    const ns = try dockSplits(&layout, bounds, 0, &splits);
+    try stdt.testing.expectEqual(@as(usize, 2), ns);
+    try stdt.testing.expectApproxEqAbs(@as(f32, 0.5), splits[1].ratio, 0.0001);
+
+    // Move para baixo do painel 1 (orientação horizontal, lado final).
+    try stdt.testing.expect(dockMovePane(&layout, 2, 1, .bottom));
+    _ = try dockPanes(&layout, bounds, 0, &infos);
+    try stdt.testing.expectEqual(@as(u16, 0), infos[0].pane);
+    try stdt.testing.expectEqual(@as(u16, 1), infos[1].pane);
+    try stdt.testing.expectEqual(@as(u16, 2), infos[2].pane);
+
+    // Centro ⇒ troca: `dockApplyDrop` delega para `dockSwapPanes`.
+    try stdt.testing.expect(dockApplyDrop(&layout, 0, 2, .center));
+    _ = try dockPanes(&layout, bounds, 0, &infos);
+    try stdt.testing.expectEqual(@as(u16, 2), infos[0].pane);
+    try stdt.testing.expectEqual(@as(u16, 1), infos[1].pane);
+    try stdt.testing.expectEqual(@as(u16, 0), infos[2].pane);
+    try stdt.testing.expect(!dockApplyDrop(&layout, 2, 2, .center));
+
+    // Borda ⇒ redivide (via `dockApplyDrop`).
+    try stdt.testing.expect(dockApplyDrop(&layout, 0, 1, .top));
+    try stdt.testing.expectEqual(@as(usize, 3), dockLeafCount(&layout));
+
+    // Layout de um painel só: nada a mover.
+    var single: DockLayout = undefined;
+    dockInit(&single, 42);
+    try stdt.testing.expect(!dockMovePane(&single, 42, 42, .left));
+    try stdt.testing.expect(!dockSwapPanes(&single, 42, 43));
+
+    // Capacidade esgotada (16 painéis): remover liberta nós ⇒ mover cabe.
+    var full: DockLayout = undefined;
+    dockInit(&full, 0);
+    var next: u16 = 1;
+    while (next < DockLayout.max_panes) : (next += 1) {
+        _ = try dockSplit(&full, full.len - 1, .horizontal, 0.5, next);
+    }
+    try stdt.testing.expectEqual(DockLayout.max_panes, dockLeafCount(&full));
+    const moved_pane: u16 = DockLayout.max_panes - 1;
+    try stdt.testing.expect(dockMovePane(&full, moved_pane, 0, .top));
+    try stdt.testing.expectEqual(DockLayout.max_panes, dockLeafCount(&full));
+    try stdt.testing.expect(full.len <= DockLayout.max_nodes);
 }
