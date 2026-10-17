@@ -1194,3 +1194,47 @@ test "TreeView mouse collapse clamps selection and reports change" {
     try testing.expectEqual(@as(?usize, 0), result.toggled_index);
     ctx.endFrame();
 }
+
+test "TreeView keyboard collapse clamps scroll to new content height" {
+    const testing = std.testing;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(testing.allocator, .{});
+    defer ctx.deinit();
+
+    var children: [24]TreeItem = undefined;
+    for (&children) |*child| {
+        child.* = .{ .label = "child", .children = &[_]TreeItem{} };
+    }
+    var items = [_]TreeItem{
+        .{ .label = "parent", .children = &children, .expanded = true },
+        .{ .label = "tail", .children = &[_]TreeItem{} },
+    };
+    const bounds = types.Rect.init(0, 0, 240, style.item_height * 3);
+    const id = id_mod.Id.fromString("test:tree-collapse-scroll");
+    var selected: usize = 0;
+    var scroll: f32 = treeViewMaxScroll(&items, bounds.h, style);
+    try testing.expect(scroll > 0);
+
+    // Acquire focus without selecting another row: click on the expander
+    // would change the tree before keyboard processing.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{
+        .button = .left,
+        .pressed = true,
+        .pos = types.Vec2.init(100, 10),
+    } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    ctx.endFrame();
+
+    // Restore the scroll position, then collapse the focused parent.
+    scroll = treeViewMaxScroll(&items, bounds.h, style);
+    selected = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    const result = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try testing.expect(!items[0].expanded);
+    try testing.expectEqual(@as(f32, 0), treeViewMaxScroll(&items, bounds.h, style));
+    try testing.expectEqual(@as(f32, 0), scroll);
+    try testing.expectEqual(scroll, result.scroll_offset);
+    ctx.endFrame();
+}
