@@ -77,6 +77,17 @@ pub const DrawCommand = union(enum) {
         color0: types.Color,
         color1: types.Color,
     },
+    /// Sombra projetada de um retângulo de cantos arredondados: a
+    /// silhueta `rect` é deslocada por `offset` e atenuada em `blur` px
+    /// (falloff LINEAR centrado na borda — aproximação barata de blur via
+    /// SDF, sem passe offscreen). Não desenha a forma: desenhe-a por cima.
+    rect_shadow: extern struct {
+        rect: types.Rect,
+        radius: f32,
+        offset: types.Vec2,
+        blur: f32,
+        color: types.Color,
+    },
 
     fn finite(v: f32) bool {
         return std.math.isFinite(v);
@@ -128,6 +139,14 @@ pub const DrawCommand = union(enum) {
                     c.rect.w >= 0 and c.rect.h >= 0 and
                     finite(c.p0.x) and finite(c.p0.y) and
                     finite(c.p1.x) and finite(c.p1.y);
+            },
+            .rect_shadow => |c| {
+                return finite(c.rect.x) and finite(c.rect.y) and
+                    finite(c.rect.w) and finite(c.rect.h) and
+                    c.rect.w >= 0 and c.rect.h >= 0 and
+                    finite(c.radius) and c.radius >= 0 and
+                    finite(c.offset.x) and finite(c.offset.y) and
+                    finite(c.blur) and c.blur >= 0;
             },
         }
     }
@@ -225,6 +244,25 @@ pub const DrawList = struct {
             .p1 = p1,
             .color0 = color0,
             .color1 = color1,
+        } });
+    }
+
+    /// Sombra projetada de um retângulo arredondado (`off` desloca, `blur` atenua).
+    pub fn rectShadow(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        rect: types.Rect,
+        radius: f32,
+        off: types.Vec2,
+        blur: f32,
+        color: types.Color,
+    ) !void {
+        try self.push(gpa, .{ .rect_shadow = .{
+            .rect = rect,
+            .radius = radius,
+            .offset = off,
+            .blur = blur,
+            .color = color,
         } });
     }
 
@@ -336,6 +374,42 @@ test "DrawList rectGradient + validação" {
         types.Vec2.init(4, 0),
         types.Color.rgb(0, 0, 0),
         types.Color.rgb(255, 255, 255),
+    ));
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+}
+
+test "DrawList rectShadow + validação" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    try dl.rectShadow(
+        gpa,
+        types.Rect.init(0, 0, 10, 10),
+        4,
+        types.Vec2.init(2, 3),
+        6,
+        .{ .r = 0, .g = 0, .b = 0, .a = 128 },
+    );
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    try stdt.testing.expect(dl.items()[0].isValid());
+
+    try stdt.testing.expectError(error.InvalidCommand, dl.rectShadow(
+        gpa,
+        types.Rect.init(0, 0, 10, 10),
+        4,
+        types.Vec2.init(0, 0),
+        -1,
+        types.Color.rgb(0, 0, 0),
+    ));
+    try stdt.testing.expectError(error.InvalidCommand, dl.rectShadow(
+        gpa,
+        types.Rect.init(0, 0, 10, 10),
+        4,
+        types.Vec2.init(std.math.inf(f32), 0),
+        1,
+        types.Color.rgb(0, 0, 0),
     ));
     try stdt.testing.expectEqual(@as(usize, 1), dl.len());
 }

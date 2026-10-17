@@ -61,6 +61,22 @@ pub fn commandBounds(cmd: commands.DrawCommand) ?types.Rect {
         },
         .rect_rounded => |c| return c.rect,
         .rect_gradient => |c| return c.rect,
+        .rect_shadow => |c| {
+            // União da silhueta e da silhueta deslocada, expandida pelo
+            // raio de atenuação (+1px de margem de amostragem).
+            const sr = types.Rect{
+                .x = c.rect.x + c.offset.x,
+                .y = c.rect.y + c.offset.y,
+                .w = c.rect.w,
+                .h = c.rect.h,
+            };
+            const pad = c.blur / 2 + 1;
+            const x = @min(c.rect.x, sr.x) - pad;
+            const y = @min(c.rect.y, sr.y) - pad;
+            const x2 = @max(c.rect.x + c.rect.w, sr.x + sr.w) + pad;
+            const y2 = @max(c.rect.y + c.rect.h, sr.y + sr.h) + pad;
+            return .{ .x = x, .y = y, .w = x2 - x, .h = y2 - y };
+        },
     }
 }
 
@@ -207,6 +223,17 @@ test "cull usa bounds do retângulo arredondado" {
             .p1 = types.Vec2.init(0, 10),
             .color0 = types.Color.rgb(0, 0, 0),
             .color1 = types.Color.rgb(255, 255, 255),
+        } }).?,
+    );
+    // Sombra: união da silhueta e da silhueta deslocada + pad (blur/2 + 1).
+    try stdt.testing.expectEqual(
+        types.Rect.init(6, 6, 30, 31),
+        commandBounds(.{ .rect_shadow = .{
+            .rect = types.Rect.init(10, 10, 20, 20),
+            .radius = 4,
+            .offset = types.Vec2.init(2, 3),
+            .blur = 6,
+            .color = .{ .r = 0, .g = 0, .b = 0, .a = 128 },
         } }).?,
     );
     const cmds = [_]commands.DrawCommand{

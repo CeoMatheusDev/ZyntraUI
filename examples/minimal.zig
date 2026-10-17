@@ -1036,4 +1036,26 @@ pub fn main() !void {
         "m91 gradient px0={d} px1={d} px2={d} px3={d}\n",
         .{ gr_fb.get(0, 0)[0], gr_fb.get(1, 0)[0], gr_fb.get(2, 0)[0], gr_fb.get(3, 0)[0] },
     );
+
+    // Draw moderno (M92): sombra projetada (silhueta deslocada + falloff
+    // linear). Silhueta 8x8, offset (4,0), blur 4: dentro cheio, borda
+    // atenuada (159 ≈ 62%) e fora limpo.
+    var sh_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 16, 8);
+    defer sh_fb.deinit(allocator);
+    sh_fb.clear(zyntra_ui.Color.rgb(0, 0, 0));
+    ctx.beginFrame();
+    try ctx.draw.rectShadow(
+        allocator,
+        zyntra_ui.Rect.init(0, 0, 8, 8),
+        0,
+        zyntra_ui.Vec2.init(4, 0),
+        4,
+        zyntra_ui.Color.rgb(255, 255, 255),
+    );
+    _ = try zyntra_ui.software.raster.render(&sh_fb, ctx.drawCommands(), zyntra_ui.Rect.init(0, 0, 16, 8));
+    ctx.endFrame();
+    std.debug.print(
+        "m92 shadow inside={d} edge={d} out={d}\n",
+        .{ sh_fb.get(6, 4)[0], sh_fb.get(11, 4)[0], sh_fb.get(14, 4)[0] },
+    );
 }

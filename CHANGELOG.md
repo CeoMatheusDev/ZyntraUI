@@ -7,6 +7,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `draw/commands` + `software/raster`: **sombra projetada** (M92, aditivo)
+  — novo comando `rect_shadow` (`rect`, `radius`, `offset`, `blur`,
+  `color`) e helper `DrawList.rectShadow`. A silhueta (retângulo
+  arredondado) é deslocada e atenuada por um **falloff linear centrado na
+  borda** (`cov = clamp(0.5 - d/blur)`) usando o mesmo SDF do `rect_rounded`
+  — aproximação barata de blur, sem passe offscreen (`blur == 0` deixa a
+  borda dura com 1px de AA). O bounds no `renderer` cobre a união das duas
+  silhuetas + `blur/2 + 1`, então culling e desenho concordam.
+  `examples/minimal.zig` ganha a demo `m92`.
 - `draw/commands` + `software/raster`: **gradiente linear** (M91, aditivo)
   — novo comando `rect_gradient` (`rect`, eixo `p0`→`p1`, `color0`/
   `color1`) e helper `DrawList.rectGradient`. O backend de referência

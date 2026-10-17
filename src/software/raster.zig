@@ -209,18 +209,23 @@ pub const SoftwareFramebuffer = struct {
         }
     }
 
-    /// Cobertura (0..1) do ponto (`px`,`py`) num retângulo de cantos
-    /// arredondados: SDF clássico; `< 0` dentro, `0` na borda. A
-    /// conversão em cobertura usa meia-largura de 1px (borda AA).
-    fn roundRectCoverage(px: f32, py: f32, r: types.Rect, rad: f32) f32 {
+    /// Distância assinada (negativa dentro) ao retângulo de cantos
+    /// arredondados — o SDF usado pela cobertura AA e pela sombra.
+    fn roundRectDist(px: f32, py: f32, r: types.Rect, rad: f32) f32 {
         const hw = r.w / 2;
         const hh = r.h / 2;
         const qx = @abs(px - (r.x + hw)) - (hw - rad);
         const qy = @abs(py - (r.y + hh)) - (hh - rad);
         const ox = @max(qx, 0);
         const oy = @max(qy, 0);
-        const d = @sqrt(ox * ox + oy * oy) + @min(@max(qx, qy), 0) - rad;
-        return std.math.clamp(0.5 - d, 0, 1);
+        return @sqrt(ox * ox + oy * oy) + @min(@max(qx, qy), 0) - rad;
+    }
+
+    /// Cobertura (0..1) do ponto (`px`,`py`) num retângulo de cantos
+    /// arredondados: `< 0` dentro, `0` na borda. A conversão em cobertura
+    /// usa meia-largura de 1px (borda AA).
+    fn roundRectCoverage(px: f32, py: f32, r: types.Rect, rad: f32) f32 {
+        return std.math.clamp(0.5 - roundRectDist(px, py, r, rad), 0, 1);
     }
 
     /// Retângulo de cantos arredondados via SDF: amostra o centro de
@@ -246,6 +251,52 @@ pub const SoftwareFramebuffer = struct {
                 const fx: f32 = @floatFromInt(x);
                 const fy: f32 = @floatFromInt(y);
                 const cov = roundRectCoverage(fx + 0.5, fy + 0.5, r, rad);
+                if (cov <= 0) continue;
+                const fa: f32 = @round(cov * base_a);
+                const ea: u8 = @intFromFloat(@min(fa, 255.0));
+                if (ea == 0) continue;
+                self.set(@intCast(x), @intCast(y), .{ .r = c.r, .g = c.g, .b = c.b, .a = ea });
+            }
+        }
+    }
+
+    /// Sombra projetada: a silhueta `r` é deslocada por `off` e atenuada
+    /// em `blur` px (falloff linear centrado na borda — aproximação
+    /// barata de blur via SDF, sem passe offscreen). `blur == 0` deixa a
+    /// borda dura com 1px de AA. Entradas não-finitas saturam em no-op.
+    pub fn fillShadow(
+        self: *Self,
+        r: types.Rect,
+        radius: f32,
+        off: types.Vec2,
+        blur: f32,
+        clip: ?types.Rect,
+        c: types.Color,
+    ) void {
+        if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
+            !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
+            !std.math.isFinite(radius) or radius < 0 or
+            !std.math.isFinite(off.x) or !std.math.isFinite(off.y) or
+            !std.math.isFinite(blur) or blur < 0) return;
+        if (r.w <= 0 or r.h <= 0 or c.a == 0) return;
+        const sr = types.Rect{ .x = r.x + off.x, .y = r.y + off.y, .w = r.w, .h = r.h };
+        const rad = @min(radius, @min(r.w, r.h) / 2);
+        const pad = blur / 2 + 1;
+        const x0 = @max(0, @as(i64, @intFromFloat(@floor(sr.x - pad))));
+        const y0 = @max(0, @as(i64, @intFromFloat(@floor(sr.y - pad))));
+        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(sr.x + sr.w + pad))));
+        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(sr.y + sr.h + pad))));
+        const denom = @max(blur, 1.0);
+        const base_a: f32 = @floatFromInt(c.a);
+        var y = y0;
+        while (y < y_end) : (y += 1) {
+            var x = x0;
+            while (x < x_end) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                const fx: f32 = @floatFromInt(x);
+                const fy: f32 = @floatFromInt(y);
+                const d = roundRectDist(fx + 0.5, fy + 0.5, sr, rad);
+                const cov = std.math.clamp(0.5 - d / denom, 0, 1);
                 if (cov <= 0) continue;
                 const fa: f32 = @round(cov * base_a);
                 const ea: u8 = @intFromFloat(@min(fa, 255.0));
@@ -386,6 +437,7 @@ pub fn render(fb: *SoftwareFramebuffer, cmds: []const commands.DrawCommand, view
                     .circle_filled => |c| fb.fillCircle(c.center, c.radius, mergeClip(clip, vp), c.color),
                     .rect_rounded => |c| fb.fillRoundRect(c.rect, c.radius, mergeClip(clip, vp), c.color),
                     .rect_gradient => |c| fb.fillGradient(c.rect, c.p0, c.p1, c.color0, c.color1, mergeClip(clip, vp)),
+                    .rect_shadow => |c| fb.fillShadow(c.rect, c.radius, c.offset, c.blur, mergeClip(clip, vp), c.color),
                     else => unreachable,
                 }
                 out.drawn += 1;
@@ -577,6 +629,8 @@ fn fuzzRaster(_: void, smith: *std.testing.Smith) !void {
     fb.fillRoundRect(r, @abs(bits[3]), types.Rect.init(-100, -100, 1000, 1000), c);
     fb.fillGradient(r, p0, p1, c, c, null);
     fb.fillGradient(r, p0, p1, c, c, types.Rect.init(-100, -100, 1000, 1000));
+    fb.fillShadow(r, @abs(bits[3]), p0, @abs(bits[1]), null, c);
+    fb.fillShadow(r, @abs(bits[3]), p0, @abs(bits[1]), types.Rect.init(-100, -100, 1000, 1000), c);
 
     // Invariante estrutural: tamanho do buffer intacto.
     try std.testing.expectEqual(@as(usize, 16 * 16 * 4), fb.pixels.len);
@@ -807,4 +861,112 @@ test "raster gradiente linear: horizontal, vertical, degenerado e clip" {
         null,
     );
     try stdt.testing.expectEqual(before, fb5.get(2, 0));
+}
+
+test "raster sombra projetada: offset, blur, raio e no-op" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+
+    // Deslocamento puro (blur 0): a silhueta anda com o offset e o antigo
+    // lugar fica limpo.
+    var fb = try SoftwareFramebuffer.init(gpa, 12, 6);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+    fb.fillShadow(
+        types.Rect.init(0, 0, 4, 4),
+        0,
+        types.Vec2.init(6, 0),
+        0,
+        null,
+        types.Color.rgb(255, 255, 255),
+    );
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(1, 2));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb.get(7, 2));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(11, 2));
+
+    // Atenuação linear: cov = clamp(0.5 - d/blur) sobre a borda.
+    var fb2 = try SoftwareFramebuffer.init(gpa, 16, 16);
+    defer fb2.deinit(gpa);
+    fb2.clear(types.Color.rgb(0, 0, 0));
+    fb2.fillShadow(
+        types.Rect.init(0, 0, 10, 10),
+        0,
+        types.Vec2.init(0, 0),
+        8,
+        null,
+        types.Color.rgb(255, 255, 255),
+    );
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb2.get(5, 5)); // fundo cheio
+    try stdt.testing.expectEqual([4]u8{ 143, 143, 143, 255 }, fb2.get(0, 0)); // d=-0.5
+    try stdt.testing.expectEqual([4]u8{ 175, 175, 175, 255 }, fb2.get(1, 1)); // d=-1.5
+    try stdt.testing.expectEqual([4]u8{ 48, 48, 48, 255 }, fb2.get(12, 8)); // fora, d=2.5
+
+    // Raio arredonda a silhueta; canto cortado, centro cheio.
+    var fb3 = try SoftwareFramebuffer.init(gpa, 10, 10);
+    defer fb3.deinit(gpa);
+    fb3.clear(types.Color.rgb(0, 0, 0));
+    fb3.fillShadow(
+        types.Rect.init(0, 0, 10, 10),
+        5,
+        types.Vec2.init(0, 0),
+        0,
+        null,
+        types.Color.rgb(0, 255, 0),
+    );
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb3.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 255, 0, 255 }, fb3.get(5, 5));
+
+    // Alfa herda o blending (50% preto sobre branco) e no-ops não pintam.
+    var fb4 = try SoftwareFramebuffer.init(gpa, 8, 4);
+    defer fb4.deinit(gpa);
+    fb4.clear(types.Color.rgb(255, 255, 255));
+    fb4.fillShadow(
+        types.Rect.init(0, 0, 4, 4),
+        0,
+        types.Vec2.init(0, 0),
+        0,
+        null,
+        .{ .r = 0, .g = 0, .b = 0, .a = 128 },
+    );
+    try stdt.testing.expectEqual([4]u8{ 127, 127, 127, 255 }, fb4.get(1, 1));
+    const before = fb4.get(6, 0);
+    fb4.fillShadow(types.Rect.init(0, 0, 4, 4), 0, types.Vec2.init(0, 0), -1, null, types.Color.rgb(9, 9, 9));
+    fb4.fillShadow(types.Rect.init(0, 0, 0, 4), 0, types.Vec2.init(0, 0), 2, null, types.Color.rgb(9, 9, 9));
+    fb4.fillShadow(types.Rect.init(0, 0, 4, 4), 0, types.Vec2.init(std.math.nan(f32), 0), 2, null, types.Color.rgb(9, 9, 9));
+    fb4.fillShadow(types.Rect.init(0, 0, 4, 4), 0, types.Vec2.init(0, 0), 2, null, .{ .r = 9, .g = 9, .b = 9, .a = 0 });
+    try stdt.testing.expectEqual(before, fb4.get(6, 0));
+}
+
+test "render com sombra projetada (drawn + cull)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 60, 40);
+    defer fb.deinit(gpa);
+    const vp = types.Rect.init(0, 0, 60, 40);
+    const cmds = [_]commands.DrawCommand{
+        .{ .clear = .{ .color = types.Color.rgb(0, 0, 0) } },
+        .{ .rect_shadow = .{
+            .rect = types.Rect.init(10, 10, 20, 20),
+            .radius = 4,
+            .offset = types.Vec2.init(4, 4),
+            .blur = 8,
+            .color = .{ .r = 255, .g = 255, .b = 255, .a = 128 },
+        } },
+        .{ .rect_shadow = .{
+            .rect = types.Rect.init(500, 500, 20, 20),
+            .radius = 4,
+            .offset = types.Vec2.init(4, 4),
+            .blur = 4,
+            .color = .{ .r = 255, .g = 255, .b = 255, .a = 128 },
+        } },
+    };
+    const s = try render(&fb, &cmds, vp);
+    try stdt.testing.expectEqual(@as(u32, 3), s.submitted);
+    try stdt.testing.expectEqual(@as(u32, 2), s.drawn);
+    try stdt.testing.expectEqual(@as(u32, 1), s.culled);
+    // Miolo da sombra (bem dentro da silhueta deslocada) pintado;
+    // fora do raio de atenuação permanece limpo.
+    try stdt.testing.expect(fb.get(24, 24)[0] > 0);
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(1, 1));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(58, 38));
 }
