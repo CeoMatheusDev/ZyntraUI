@@ -979,3 +979,27 @@ test "TreeView traversal: preorder skips collapsed descendants without allocatio
     try testing.expectEqual(@as(usize, 2), treeViewFind(&items, 2).?.depth);
     try testing.expectEqual(@as(usize, 0), treeViewFind(&items, 5).?.depth);
 }
+
+test "TreeView pending keyboard toggles preserve S1 until commit" {
+    const testing = std.testing;
+    var child = [_]TreeItem{
+        .{ .label = "child", .children = &[_]TreeItem{} },
+    };
+    var items = [_]TreeItem{
+        .{ .label = "parent", .children = &child, .expanded = false },
+        .{ .label = "sibling", .children = &[_]TreeItem{} },
+    };
+    var pending: TreePending = .empty;
+    defer pending.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), treeViewCountVisible(&items));
+    try treeViewToggle(&pending, testing.allocator, &items[0]);
+    try testing.expect(!items[0].expanded);
+    try testing.expectEqual(@as(usize, 2), treeViewCountVisible(&items));
+    try testing.expectEqualStrings("sibling", treeViewFind(&items, 1).?.item.label);
+
+    treeViewCommit(&pending);
+    try testing.expect(items[0].expanded);
+    try testing.expectEqual(@as(usize, 3), treeViewCountVisible(&items));
+    try testing.expectEqualStrings("child", treeViewFind(&items, 1).?.item.label);
+}
