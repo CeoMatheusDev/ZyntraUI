@@ -710,7 +710,6 @@ test "TreeView colapso, scroll, contagem e profundidade" {
     ctx.endFrame();
 }
 
-
 test "TreeView golden G5: Right repetido alterna o mesmo no sem navegar" {
     const testing = std.testing;
     const style = style_mod.Theme.darkDefault().treeViewStyle();
@@ -733,7 +732,15 @@ test "TreeView golden G5: Right repetido alterna o mesmo no sem navegar" {
     ctx.focus_owner = id;
     try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
     try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
-    const result = try beginTreeView(&ctx, id, types.Rect.init(0, 0, 300, 120), &items, &selected, &scroll, style);
+    const result = try beginTreeView(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 300, 120),
+        &items,
+        &selected,
+        &scroll,
+        style,
+    );
 
     try testing.expectEqual(@as(usize, 0), selected);
     try testing.expectEqual(@as(usize, 0), result.selected);
@@ -774,7 +781,15 @@ test "TreeView golden G11: Right Down Enter navega na sequencia S1" {
     try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
     try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
     try ctx.pushEvent(.{ .key = .{ .key = .enter, .pressed = true, .modifiers = .{} } });
-    const result = try beginTreeView(&ctx, id, types.Rect.init(0, 0, 300, 120), &items, &selected, &scroll, style);
+    const result = try beginTreeView(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 300, 120),
+        &items,
+        &selected,
+        &scroll,
+        style,
+    );
 
     try testing.expectEqual(@as(usize, 1), selected);
     try testing.expectEqual(@as(usize, 1), result.selected);
@@ -797,7 +812,6 @@ test "TreeView golden G11: Right Down Enter navega na sequencia S1" {
     try testing.expectEqual(@as(usize, 3), texts);
     ctx.endFrame();
 }
-
 
 test "TreeView golden G6: scrollbar usa S2 enquanto linhas usam S1" {
     const testing = std.testing;
@@ -825,7 +839,15 @@ test "TreeView golden G6: scrollbar usa S2 enquanto linhas usam S1" {
     ctx.beginFrame();
     ctx.focus_owner = id;
     try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
-    const result = try beginTreeView(&ctx, id, types.Rect.init(0, 0, 300, 72), &items, &selected, &scroll, style);
+    const result = try beginTreeView(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 300, 72),
+        &items,
+        &selected,
+        &scroll,
+        style,
+    );
     try testing.expect(items[0].expanded);
     try testing.expectEqual(@as(usize, 0), result.selected);
     try testing.expectEqual(@as(f32, 0), result.scroll_offset);
@@ -871,7 +893,15 @@ test "TreeView golden G12: wheel preserva intervalo de indices anterior" {
 
     ctx.beginFrame();
     try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = -1, .pos = types.Vec2.init(150, 24) } });
-    const result = try beginTreeView(&ctx, id, types.Rect.init(0, 0, 300, 48), &items, &selected, &scroll, style);
+    const result = try beginTreeView(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 300, 48),
+        &items,
+        &selected,
+        &scroll,
+        style,
+    );
     try testing.expectEqual(@as(f32, 20), scroll);
     try testing.expectEqual(@as(f32, 20), result.scroll_offset);
     var texts: usize = 0;
@@ -910,7 +940,15 @@ test "TreeView golden G13: auto-scroll nao recalcula intervalo desenhado" {
     ctx.beginFrame();
     ctx.focus_owner = id;
     try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
-    const result = try beginTreeView(&ctx, id, types.Rect.init(0, 0, 300, 48), &items, &selected, &scroll, style);
+    const result = try beginTreeView(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 300, 48),
+        &items,
+        &selected,
+        &scroll,
+        style,
+    );
     try testing.expect(result.changed);
     try testing.expectEqual(@as(usize, 5), selected);
     try testing.expectEqual(@as(usize, 5), result.selected);
