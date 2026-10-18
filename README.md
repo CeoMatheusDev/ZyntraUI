@@ -336,7 +336,10 @@ colors and per-widget styles (`zyntra_theme_colors`/`zyntra_style_*`), and
 the string-list widgets `radio`/`tab_bar`/`list_view`, the `panel`
 container and the flat/recursive structures `menu`/`table`/`tree_view`,
 with their interaction results (click, toggle, selection, drag, collapse,
-menu choice, expander) handed back to C. See
+menu choice, expander) handed back to C. Keyboard input and focus are part
+of the same surface (`zyntra_context_push_key`/`_push_text`/`_focus` plus the
+`ZyntraKey` mirror), so C consumers drive the same keys the Zig widgets
+handle. See
 [`src/c-abi/zyntra.h`](src/c-abi/zyntra.h) and [`docs/C_ABI.md`](docs/C_ABI.md)
 for the exported interface and integration details.
 

@@ -194,6 +194,60 @@ pub export fn zyntra_context_push_mouse_button(
     return .ok;
 }
 
+/// Tecla normalizada (`key` é um valor de `ZyntraKey`; `modifiers` usa as
+/// máscaras `ZYNTRA_MOD_*`, bits reservados ⇒ inválido). Teclas vão para o
+/// widget focado; widgets focáveis também tratam Tab para trocar de foco.
+pub export fn zyntra_context_push_key(
+    handle: ?*ZyntraContext,
+    key: i32,
+    pressed: bool,
+    modifiers: u8,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const k = std.enums.fromInt(ct.ZyntraKey, key) orelse return .invalid_argument;
+    if (modifiers & ~ct.key_modifiers_mask != 0) return .invalid_argument;
+    toCtx(h).pushEvent(.{ .key = .{
+        .key = @fromBackingInt(@intCast(@backingInt(k))),
+        .pressed = pressed,
+        .modifiers = @bitCast(modifiers),
+    } }) catch |err| {
+        return mapErr(err);
+    };
+    return .ok;
+}
+
+/// Texto digitado: um codepoint Unicode por chamada (fora de
+/// `0..0x10FFFF` ou substituto ⇒ `ZYNTRA_INVALID_EVENT`, como as posições
+/// não-finitas dos eventos de mouse).
+pub export fn zyntra_context_push_text(handle: ?*ZyntraContext, codepoint: u32) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    toCtx(h).pushEvent(.{ .text = .{ .codepoint = codepoint } }) catch |err| {
+        return mapErr(err);
+    };
+    return .ok;
+}
+
+/// Coloca o foco no widget `id` (`0` limpa o foco) — teclado e Tab operam
+/// sobre o focado.
+pub export fn zyntra_context_focus(handle: ?*ZyntraContext, id: ct.ZyntraId) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const ctx = toCtx(h);
+    ctx.focus_owner = if (id == 0) null else id_mod.Id.fromU64(id);
+    return .ok;
+}
+
+/// Informa se o widget `id` é o dono do foco neste momento.
+pub export fn zyntra_context_has_focus(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    out_focused: ?*bool,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_focused orelse return .invalid_argument;
+    out.* = toCtx(h).hasFocus(id_mod.Id.fromU64(id));
+    return .ok;
+}
+
 pub export fn zyntra_context_push_quit(handle: ?*ZyntraContext) callconv(.c) ct.ZyntraResult {
     const h = checkHandle(handle) catch return .invalid_argument;
     toCtx(h).pushEvent(.quit) catch |err| {
@@ -2280,4 +2334,159 @@ test "C-ABI árvore: tree_view com estado devolvido" {
     try eq(ok, zyntra_widget_tree_view(ctx_handle, id, bounds, &muitos, muitos.len, &msel, &mscroll, &tvs, &res));
     try stdt.testing.expect(msel == 0 and res.selected == 0);
     try eq(ok, zyntra_context_end_frame(ctx_handle));
+}
+
+test "C-ABI teclado: foco, teclas e texto" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    const bad_event = ct.ZyntraResult.invalid_event;
+
+    var handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 240, .h = 200 }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    const menu_id = zyntra_id_from_string("c:keys:menu", 11);
+    const table_id = zyntra_id_from_string("c:keys:table", 12);
+    const outro_id = zyntra_id_from_string("c:keys:outro", 12);
+    var focused: bool = true;
+
+    // Foco: vai e volta; leitura por id.
+    try eq(ok, zyntra_context_focus(handle, menu_id));
+    try eq(ok, zyntra_context_has_focus(handle, menu_id, &focused));
+    try stdt.testing.expect(focused);
+    try eq(ok, zyntra_context_has_focus(handle, outro_id, &focused));
+    try stdt.testing.expect(!focused);
+    try eq(bad, zyntra_context_has_focus(handle, menu_id, null));
+    try eq(bad, zyntra_context_focus(null, menu_id));
+    try eq(ok, zyntra_context_focus(handle, 0));
+    try eq(ok, zyntra_context_has_focus(handle, menu_id, &focused));
+    try stdt.testing.expect(!focused);
+
+    // Teclas: valor fora de `ZyntraKey` e bits reservados são argumento
+    // inválido; modificadores válidos entram na fila.
+    try eq(bad, zyntra_context_push_key(handle, 999, true, 0));
+    try eq(bad, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.enter), true, 0x10));
+    try eq(bad, zyntra_context_push_key(null, @backingInt(ct.ZyntraKey.enter), true, 0));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.enter), true, 0x03));
+    var ev_len: usize = 0;
+    try eq(ok, zyntra_context_pending_events(handle, &ev_len));
+    try stdt.testing.expect(ev_len == 1);
+    // Texto: codepoint válido entra; fora da faixa ou substituto é evento
+    // inválido (não entra na fila).
+    try eq(ok, zyntra_context_push_text(handle, 'A'));
+    try eq(bad_event, zyntra_context_push_text(handle, 0x110000));
+    try eq(bad_event, zyntra_context_push_text(handle, 0xD800));
+    try eq(ok, zyntra_context_pending_events(handle, &ev_len));
+    try stdt.testing.expect(ev_len == 2);
+
+    var fb_handle: ?*ZyntraFramebuffer = null;
+    try eq(ok, zyntra_framebuffer_create(240, 200, &fb_handle));
+    defer zyntra_framebuffer_destroy(fb_handle);
+    var ms: ct.ZyntraMenuStyle = undefined;
+    var ts: ct.ZyntraTableStyle = undefined;
+    try eq(ok, zyntra_style_menu(0, &ms));
+    try eq(ok, zyntra_style_table(0, &ts));
+
+    const menu_bounds: ct.ZyntraRect = .{ .x = 8, .y = 8, .w = 160, .h = 104 };
+    const table_bounds: ct.ZyntraRect = .{ .x = 8, .y = 120, .w = 220, .h = 72 };
+    const menu_items = [_]ct.ZyntraMenuItem{
+        .{ .label = .{ .ptr = "Abrir", .len = 5 } },
+        .{ .label = .{ .ptr = "", .len = 0 }, .separator = true },
+        .{ .label = .{ .ptr = "Salvar", .len = 6 } },
+        .{ .label = .{ .ptr = "Sair", .len = 4 }, .enabled = false },
+    };
+    const columns = [_]ct.ZyntraTableColumn{
+        .{ .title = .{ .ptr = "Nome", .len = 4 }, .width = 220 },
+    };
+    const row_cells = [_][1]ct.ZyntraStr{
+        .{.{ .ptr = "um", .len = 2 }},
+        .{.{ .ptr = "dois", .len = 4 }},
+        .{.{ .ptr = "tres", .len = 4 }},
+    };
+    const rows = [_]ct.ZyntraTableRow{
+        .{ .cells = &row_cells[0], .cells_len = 1 },
+        .{ .cells = &row_cells[1], .cells_len = 1 },
+        .{ .cells = &row_cells[2], .cells_len = 1 },
+    };
+    var mres: ct.ZyntraMenuResult = .{};
+    var tres: ct.ZyntraTableResult = .{};
+    var active: usize = 0;
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+    var px: ct.ZyntraColor = .{};
+    const clear = ct.ZyntraColor{ .r = 24, .g = 24, .b = 28, .a = 255 };
+
+    // Foco realça a linha ativa do menu (linha 0 sem mouse).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 236, .y = 196 }));
+    try eq(ok, zyntra_draw_clear(handle, clear));
+    try eq(ok, zyntra_context_focus(handle, menu_id));
+    try eq(ok, zyntra_widget_menu(handle, menu_id, menu_bounds, &menu_items, menu_items.len, &active, 16, &ms, &mres));
+    try stdt.testing.expect(active == 0 and mres.chosen == -1 and !mres.hovered);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 50, 20, &px));
+    try eq(ms.item_hover.r, px.r);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // `down` pula o separador (linha 1) e para na linha 2.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_draw_clear(handle, clear));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.down), true, 0));
+    try eq(ok, zyntra_widget_menu(handle, menu_id, menu_bounds, &menu_items, menu_items.len, &active, 16, &ms, &mres));
+    try stdt.testing.expect(active == 2);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 50, 70, &px));
+    try eq(ms.item_hover.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 50, 20, &px));
+    try eq(ms.bg.r, px.r);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // `up` volta e `enter` escolhe a linha ativa (one-shot).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.up), true, 0));
+    try eq(ok, zyntra_widget_menu(handle, menu_id, menu_bounds, &menu_items, menu_items.len, &active, 16, &ms, &mres));
+    try stdt.testing.expect(active == 0 and mres.chosen == -1);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.down), true, 0));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.enter), true, 0));
+    try eq(ok, zyntra_widget_menu(handle, menu_id, menu_bounds, &menu_items, menu_items.len, &active, 16, &ms, &mres));
+    try stdt.testing.expect(mres.chosen == 2 and active == 2 and !mres.dismissed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // `escape` dispensa e solta o foco.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.escape), true, 0));
+    try eq(ok, zyntra_widget_menu(handle, menu_id, menu_bounds, &menu_items, menu_items.len, &active, 16, &ms, &mres));
+    try stdt.testing.expect(mres.dismissed);
+    try eq(ok, zyntra_context_has_focus(handle, menu_id, &focused));
+    try stdt.testing.expect(!focused);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Tabela com foco: `down` move a seleção (linha 0 → 1).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_draw_clear(handle, clear));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 236, .y = 196 }));
+    try eq(ok, zyntra_context_focus(handle, table_id));
+    try eq(ok, zyntra_widget_table(handle, table_id, table_bounds, &columns, columns.len, &rows, rows.len, &selected, &scroll, &ts, &tres));
+    try stdt.testing.expect(selected == 0 and !tres.changed);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 158, &px));
+    try eq(ts.bg_selected.r, px.r);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_draw_clear(handle, clear));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.down), true, 0));
+    try eq(ok, zyntra_widget_table(handle, table_id, table_bounds, &columns, columns.len, &rows, rows.len, &selected, &scroll, &ts, &tres));
+    try stdt.testing.expect(selected == 1 and tres.changed and tres.selected == 1);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 182, &px));
+    try eq(ts.bg_selected.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 158, &px));
+    try eq(ts.bg.r, px.r);
+    try eq(ok, zyntra_context_end_frame(handle));
 }

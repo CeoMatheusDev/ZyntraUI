@@ -35,12 +35,41 @@ Toda função retorna `ZyntraResult` (`0 == ZYNTRA_OK`):
 | Código | Significado |
 |---|---|
 | `ZYNTRA_OK` | sucesso |
-| `ZYNTRA_INVALID_ARGUMENT` | handle/saída nulo, viewport negativo, botão > 2 |
+| `ZYNTRA_INVALID_ARGUMENT` | handle/saída nulo, viewport negativo, botão > 2, tecla fora de `ZyntraKey`, bit de modificador reservado |
 | `ZYNTRA_OUT_OF_MEMORY` | falha de alocação do `page_allocator` |
-| `ZYNTRA_INVALID_EVENT` | evento rejeitado na validação |
+| `ZYNTRA_INVALID_EVENT` | evento rejeitado na validação (posição não-finita, codepoint fora de `0..0x10FFFF` ou substituto) |
 | `ZYNTRA_INVALID_COMMAND` | comando de desenho inválido (ex.: largura/raio negativos, NaN) |
 | `ZYNTRA_INVALID_STATE` | `begin` com frame ativo / `end` sem frame ativo |
 | `ZYNTRA_INVALID_TEXT` | UTF-8 malformado em `zyntra_draw_text`/`zyntra_text_*` |
+
+## Entrada: mouse, teclado e foco
+
+O mouse entra por `zyntra_context_push_mouse_move`,
+`zyntra_context_push_mouse_button` e a roda (quando houver); o teclado entra
+por `zyntra_context_push_key` e o texto digitado por
+`zyntra_context_push_text` (um codepoint por chamada):
+
+```c
+zyntra_context_push_mouse_button(ctx, 0 /* left */, true, (ZyntraVec2){x, y});
+zyntra_context_push_key(ctx, ZYNTRA_KEY_DOWN, true, 0);
+zyntra_context_push_key(ctx, ZYNTRA_KEY_S, true, ZYNTRA_MOD_CTRL);
+zyntra_context_push_text(ctx, 'a');   /* texto digitado */
+```
+
+* `ZyntraKey` espelha as teclas normalizadas da API Zig (mesmos valores),
+  então as mesmas teclas funcionam nos widgets das duas pontas: setas,
+  `HOME`/`END`, `PAGE_UP`/`PAGE_DOWN`, `ENTER`, `ESCAPE`, `TAB`, `SPACE`,
+  `BACKSPACE`, `DELETE` e as letras de atalho (`A`, `C`, `V`, `X`, `Y`, `Z`).
+* `modifiers` é um bitmask: `ZYNTRA_MOD_SHIFT` (0x01), `ZYNTRA_MOD_CTRL`
+  (0x02), `ZYNTRA_MOD_ALT` (0x04) e `ZYNTRA_MOD_SUPER` (0x08). Bits fora
+  dessas máscaras são recusados com `ZYNTRA_INVALID_ARGUMENT`.
+* Teclas vão para o widget **focado**: `zyntra_context_focus(ctx, id)`
+  define o foco (`id == 0` limpa) e `zyntra_context_has_focus` consulta.
+  Cliques também focam (um press dentro do widget vira dono do foco), e
+  `TAB` percorre os widgets focáveis na ordem de chamada do frame.
+* `zyntra_context_push_text` rejeita codepoints fora de `0..0x10FFFF` ou na
+  faixa de substitutos com `ZYNTRA_INVALID_EVENT` (mesma regra das posições
+  de mouse não-finitas); eventos válidos ficam na fila do frame corrente.
 
 ## Desenho
 
@@ -306,6 +335,8 @@ zyntra_widget_tree_view(ctx, tree_id, (ZyntraRect){8, 8, 200, 256}, raizes, 2,
 * M109: também travados `ZyntraMenuItem=40`, `ZyntraTableColumn=24`,
   `ZyntraTableRow=16`, estilos (`Menu=24`, `Table=48`) e resultados
   (`Menu=24`, `Table=24`).
+* M111: também travados `ZyntraKey` (enum `c_int`, 0..20, mesmos valores de
+  `event.Key`) e as máscaras `ZYNTRA_MOD_*` (bits 0..3 de `Modifiers`).
 * M110: também travados `ZyntraTreeItem=40`, estilo `TreeView=40` e
   resultado `TreeView=32`.
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
@@ -328,5 +359,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..."
 ```

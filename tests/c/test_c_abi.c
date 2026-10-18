@@ -869,6 +869,145 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 24-29: foco e teclado (M111) — teclas no menu e na tabela. */
+    ZyntraFramebuffer *kfb = NULL;
+    long long ev_chosen = -1;
+    int ev_active = -1, ev_dismissed = 0, ev_focus = 0, ev_focus_escape = 0;
+    int ev_changed = 0, ev_sel = -1;
+    size_t ev_pending = 0;
+    int ev_px_hover = 0, ev_px_bg = 0, ev_px_sel = 0, ev_px_deselect = 0;
+    {
+        ZyntraMenuStyle kms;
+        ZyntraTableStyle kts;
+        CHECK(zyntra_style_menu(ZYNTRA_THEME_DARK, &kms));
+        CHECK(zyntra_style_table(ZYNTRA_THEME_DARK, &kts));
+
+        /* Argumentos inválidos: tecla fora do enum, bit reservado, ponteiro
+         * nulo e codepoint fora da faixa. */
+        assert(zyntra_context_push_key(ctx, 999, true, 0) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_context_push_key(ctx, ZYNTRA_KEY_ENTER, true, 0x10u) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_context_push_key(NULL, ZYNTRA_KEY_ENTER, true, 0) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_context_push_text(ctx, 0x110000u) == ZYNTRA_INVALID_EVENT);
+        assert(zyntra_context_push_text(ctx, 0xD800u) == ZYNTRA_INVALID_EVENT);
+        assert(zyntra_context_push_text(ctx, 'A') == ZYNTRA_OK);
+        assert(zyntra_context_has_focus(ctx, 0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+        const ZyntraMenuItem kitems[4] = {
+            {{"Abrir", 5}, {"", 0}, true, false, false, false},
+            {{"", 0}, {"", 0}, true, true, false, false},
+            {{"Salvar", 6}, {"", 0}, true, false, false, false},
+            {{"Sair", 4}, {"", 0}, false, false, false, false},
+        };
+        const ZyntraTableColumn kcols[1] = {{{"Nome", 4}, 220.0f}};
+        const ZyntraStr kr0[1] = {{"um", 2}};
+        const ZyntraStr kr1[1] = {{"dois", 4}};
+        const ZyntraStr kr2[1] = {{"tres", 4}};
+        const ZyntraTableRow krows[3] = {{kr0, 1}, {kr1, 1}, {kr2, 1}};
+        const ZyntraId mid = zyntra_id_from_string("c:keys:menu", 11);
+        const ZyntraId kid = zyntra_id_from_string("c:keys:table", 12);
+        assert(mid != 0 && kid != 0);
+
+        ZyntraRect menu_bounds = {8, 8, 160, 104};
+        ZyntraRect table_bounds = {8, 120, 220, 72};
+        ZyntraMenuResult kmr;
+        ZyntraTableResult ktr;
+        ZyntraColor kpx = {0, 0, 0, 0};
+        ZyntraColor kbg = {24, 24, 28, 255};
+        size_t k_active = 0, k_sel = 0;
+        float k_scroll = 0.0f;
+        bool k_focused = false;
+
+        CHECK(zyntra_framebuffer_create(240, 200, &kfb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 240, 200}));
+
+        /* Frame 24: foco no menu realça a linha ativa (linha 0). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){236, 196}));
+        CHECK(zyntra_draw_clear(ctx, kbg));
+        CHECK(zyntra_context_focus(ctx, mid));
+        CHECK(zyntra_widget_menu(ctx, mid, menu_bounds, kitems, 4, &k_active, 16.0f, &kms, &kmr));
+        assert(k_active == 0 && kmr.chosen == -1 && !kmr.hovered);
+        CHECK(zyntra_context_has_focus(ctx, mid, &k_focused));
+        ev_focus = k_focused;
+        assert(ev_focus);
+        CHECK(zyntra_framebuffer_render(kfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(kfb, 50, 20, &kpx));
+        ev_px_hover = (kpx.r == kms.item_hover.r && kpx.b == kms.item_hover.b);
+        assert(ev_px_hover);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 25: seta para baixo pula o separador e para na linha 2. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, kbg));
+        CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_DOWN, true, 0));
+        CHECK(zyntra_context_push_text(ctx, 'A'));
+        CHECK(zyntra_context_pending_events(ctx, &ev_pending));
+        assert(ev_pending == 2);
+        CHECK(zyntra_widget_menu(ctx, mid, menu_bounds, kitems, 4, &k_active, 16.0f, &kms, &kmr));
+        ev_active = (int)k_active;
+        assert(k_active == 2);
+        CHECK(zyntra_framebuffer_render(kfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(kfb, 50, 70, &kpx));
+        assert(kpx.r == kms.item_hover.r);
+        CHECK(zyntra_framebuffer_pixel(kfb, 50, 20, &kpx));
+        ev_px_bg = (kpx.r == kms.bg.r);
+        assert(ev_px_bg);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 26: nova seta para baixo dá a volta (a linha 3 está
+         * desabilitada) e Enter escolhe a linha ativa. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_DOWN, true, 0));
+        CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_ENTER, true, 0));
+        CHECK(zyntra_widget_menu(ctx, mid, menu_bounds, kitems, 4, &k_active, 16.0f, &kms, &kmr));
+        assert(kmr.chosen == 0 && k_active == 0 && !kmr.dismissed);
+        ev_chosen = (long long)kmr.chosen;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 27: Escape dispensa e solta o foco. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_ESCAPE, true, 0));
+        CHECK(zyntra_widget_menu(ctx, mid, menu_bounds, kitems, 4, &k_active, 16.0f, &kms, &kmr));
+        assert(kmr.dismissed);
+        ev_dismissed = kmr.dismissed;
+        CHECK(zyntra_context_has_focus(ctx, mid, &k_focused));
+        ev_focus_escape = k_focused;
+        assert(!ev_focus_escape);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 28: tabela com foco mostra a linha 0 selecionada. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, kbg));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){236, 196}));
+        CHECK(zyntra_context_focus(ctx, kid));
+        CHECK(zyntra_widget_table(ctx, kid, table_bounds, kcols, 1, krows, 3, &k_sel, &k_scroll, &kts, &ktr));
+        assert(k_sel == 0 && !ktr.changed);
+        CHECK(zyntra_framebuffer_render(kfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(kfb, 20, 158, &kpx));
+        assert(kpx.r == kts.bg_selected.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 29: seta para baixo move a seleção (0 -> 1). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, kbg));
+        CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_DOWN, true, 0));
+        CHECK(zyntra_widget_table(ctx, kid, table_bounds, kcols, 1, krows, 3, &k_sel, &k_scroll, &kts, &ktr));
+        assert(ktr.changed && ktr.selected == 1 && k_sel == 1);
+        ev_changed = ktr.changed;
+        ev_sel = (int)k_sel;
+        CHECK(zyntra_framebuffer_render(kfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(kfb, 20, 182, &kpx));
+        ev_px_sel = (kpx.r == kts.bg_selected.r);
+        assert(ev_px_sel);
+        CHECK(zyntra_framebuffer_pixel(kfb, 20, 158, &kpx));
+        ev_px_deselect = (kpx.r == kts.bg.r);
+        assert(ev_px_deselect);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        zyntra_framebuffer_destroy(kfb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -904,6 +1043,10 @@ int main(void) {
         " px_sel=%d px_exp=%d px_text=%d\n",
         t_toggled, t_sel, t_changed, t_expand_root, t_expand_child,
         t_px_sel, t_px_exp, t_px_text);
+    printf("C-ABI keys chosen=%lld active=%d dismissed=%d focus=%d/%d sel=%d changed=%d"
+        " pending=%zu px_hover=%d px_bg=%d px_sel=%d px_deselect=%d\n",
+        ev_chosen, ev_active, ev_dismissed, ev_focus, ev_focus_escape, ev_sel, ev_changed,
+        ev_pending, ev_px_hover, ev_px_bg, ev_px_sel, ev_px_deselect);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

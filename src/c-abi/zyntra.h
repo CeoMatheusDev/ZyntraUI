@@ -14,6 +14,7 @@
  * M109: ZyntraMenuItem=40, ZyntraTableColumn=24, ZyntraTableRow=16,
  * estilos Menu=24/Table=48 e resultados Menu=24/Table=24.
  * M110: ZyntraTreeItem=40, estilo TreeView=40 e resultado TreeView=32.
+ * M111: ZyntraKey (enum c_int, 0..20) e ZYNTRA_MOD_* (bit 0=shift..3=super).
  */
 
 #include <stdbool.h>
@@ -83,6 +84,45 @@ ZyntraResult zyntra_context_set_viewport(ZyntraContext *handle, ZyntraRect viewp
 ZyntraResult zyntra_context_push_mouse_move(ZyntraContext *handle, ZyntraVec2 pos);
 ZyntraResult zyntra_context_push_mouse_button(ZyntraContext *handle, uint8_t button, bool pressed, ZyntraVec2 pos);
 ZyntraResult zyntra_context_push_quit(ZyntraContext *handle);
+
+/* Teclado e foco (M111). `key` é um valor de `ZyntraKey` (mesmos valores da
+ * API Zig); `modifiers` usa as máscaras abaixo. Teclas vão para o widget
+ * focado — `zyntra_context_focus` define o foco (`0` limpa) e Tab/flechas
+ * seguem a ordem de registro dos widgets focáveis. Texto digitado chega por
+ * `zyntra_context_push_text`, um codepoint por chamada. */
+
+typedef enum ZyntraKey {
+    ZYNTRA_KEY_UNKNOWN = 0,
+    ZYNTRA_KEY_ESCAPE = 1,
+    ZYNTRA_KEY_ENTER = 2,
+    ZYNTRA_KEY_TAB = 3,
+    ZYNTRA_KEY_SPACE = 4,
+    ZYNTRA_KEY_BACKSPACE = 5,
+    ZYNTRA_KEY_LEFT = 6,
+    ZYNTRA_KEY_RIGHT = 7,
+    ZYNTRA_KEY_UP = 8,
+    ZYNTRA_KEY_DOWN = 9,
+    ZYNTRA_KEY_A = 10,
+    ZYNTRA_KEY_C = 11,
+    ZYNTRA_KEY_V = 12,
+    ZYNTRA_KEY_X = 13,
+    ZYNTRA_KEY_Z = 14,
+    ZYNTRA_KEY_DELETE = 15,
+    ZYNTRA_KEY_HOME = 16,
+    ZYNTRA_KEY_END = 17,
+    ZYNTRA_KEY_Y = 18,
+    ZYNTRA_KEY_PAGE_UP = 19,
+    ZYNTRA_KEY_PAGE_DOWN = 20
+} ZyntraKey;
+
+#define ZYNTRA_MOD_SHIFT 0x01u
+#define ZYNTRA_MOD_CTRL 0x02u
+#define ZYNTRA_MOD_ALT 0x04u
+#define ZYNTRA_MOD_SUPER 0x08u
+
+ZyntraResult zyntra_context_push_key(ZyntraContext *handle, int32_t key, bool pressed,
+    uint8_t modifiers);
+ZyntraResult zyntra_context_push_text(ZyntraContext *handle, uint32_t codepoint);
 ZyntraResult zyntra_context_pending_events(ZyntraContext *handle, size_t *out_len);
 /* Repintura parcial (M98/M106): o acumulado do frame atual. */
 ZyntraResult zyntra_context_mark_dirty(ZyntraContext *handle, ZyntraRect rect);
@@ -150,6 +190,10 @@ ZyntraResult zyntra_framebuffer_render_region(ZyntraFramebuffer *handle, ZyntraC
  * `out_*` de resultado é opcional (NULL ignora). */
 
 typedef uint64_t ZyntraId;
+
+/* Foco (M111): o teclado vai para o widget focado (`0` limpa o foco). */
+ZyntraResult zyntra_context_focus(ZyntraContext *handle, ZyntraId id);
+ZyntraResult zyntra_context_has_focus(ZyntraContext *handle, ZyntraId id, bool *out_focused);
 
 typedef enum ZyntraThemeKind {
     ZYNTRA_THEME_DARK = 0,

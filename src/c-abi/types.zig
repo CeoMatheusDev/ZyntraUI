@@ -10,6 +10,56 @@ const std = @import("std");
 const raster_mod = @import("../software/raster.zig");
 const metrics_mod = @import("../text/metrics.zig");
 const style_mod = @import("../style/style.zig");
+const event_mod = @import("../event/event.zig");
+
+/// Teclas normalizadas na fronteira C (espelha `event.Key`): os valores são
+/// os mesmos da API Zig e estáveis — teclas novas entram depois das atuais.
+pub const ZyntraKey = enum(c_int) {
+    unknown = 0,
+    escape = 1,
+    enter = 2,
+    tab = 3,
+    space = 4,
+    backspace = 5,
+    left = 6,
+    right = 7,
+    up = 8,
+    down = 9,
+    a = 10,
+    c = 11,
+    v = 12,
+    x = 13,
+    z = 14,
+    delete = 15,
+    home = 16,
+    end = 17,
+    y = 18,
+    page_up = 19,
+    page_down = 20,
+};
+
+/// Máscaras de modificadores de `zyntra_context_push_key` (bit 0 = shift,
+/// 1 = ctrl, 2 = alt, 3 = super); bits reservados ⇒ argumento inválido.
+pub const key_modifiers_mask: u8 = 0x0F;
+
+comptime {
+    // Trava: toda tecla da fronteira C tem o mesmo nome e valor em `event.Key`.
+    @setEvalBranchQuota(50_000);
+    const einfo = @typeInfo(ZyntraKey).@"enum";
+    for (einfo.field_names, einfo.field_values) |name, value| {
+        const zig_key = std.meta.stringToEnum(event_mod.Key, name) orelse
+            @compileError("ZyntraKey sem par em event.Key: " ++ name);
+        if (@backingInt(zig_key) != value) {
+            @compileError("ZyntraKey com valor divergente de event.Key: " ++ name);
+        }
+    }
+    // Trava: as máscaras documentadas coincidem com os bits de `Modifiers`.
+    if (@as(u8, @bitCast(event_mod.Modifiers{})) != 0) @compileError("Modifiers: base não-zero");
+    if (@as(u8, @bitCast(event_mod.Modifiers{ .shift = true })) != 0x01) @compileError("Modifiers: shift != bit 0");
+    if (@as(u8, @bitCast(event_mod.Modifiers{ .ctrl = true })) != 0x02) @compileError("Modifiers: ctrl != bit 1");
+    if (@as(u8, @bitCast(event_mod.Modifiers{ .alt = true })) != 0x04) @compileError("Modifiers: alt != bit 2");
+    if (@as(u8, @bitCast(event_mod.Modifiers{ .super = true })) != 0x08) @compileError("Modifiers: super != bit 3");
+}
 
 /// Código de retorno de toda função C-ABI. Sempre por valor, nunca
 /// via error union (Zig) ou exceção.
@@ -312,4 +362,13 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(c_int, 0), @backingInt(ZyntraResult.ok));
     try stdt.testing.expectEqual(@as(i32, 0), @backingInt(ZyntraThemeKind.dark));
     try stdt.testing.expectEqual(@as(i32, 1), @backingInt(ZyntraThemeKind.light));
+    // Teclas/máscaras da fronteira C espelham a entrada Zig.
+    try stdt.testing.expectEqual(@as(i32, @backingInt(event_mod.Key.enter)), @backingInt(ZyntraKey.enter));
+    try stdt.testing.expectEqual(@as(i32, @backingInt(event_mod.Key.page_down)), @backingInt(ZyntraKey.page_down));
+    try stdt.testing.expectEqual(@as(usize, 21), @typeInfo(ZyntraKey).@"enum".field_names.len);
+    // Enum fechado: valor desconhecido não vira tecla.
+    try stdt.testing.expect(std.enums.fromInt(ZyntraKey, 999) == null);
+    try stdt.testing.expect(std.enums.fromInt(ZyntraKey, 0) != null);
+    try stdt.testing.expectEqual(@as(u8, 0x0F), key_modifiers_mask);
+    try stdt.testing.expectEqual(@as(u8, 0x02), @as(u8, @bitCast(event_mod.Modifiers{ .ctrl = true })));
 }

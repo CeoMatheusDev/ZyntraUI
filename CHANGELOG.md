@@ -5,6 +5,20 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `c-abi`: **foco e teclado na fronteira C** (M111, aditivo) —
+  `zyntra_context_push_key` (tecla + modificadores), `zyntra_context_push_text`
+  (um codepoint por chamada), `zyntra_context_focus`/`zyntra_context_has_focus`
+  e o enum `ZyntraKey` (espelho fechado de `event.Key`, mesmos valores, com
+  trava de compilação) mais as máscaras `ZYNTRA_MOD_SHIFT/CTRL/ALT/SUPER`
+  (travadas contra os bits de `Modifiers`). Teclas fora do enum, bits de
+  modificador reservados e codepoints fora de `0..0x10FFFF`/substitutos são
+  recusados; o teclado age sobre o widget focado e `TAB` percorre os
+  focáveis. O consumidor C ganhou os frames 24–29 (foco no menu, seta
+  pulando separador/item desabilitado, `ENTER`, `ESCAPE` soltando o foco e
+  seta movendo a seleção da tabela) com checagem de pixels.
+
 ## [1.33.0] - 2026-10-18
 
 MINOR estável, 100% compatível: o item #1 do roadmap (superfície C) avança
