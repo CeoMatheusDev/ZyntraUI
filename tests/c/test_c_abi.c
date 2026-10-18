@@ -142,9 +142,124 @@ int main(void) {
         CHECK(zyntra_context_end_frame(ctx));
     }
 
+    /* Frame 3: caminho de pixels (M106) — framebuffer de referência.
+     * O mesmo rasterizador da API Zig, agora alcançável do C: render
+     * integral, leitura de pixel e repintura parcial dirigida por
+     * `zyntra_context_mark_dirty`. */
+    ZyntraFramebuffer *fb = NULL;
+    int grad_left = 0, grad_right = 0, round_in = 0, round_out = 0;
+    int part_px = 0, kept_px = 0;
+    size_t stats_sub = 0, stats_drawn = 0, stats_culled = 0;
+    {
+        _Static_assert(sizeof(ZyntraRenderStats) == 16, "ZyntraRenderStats ABI");
+
+        ZyntraFramebuffer *badfb = NULL;
+        assert(zyntra_framebuffer_create(0, 32, &badfb) == ZYNTRA_INVALID_ARGUMENT);
+        assert(badfb == NULL);
+        assert(zyntra_framebuffer_create(32, 9000, &badfb) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_framebuffer_create(64, 32, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_framebuffer_create(64, 32, &fb));
+        assert(fb != NULL);
+
+        uint32_t fw = 0, fh = 0;
+        CHECK(zyntra_framebuffer_size(fb, &fw, &fh));
+        assert(fw == 64 && fh == 32);
+
+        ZyntraRect fvp = {0, 0, 64, 32};
+        CHECK(zyntra_context_set_viewport(ctx, fvp));
+
+        ZyntraColor bg = {10, 20, 30, 255};
+        ZyntraColor fred = {200, 40, 40, 255};
+        ZyntraColor fwhite = {255, 255, 255, 255};
+        ZyntraColor fblack = {0, 0, 0, 255};
+        ZyntraColor fgreen = {0, 200, 60, 255};
+        ZyntraColor fblue = {40, 80, 220, 255};
+        ZyntraColor px = {0, 0, 0, 0};
+
+        CHECK(zyntra_framebuffer_fill(fb, bg));
+        CHECK(zyntra_framebuffer_pixel(fb, 63, 31, &px));
+        assert(px.r == bg.r && px.g == bg.g && px.b == bg.b && px.a == 255);
+
+        CHECK(zyntra_context_begin_frame(ctx));
+        ZyntraRect box = {4, 4, 16, 16};
+        ZyntraRect grad_box = {32, 4, 24, 16};
+        ZyntraRect round_box = {4, 20, 20, 10};
+        CHECK(zyntra_draw_clear(ctx, bg));
+        CHECK(zyntra_draw_rect_filled(ctx, box, fred));
+        ZyntraVec2 g0 = {32, 4}, g1 = {56, 4};
+        CHECK(zyntra_draw_rect_gradient(ctx, grad_box, g0, g1, fwhite, fblack));
+        CHECK(zyntra_draw_rect_rounded(ctx, round_box, 5.0f, fgreen));
+
+        /* Dirty rect acumula a união e `clear_dirty` zera. */
+        CHECK(zyntra_context_mark_dirty(ctx, box));
+        CHECK(zyntra_context_mark_dirty(ctx, grad_box));
+        ZyntraRect dirty = {0, 0, 0, 0};
+        CHECK(zyntra_context_dirty_rect(ctx, &dirty));
+        assert(dirty.x == 4.0f && dirty.y == 4.0f && dirty.w == 52.0f && dirty.h == 16.0f);
+        CHECK(zyntra_context_clear_dirty(ctx));
+        CHECK(zyntra_context_dirty_rect(ctx, &dirty));
+        assert(dirty.w == 0.0f && dirty.h == 0.0f);
+
+        ZyntraRenderStats stats = {0, 0, 0, 0};
+        CHECK(zyntra_framebuffer_render(fb, ctx, &stats));
+        assert(stats.submitted == 4 && stats.drawn == 4 && stats.culled == 0);
+        stats_sub = stats.submitted;
+        stats_drawn = stats.drawn;
+        stats_culled = stats.culled;
+
+        CHECK(zyntra_framebuffer_pixel(fb, 12, 12, &px));
+        assert(px.r == fred.r && px.g == fred.g);
+        CHECK(zyntra_framebuffer_pixel(fb, 2, 2, &px));
+        assert(px.r == bg.r);
+        CHECK(zyntra_framebuffer_pixel(fb, 33, 10, &px));
+        grad_left = (int)px.r;
+        CHECK(zyntra_framebuffer_pixel(fb, 55, 10, &px));
+        grad_right = (int)px.r;
+        assert(grad_left > 200 && grad_right < 60);
+        CHECK(zyntra_framebuffer_pixel(fb, 14, 25, &px));
+        round_in = (int)px.g;
+        assert(round_in == fgreen.g);
+        CHECK(zyntra_framebuffer_pixel(fb, 4, 20, &px));
+        round_out = (int)px.r;
+        assert(round_out == bg.r); /* fora do raio: fundo, não a forma */
+
+        assert(zyntra_framebuffer_pixel(fb, 64, 0, &px) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_framebuffer_pixel(fb, 0, 32, &px) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_framebuffer_pixel(fb, 0, 0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_framebuffer_pixel(NULL, 0, 0, &px) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 4: repintura parcial dirigida pelo dirty rect. */
+        ZyntraRect patch = {40, 20, 14, 10};
+        ZyntraRect patch_box = {40, 20, 12, 8};
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, bg));
+        CHECK(zyntra_draw_rect_filled(ctx, patch_box, fblue));
+        CHECK(zyntra_context_mark_dirty(ctx, patch));
+        ZyntraRenderStats part = {0, 0, 0, 0};
+        CHECK(zyntra_framebuffer_render_region(fb, ctx, patch, &part));
+        assert(part.submitted == 2 && part.drawn == 2 && part.culled == 0);
+
+        CHECK(zyntra_framebuffer_pixel(fb, 45, 24, &px));
+        assert(px.b == fblue.b);
+        part_px = (int)px.b;
+        CHECK(zyntra_framebuffer_pixel(fb, 53, 29, &px)); /* região, fora do rect */
+        assert(px.r == bg.r);
+        CHECK(zyntra_framebuffer_pixel(fb, 12, 12, &px)); /* fora da região */
+        assert(px.r == fred.r);
+        kept_px = (int)px.r;
+        CHECK(zyntra_context_end_frame(ctx));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
+    assert(zyntra_framebuffer_render(NULL, ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
+    assert(zyntra_framebuffer_render(fb, NULL, NULL) == ZYNTRA_INVALID_ARGUMENT);
+    assert(zyntra_framebuffer_fill(NULL, (ZyntraColor){0, 0, 0, 255}) == ZYNTRA_INVALID_ARGUMENT);
+    assert(zyntra_context_mark_dirty(NULL, (ZyntraRect){0, 0, 1, 1}) == ZYNTRA_INVALID_ARGUMENT);
+    assert(zyntra_context_dirty_rect(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
+    zyntra_framebuffer_destroy(NULL); /* no-op */
     zyntra_context_destroy(NULL);
 
     zyntra_context_destroy(ctx);
@@ -152,5 +267,9 @@ int main(void) {
         events, draws, (unsigned long long)idx);
     printf("C-ABI modern draws=%zu width=%.0f height=%.0f kept=%zu\n",
         modern, (double)mw, (double)mh, kept);
+    printf("C-ABI pixels grad=%d/%d round=%d/%d part=%d kept=%d stats=%zu/%zu/%zu\n",
+        grad_left, grad_right, round_in, round_out, part_px, kept_px,
+        stats_sub, stats_drawn, stats_culled);
+    zyntra_framebuffer_destroy(fb);
     return 0;
 }

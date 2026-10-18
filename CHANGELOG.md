@@ -7,6 +7,27 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `c-abi`: **caminho de pixels na fronteira C** (M106, aditivo) — o
+  rasterizador de software do backend de referência passa a ser alcançável
+  de C. Novo handle opaco `ZyntraFramebuffer*`: `zyntra_framebuffer_create`
+  (`w`×`h` RGBA, 0 ou > 8192 inválido), `zyntra_framebuffer_destroy`,
+  `zyntra_framebuffer_size`, `zyntra_framebuffer_fill`,
+  `zyntra_framebuffer_pixel` (leitura RGBA com limites checados),
+  `zyntra_framebuffer_render` (viewport do contexto clampado ao
+  framebuffer) e `zyntra_framebuffer_render_region` (repintura parcial;
+  o resto do framebuffer fica como estava). `ZyntraRenderStats`
+  (`submitted`/`drawn`/`culled`/`skipped_text`, opcional) espelha os
+  contadores do `render`/`renderRegion` da API Zig — sem segunda
+  definição, é o mesmo struct `extern` do backend, com trava de layout
+  (`16` bytes) no `comptime` e no `_Static_assert` do teste C.
+  A repintura parcial vista do C ganha `zyntra_context_mark_dirty`,
+  `zyntra_context_clear_dirty` e `zyntra_context_dirty_rect` (o
+  `begin_frame` também limpa o acumulado). Teste de integração C com um
+  terceiro bloco: gradiente nos dois extremos, canto arredondado dentro e
+  fora do raio, fundo preservado, repintura parcial (pixel novo dentro,
+  pixels fora intactos) e contadores de rasterização — tudo por leitura
+  de pixel. Novo teste Zig espelhando o mesmo roteiro.
+
 - `widgets` (`list_view`, `table`, `tree_view`, `tab_bar`, `splitter`,
   `scroll`, `menu`, `text_input`, `textarea`): **repintura parcial nos
   widgets restantes** (M105, aditivo) — os nove passam a declarar o próprio

@@ -326,7 +326,9 @@ The included examples exercise the UI pipeline; they do not provide a standalone
 An optional C ABI is available for non-Zig consumers. It mirrors the Zig draw
 surface — solid/outlined/rounded rectangles, lines, circles, linear gradients,
 drop shadows, backdrop blur, clip, copied UTF-8 text runs and text metrics —
-plus the context/frame/event lifecycle. See
+plus the context/frame/event lifecycle. The software rasterizer is reachable
+too: an opaque framebuffer renders the frame's draw list (full or partial
+repaint driven by the dirty rect) and single pixels can be read back. See
 [`src/c-abi/zyntra.h`](src/c-abi/zyntra.h) and [`docs/C_ABI.md`](docs/C_ABI.md)
 for the exported interface and integration details.
 

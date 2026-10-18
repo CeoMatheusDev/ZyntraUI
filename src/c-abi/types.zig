@@ -7,6 +7,7 @@
 //! - `ZyntraResult` tem tag `c_int` explícita; 0 sempre é sucesso.
 
 const std = @import("std");
+const raster_mod = @import("../software/raster.zig");
 
 /// Código de retorno de toda função C-ABI. Sempre por valor, nunca
 /// via error union (Zig) ou exceção.
@@ -45,9 +46,16 @@ pub const ZyntraColor = extern struct {
     a: u8 = 255,
 };
 
+/// Estatísticas da rasterização de software, devolvidas por
+/// `zyntra_framebuffer_render*`. Reexporta o struct `extern` do backend de
+/// referência (mesmos campos/ordem) para não haver duas definições; a trava
+/// de layout abaixo falha o build se ele mudar.
+pub const ZyntraRenderStats = raster_mod.SoftwareStats;
+
 // Trava de ABI: falhe o build se o layout mudar.
 comptime {
     if (@sizeOf(ZyntraResult) != @sizeOf(c_int)) @compileError("ZyntraResult ABI drift");
+    if (@sizeOf(ZyntraRenderStats) != 16 or @alignOf(ZyntraRenderStats) != 4) @compileError("ZyntraRenderStats ABI drift");
     if (@sizeOf(ZyntraVec2) != 8 or @alignOf(ZyntraVec2) != 4) @compileError("ZyntraVec2 ABI drift");
     if (@sizeOf(ZyntraSize) != 8 or @alignOf(ZyntraSize) != 4) @compileError("ZyntraSize ABI drift");
     if (@sizeOf(ZyntraRect) != 16 or @alignOf(ZyntraRect) != 4) @compileError("ZyntraRect ABI drift");
@@ -60,5 +68,6 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 8), @sizeOf(ZyntraVec2));
     try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraRect));
     try stdt.testing.expectEqual(@as(usize, 4), @sizeOf(ZyntraColor));
+    try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraRenderStats));
     try stdt.testing.expectEqual(@as(c_int, 0), @backingInt(ZyntraResult.ok));
 }

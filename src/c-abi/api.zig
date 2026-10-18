@@ -20,6 +20,7 @@ const context_mod = @import("../core/context.zig");
 const types_mod = @import("../core/types.zig");
 const event_mod = @import("../event/event.zig");
 const metrics_mod = @import("../text/metrics.zig");
+const software_mod = @import("../software/raster.zig");
 const ct = @import("types.zig");
 
 /// Handle opaco. O layout real (`Context`) nunca é exposto.
@@ -184,6 +185,30 @@ pub export fn zyntra_context_pending_events(handle: ?*ZyntraContext, out_len: ?*
     const h = checkHandle(handle) catch return .invalid_argument;
     const out = out_len orelse return .invalid_argument;
     out.* = toCtx(h).pendingEvents().len;
+    return .ok;
+}
+
+/// Marca a região que mudou neste frame (une com o acumulado; rect vazio
+/// é no-op). `begin_frame` limpa o acumulado.
+pub export fn zyntra_context_mark_dirty(handle: ?*ZyntraContext, rect: ct.ZyntraRect) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    toCtx(h).mark_dirty(toRect(rect));
+    return .ok;
+}
+
+/// Zera a região suja acumulada (nada mais a repintar).
+pub export fn zyntra_context_clear_dirty(handle: ?*ZyntraContext) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    toCtx(h).clear_dirty();
+    return .ok;
+}
+
+/// Lê a região suja acumulada no frame atual (vazia quando nada mudou).
+pub export fn zyntra_context_dirty_rect(handle: ?*ZyntraContext, out_rect: ?*ct.ZyntraRect) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_rect orelse return .invalid_argument;
+    const r = toCtx(h).dirty_rect;
+    out.* = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     return .ok;
 }
 
@@ -415,6 +440,143 @@ pub export fn zyntra_text_truncate(
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Pixels: framebuffer de software e rasterização (M106)
+// ---------------------------------------------------------------------------
+
+/// Handle opaco do framebuffer de software (backend de referência). O
+/// layout real (`software.raster.SoftwareFramebuffer`) nunca é exposto.
+pub const ZyntraFramebuffer = opaque {};
+
+const Fb = software_mod.SoftwareFramebuffer;
+
+fn toFb(h: *ZyntraFramebuffer) *Fb {
+    return @ptrCast(@alignCast(h));
+}
+
+fn checkFb(h: ?*ZyntraFramebuffer) !*ZyntraFramebuffer {
+    return h orelse error.InvalidArgument;
+}
+
+fn mapRenderErr(err: anyerror) ct.ZyntraResult {
+    return switch (err) {
+        error.OutOfMemory => .out_of_memory,
+        error.InvalidCommand => .invalid_command,
+        error.InvalidArgument => .invalid_argument,
+        else => .invalid_state,
+    };
+}
+
+/// Cria um framebuffer `width`×`height` em RGBA no `page_allocator`
+/// interno. Dimensão 0 ou > 8192 ⇒ `ZYNTRA_INVALID_ARGUMENT`.
+pub export fn zyntra_framebuffer_create(
+    width: u32,
+    height: u32,
+    out_handle: ?*?*ZyntraFramebuffer,
+) callconv(.c) ct.ZyntraResult {
+    const out = out_handle orelse return .invalid_argument;
+    const gpa = std.heap.page_allocator;
+    const fb = gpa.create(Fb) catch return .out_of_memory;
+    fb.* = Fb.init(gpa, width, height) catch |err| {
+        gpa.destroy(fb);
+        return switch (err) {
+            error.OutOfMemory => .out_of_memory,
+            error.InvalidArgument => .invalid_argument,
+        };
+    };
+    out.* = @ptrCast(fb);
+    return .ok;
+}
+
+/// Destrói o framebuffer (NULL é seguro).
+pub export fn zyntra_framebuffer_destroy(handle: ?*ZyntraFramebuffer) callconv(.c) void {
+    const h = handle orelse return;
+    const fb = toFb(h);
+    const gpa = std.heap.page_allocator;
+    fb.deinit(gpa);
+    gpa.destroy(fb);
+}
+
+/// Tamanho atual em pixels (útil quando o layout é dirigido por dados).
+pub export fn zyntra_framebuffer_size(
+    handle: ?*ZyntraFramebuffer,
+    out_width: ?*u32,
+    out_height: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkFb(handle) catch return .invalid_argument;
+    const w_out = out_width orelse return .invalid_argument;
+    const h_out = out_height orelse return .invalid_argument;
+    const fb = toFb(h);
+    w_out.* = fb.w;
+    h_out.* = fb.h;
+    return .ok;
+}
+
+/// Preenche o framebuffer inteiro com `color` (source-over: alfa parcial
+/// mistura com o que já está lá; alfa 0 é no-op).
+pub export fn zyntra_framebuffer_fill(handle: ?*ZyntraFramebuffer, color: ct.ZyntraColor) callconv(.c) ct.ZyntraResult {
+    const h = checkFb(handle) catch return .invalid_argument;
+    const fb = toFb(h);
+    fb.fillRect(.{
+        .x = 0,
+        .y = 0,
+        .w = @floatFromInt(fb.w),
+        .h = @floatFromInt(fb.h),
+    }, null, toColor(color));
+    return .ok;
+}
+
+/// Lê um pixel em RGBA. Fora dos limites ⇒ `ZYNTRA_INVALID_ARGUMENT`.
+pub export fn zyntra_framebuffer_pixel(
+    handle: ?*ZyntraFramebuffer,
+    x: u32,
+    y: u32,
+    out_color: ?*ct.ZyntraColor,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkFb(handle) catch return .invalid_argument;
+    const out = out_color orelse return .invalid_argument;
+    const fb = toFb(h);
+    if (x >= fb.w or y >= fb.h) return .invalid_argument;
+    const px = fb.get(x, y);
+    out.* = .{ .r = px[0], .g = px[1], .b = px[2], .a = px[3] };
+    return .ok;
+}
+
+/// Rasteriza a `DrawList` do frame atual no framebuffer, cobrindo o
+/// viewport do contexto (clampado ao tamanho do framebuffer). `out_stats`
+/// é opcional (contadores de submetidos/desenhados/cullados).
+pub export fn zyntra_framebuffer_render(
+    fb_handle: ?*ZyntraFramebuffer,
+    ctx_handle: ?*ZyntraContext,
+    out_stats: ?*ct.ZyntraRenderStats,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkFb(fb_handle) catch return .invalid_argument;
+    const ch = checkHandle(ctx_handle) catch return .invalid_argument;
+    const fb = toFb(h);
+    const ctx = toCtx(ch);
+    const stats = software_mod.render(fb, ctx.drawCommands(), ctx.viewport) catch |err| return mapRenderErr(err);
+    if (out_stats) |s| s.* = stats;
+    return .ok;
+}
+
+/// Repintura parcial: rasteriza só a interseção de `region` com o
+/// viewport (clampado ao framebuffer). O resto do framebuffer fica como
+/// estava — o mesmo caminho do `render_region` da API Zig.
+pub export fn zyntra_framebuffer_render_region(
+    fb_handle: ?*ZyntraFramebuffer,
+    ctx_handle: ?*ZyntraContext,
+    region: ct.ZyntraRect,
+    out_stats: ?*ct.ZyntraRenderStats,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkFb(fb_handle) catch return .invalid_argument;
+    const ch = checkHandle(ctx_handle) catch return .invalid_argument;
+    const fb = toFb(h);
+    const ctx = toCtx(ch);
+    const stats = software_mod.renderRegion(fb, ctx.drawCommands(), ctx.viewport, toRect(region)) catch |err| return mapRenderErr(err);
+    if (out_stats) |s| s.* = stats;
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -612,4 +774,123 @@ test "C-ABI versão espelha constantes Zig" {
     try stdt.testing.expectEqual(types_mod.version_patch, zyntra_version_patch());
     const pre = std.mem.span(zyntra_version_prerelease());
     try stdt.testing.expectEqualStrings(types_mod.version_prerelease, pre);
+}
+
+test "C-ABI pixels: framebuffer, render integral/parcial e dirty rect" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+
+    // Dimensões inválidas são rejeitadas sem alocar.
+    var bad: ?*ZyntraFramebuffer = null;
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_create(0, 32, &bad));
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_create(32, 9000, &bad));
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_create(32, 32, null));
+
+    var fb_handle: ?*ZyntraFramebuffer = null;
+    try eq(ok, zyntra_framebuffer_create(64, 32, &fb_handle));
+    defer zyntra_framebuffer_destroy(fb_handle);
+    var ctx_handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 64, .h = 32 }, &ctx_handle));
+    defer zyntra_context_destroy(ctx_handle);
+
+    var fw: u32 = 0;
+    var fh: u32 = 0;
+    try eq(ok, zyntra_framebuffer_size(fb_handle, &fw, &fh));
+    try eq(@as(u32, 64), fw);
+    try eq(@as(u32, 32), fh);
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_size(fb_handle, &fw, null));
+
+    const bg: ct.ZyntraColor = .{ .r = 10, .g = 20, .b = 30, .a = 255 };
+    const red: ct.ZyntraColor = .{ .r = 200, .g = 40, .b = 40, .a = 255 };
+    const white: ct.ZyntraColor = .{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    const black: ct.ZyntraColor = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
+    const green: ct.ZyntraColor = .{ .r = 0, .g = 200, .b = 60, .a = 255 };
+    const blue: ct.ZyntraColor = .{ .r = 40, .g = 80, .b = 220, .a = 255 };
+
+    // `fill` cobre o framebuffer inteiro antes de qualquer frame.
+    try eq(ok, zyntra_framebuffer_fill(fb_handle, bg));
+    var px: ct.ZyntraColor = .{};
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 63, 31, &px));
+    try eq(bg.r, px.r);
+
+    // Frame 1: clear + retângulo + gradiente + cantos arredondados.
+    const box: ct.ZyntraRect = .{ .x = 4, .y = 4, .w = 16, .h = 16 };
+    const grad_box: ct.ZyntraRect = .{ .x = 32, .y = 4, .w = 24, .h = 16 };
+    const round_box: ct.ZyntraRect = .{ .x = 4, .y = 20, .w = 20, .h = 10 };
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_draw_clear(ctx_handle, bg));
+    try eq(ok, zyntra_draw_rect_filled(ctx_handle, box, red));
+    try eq(ok, zyntra_draw_rect_gradient(ctx_handle, grad_box, .{ .x = 32, .y = 4 }, .{ .x = 56, .y = 4 }, white, black));
+    try eq(ok, zyntra_draw_rect_rounded(ctx_handle, round_box, 5, green));
+
+    // Dirty rect: união dos dois primeiros rects; limpar zera.
+    try eq(ok, zyntra_context_mark_dirty(ctx_handle, box));
+    try eq(ok, zyntra_context_mark_dirty(ctx_handle, grad_box));
+    var dirty: ct.ZyntraRect = .{};
+    try eq(ok, zyntra_context_dirty_rect(ctx_handle, &dirty));
+    try eq(@as(f32, 4), dirty.x);
+    try eq(@as(f32, 52), dirty.w);
+    try eq(ok, zyntra_context_clear_dirty(ctx_handle));
+    try eq(ok, zyntra_context_dirty_rect(ctx_handle, &dirty));
+    try stdt.testing.expect(dirty.w == 0 and dirty.h == 0);
+
+    var stats: ct.ZyntraRenderStats = .{};
+    try eq(ok, zyntra_framebuffer_render(fb_handle, ctx_handle, &stats));
+    try eq(@as(u32, 4), stats.submitted);
+    try eq(@as(u32, 4), stats.drawn);
+    try eq(@as(u32, 0), stats.culled);
+
+    // Pixels: retângulo, fundo, gradiente nos dois extremos, canto
+    // arredondado dentro/fora.
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 12, 12, &px));
+    try eq(red.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 2, 2, &px));
+    try eq(bg.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 33, 10, &px));
+    try stdt.testing.expect(px.r > 200);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 55, 10, &px));
+    try stdt.testing.expect(px.r < 60);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 14, 25, &px));
+    try eq(green.g, px.g);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 4, 20, &px));
+    try eq(bg.r, px.r);
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_pixel(fb_handle, 64, 0, &px));
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_pixel(fb_handle, 0, 32, &px));
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_pixel(fb_handle, 0, 0, null));
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_pixel(null, 0, 0, &px));
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Frame 2 (parcial): só a região marcada é repintada; o resto do
+    // framebuffer mantém o frame anterior.
+    const patch: ct.ZyntraRect = .{ .x = 40, .y = 20, .w = 14, .h = 10 };
+    const patch_box: ct.ZyntraRect = .{ .x = 40, .y = 20, .w = 12, .h = 8 };
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_draw_clear(ctx_handle, bg));
+    try eq(ok, zyntra_draw_rect_filled(ctx_handle, patch_box, blue));
+    try eq(ok, zyntra_context_mark_dirty(ctx_handle, patch));
+    var part: ct.ZyntraRenderStats = .{};
+    try eq(ok, zyntra_framebuffer_render_region(fb_handle, ctx_handle, patch, &part));
+    try eq(@as(u32, 2), part.submitted);
+    try eq(@as(u32, 2), part.drawn);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 45, 24, &px));
+    try eq(blue.b, px.b);
+    // Dentro da região, fora do rect: o clear parcial pintou o fundo.
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 53, 29, &px));
+    try eq(bg.r, px.r);
+    // Fora da região: retângulo e gradiente do frame anterior intactos.
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 12, 12, &px));
+    try eq(red.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 55, 10, &px));
+    try stdt.testing.expect(px.r < 60);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Nulos nunca crasham.
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_render(null, ctx_handle, null));
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_render(fb_handle, null, null));
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_render_region(fb_handle, null, patch, null));
+    try eq(ok, zyntra_framebuffer_render_region(fb_handle, ctx_handle, patch, null));
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_fill(null, bg));
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_context_mark_dirty(null, box));
+    zyntra_framebuffer_destroy(null);
 }
