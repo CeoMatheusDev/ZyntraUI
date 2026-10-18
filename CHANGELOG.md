@@ -5,6 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.29.0] - 2026-10-18
+
+MINOR estável, 100% compatível: fecha a prioridade **#6** do roadmap
+(DnD/multi-janela) do lado das superfícies — roteamento de input por
+janela, composição de repintura multi-janela e janelas arrastáveis com
+decorações — e completa a fronteira C com todo o desenho moderno e as
+métricas de texto. Tudo aditivo: nenhuma assinatura existente mudou, os
+caminhos de render integral e parcial seguem idênticos em pixels,
+semântica e estatísticas, e a ABI C só ganhou símbolos novos.
+
 ### Adicionado
 
 - `window/input` + `window/registry`: **roteamento de input multi-janela**
