@@ -1802,4 +1802,186 @@ pub fn main() !void {
             wr_router.isCapturing(),
         },
     );
+
+    // Composição multi-janela (M102): cada janela tem o SEU `Context` (comandos
+    // LOCAIS e eventos LOCAIS do M101) e o compositor desloca/recompõe no
+    // framebuffer do DESKTOP, repintando só o que mudou — geometria,
+    // visibilidade e empilhamento (derivados da fotografia) mais o `dirty_rect`
+    // que os próprios widgets marcam (M98/M99).
+    const M102 = struct {
+        const bg = zyntra_ui.Color.rgb(20, 20, 28);
+        const win_a = zyntra_ui.Color.rgb(38, 42, 56);
+        const title_a = zyntra_ui.Color.rgb(60, 70, 90);
+        const win_b = zyntra_ui.Color.rgb(52, 44, 44);
+        const title_b = zyntra_ui.Color.rgb(90, 60, 70);
+        const sentinel = zyntra_ui.Color.rgb(1, 2, 3);
+
+        fn is(fb: *const zyntra_ui.SoftwareFramebuffer, x: u32, y: u32, c: zyntra_ui.Color) bool {
+            const p = fb.get(x, y);
+            return p[0] == c.r and p[1] == c.g and p[2] == c.b;
+        }
+    };
+
+    var m102_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 240, 130);
+    defer m102_fb.deinit(allocator);
+    var m102_ctx_a = try zyntra_ui.Context.init(allocator, .{
+        .viewport = zyntra_ui.Rect.init(0, 0, 120, 96),
+    });
+    defer m102_ctx_a.deinit();
+    var m102_ctx_b = try zyntra_ui.Context.init(allocator, .{
+        .viewport = zyntra_ui.Rect.init(0, 0, 120, 70),
+    });
+    defer m102_ctx_b.deinit();
+    var m102_reg: zyntra_ui.WindowRegistry = .{};
+    var m102_router: zyntra_ui.WindowRouter = .{};
+    var m102_comp: zyntra_ui.WindowCompositor = .{};
+    defer m102_comp.deinit(allocator);
+    var m102_value: f32 = 20;
+
+    const m102_a = zyntra_ui.Id.fromString("examples/m102:a");
+    const m102_b = zyntra_ui.Id.fromString("examples/m102:b");
+    const m102_btn = zyntra_ui.Id.fromString("examples/m102:btn");
+    const m102_sld = zyntra_ui.Id.fromString("examples/m102:sld");
+    const m102_btn_rect = zyntra_ui.Rect.init(5, 30, 60, 24);
+    const m102_sld_rect = zyntra_ui.Rect.init(10, 36, 100, 18);
+    try m102_reg.add(m102_a, zyntra_ui.Rect.init(10, 6, 120, 96)); // janela A
+    try m102_reg.add(m102_b, zyntra_ui.Rect.init(90, 44, 120, 70)); // B por cima
+    _ = m102_reg.bind(m102_a, &m102_ctx_a);
+    _ = m102_reg.bind(m102_b, &m102_ctx_b);
+
+    // Frame 1: um frame por janela (comandos locais) e a primeira composição
+    // (sem fotografia ⇒ desktop inteiro).
+    try m102_ctx_a.setViewport(m102_reg.get(m102_a).?.viewport());
+    m102_ctx_a.beginFrame();
+    try m102_ctx_a.draw.clear(allocator, M102.win_a);
+    try m102_ctx_a.draw.rectFilled(allocator, zyntra_ui.Rect.init(0, 0, 120, 18), M102.title_a);
+    _ = try button_mod.button(&m102_ctx_a, m102_btn, m102_btn_rect, btn_style);
+    m102_ctx_a.endFrame();
+    try m102_ctx_b.setViewport(m102_reg.get(m102_b).?.viewport());
+    m102_ctx_b.beginFrame();
+    try m102_ctx_b.draw.clear(allocator, M102.win_b);
+    try m102_ctx_b.draw.rectFilled(allocator, zyntra_ui.Rect.init(0, 0, 120, 18), M102.title_b);
+    _ = try slider_mod.slider(&m102_ctx_b, m102_sld, m102_sld_rect, &m102_value, 0, 100, sld_style);
+    m102_ctx_b.endFrame();
+
+    const m102_first = try m102_comp.compose(allocator, &m102_fb, &m102_reg, .{ .background = M102.bg });
+    const m102_first_ok = M102.is(&m102_fb, 15, 10, M102.title_a) and
+        M102.is(&m102_fb, 200, 50, M102.title_b) and
+        M102.is(&m102_fb, 230, 125, M102.bg);
+
+    // Frame 2: hover no botão de A. O evento entra no frame da janela (roteado
+    // por M101 em coordenadas de DESKTOP; o widget o enxerga LOCAL) e o widget
+    // marca o próprio rect (M99): a composição repinta só essa região.
+    const m102_btn_before = m102_fb.get(30, 48);
+    m102_fb.fillRect(zyntra_ui.Rect.init(120, 90, 4, 4), null, M102.sentinel);
+    try m102_ctx_a.setViewport(m102_reg.get(m102_a).?.viewport());
+    m102_ctx_a.beginFrame();
+    _ = try zyntra_ui.window.input.pushMouseMove(&m102_router, &m102_reg, .{ .x = 30, .y = 48 });
+    try m102_ctx_a.draw.clear(allocator, M102.win_a);
+    try m102_ctx_a.draw.rectFilled(allocator, zyntra_ui.Rect.init(0, 0, 120, 18), M102.title_a);
+    _ = try button_mod.button(&m102_ctx_a, m102_btn, m102_btn_rect, btn_style);
+    m102_ctx_a.endFrame();
+    const m102_hover = try m102_comp.compose(allocator, &m102_fb, &m102_reg, .{ .background = M102.bg });
+    const m102_btn_after = m102_fb.get(30, 48);
+    const m102_hover_btn = m102_btn_before[0] != m102_btn_after[0] or
+        m102_btn_before[1] != m102_btn_after[1] or
+        m102_btn_before[2] != m102_btn_after[2];
+    const m102_hover_kept = M102.is(&m102_fb, 121, 91, M102.sentinel);
+
+    // Frames 3a/3b/3c: press, arraste e solta no slider de B (roteados por
+    // M101). O valor muda dentro do widget e ele marca o rect (M99).
+    _ = zyntra_ui.window.input.focusAt(&m102_reg, .{ .x = 140, .y = 89 });
+    try m102_ctx_b.setViewport(m102_reg.get(m102_b).?.viewport());
+    m102_ctx_b.beginFrame();
+    _ = try zyntra_ui.window.input.pushButton(&m102_router, &m102_reg, .left, true, .{ .x = 140, .y = 89 });
+    try m102_ctx_b.draw.clear(allocator, M102.win_b);
+    try m102_ctx_b.draw.rectFilled(allocator, zyntra_ui.Rect.init(0, 0, 120, 18), M102.title_b);
+    _ = try slider_mod.slider(&m102_ctx_b, m102_sld, m102_sld_rect, &m102_value, 0, 100, sld_style);
+    m102_ctx_b.endFrame();
+    const m102_press = try m102_comp.compose(allocator, &m102_fb, &m102_reg, .{ .background = M102.bg });
+    const m102_value_press = m102_value;
+
+    m102_ctx_b.beginFrame();
+    _ = try zyntra_ui.window.input.pushMouseMove(&m102_router, &m102_reg, .{ .x = 180, .y = 89 });
+    try m102_ctx_b.draw.clear(allocator, M102.win_b);
+    try m102_ctx_b.draw.rectFilled(allocator, zyntra_ui.Rect.init(0, 0, 120, 18), M102.title_b);
+    _ = try slider_mod.slider(&m102_ctx_b, m102_sld, m102_sld_rect, &m102_value, 0, 100, sld_style);
+    m102_ctx_b.endFrame();
+    const m102_drag = try m102_comp.compose(allocator, &m102_fb, &m102_reg, .{ .background = M102.bg });
+    const m102_sld_drag = m102_value > m102_value_press;
+
+    m102_ctx_b.beginFrame();
+    const m102_release = try zyntra_ui.window.input.pushButton(
+        &m102_router,
+        &m102_reg,
+        .left,
+        false,
+        .{ .x = 180, .y = 89 },
+    );
+    try m102_ctx_b.draw.clear(allocator, M102.win_b);
+    try m102_ctx_b.draw.rectFilled(allocator, zyntra_ui.Rect.init(0, 0, 120, 18), M102.title_b);
+    _ = try slider_mod.slider(&m102_ctx_b, m102_sld, m102_sld_rect, &m102_value, 0, 100, sld_style);
+    m102_ctx_b.endFrame();
+    _ = try m102_comp.compose(allocator, &m102_fb, &m102_reg, .{ .background = M102.bg });
+
+    // Frame 4: mover B NÃO exige re-layout nem redesenho — o compositor deriva
+    // o dano (bounds antigos E novos) e recompõe.
+    try m102_reg.setBounds(m102_b, zyntra_ui.Rect.init(90, 56, 120, 70));
+    const m102_move = try m102_comp.compose(allocator, &m102_fb, &m102_reg, .{ .background = M102.bg });
+    const m102_vacated = M102.is(&m102_fb, 200, 50, M102.bg);
+    const m102_new_area = M102.is(&m102_fb, 200, 120, M102.win_b);
+
+    // Frame 5: esconder/mostrar B (A é recomposta onde B cobria).
+    _ = m102_reg.setVisible(m102_b, false);
+    const m102_hide = try m102_comp.compose(allocator, &m102_fb, &m102_reg, .{ .background = M102.bg });
+    const m102_overlap_a = M102.is(&m102_fb, 110, 75, M102.win_a);
+    _ = m102_reg.setVisible(m102_b, true);
+    const m102_show = try m102_comp.compose(allocator, &m102_fb, &m102_reg, .{ .background = M102.bg });
+    const m102_overlap_b = M102.is(&m102_fb, 110, 75, M102.win_b);
+
+    // Frame 6: subir A (dano só na interseção) e depois um frame ocioso.
+    _ = m102_reg.raise(m102_a);
+    const m102_raise = try m102_comp.compose(allocator, &m102_fb, &m102_reg, .{ .background = M102.bg });
+    const m102_overlap_raised = M102.is(&m102_fb, 110, 75, M102.win_a);
+    const m102_idle = try m102_comp.compose(allocator, &m102_fb, &m102_reg, .{ .background = M102.bg });
+
+    std.debug.print(
+        "m102 compose first damaged={d} windows={d} regions={d} ok={} | hover damaged={d} windows={d} regions={d} btn_changed={} far_kept={}\n",
+        .{
+            m102_first.damaged,
+            m102_first.windows,
+            m102_first.regions,
+            m102_first_ok,
+            m102_hover.damaged,
+            m102_hover.windows,
+            m102_hover.regions,
+            m102_hover_btn,
+            m102_hover_kept,
+        },
+    );
+    std.debug.print(
+        "m102 slider press={d}/{d} value={d:.0} drag={d}/{d} value={d:.0} moved={} release={} | geom move={d}/{d} vacated_bg={} new_covered={} hide={d} overlap_a={} show={d} overlap_b={} raise={d} overlap_a={} idle={d}/{d}\n",
+        .{
+            m102_press.damaged,
+            m102_press.regions,
+            m102_value_press,
+            m102_drag.damaged,
+            m102_drag.regions,
+            m102_value,
+            m102_sld_drag,
+            m102_release,
+            m102_move.damaged,
+            m102_move.regions,
+            m102_vacated,
+            m102_new_area,
+            m102_hide.damaged,
+            m102_overlap_a,
+            m102_show.damaged,
+            m102_overlap_b,
+            m102_raise.damaged,
+            m102_overlap_raised,
+            m102_idle.damaged,
+            m102_idle.regions,
+        },
+    );
 }

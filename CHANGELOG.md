@@ -32,6 +32,31 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   negativos, release na captura, roda/movimento seguindo o cursor e
   teclado na janela ativa.
 
+- `window/compositor` + `draw/commands`: **composição de repintura
+  multi-janela** (M102, aditivo) — fecha a parte de desenho do multi-janela.
+  `DrawCommand.translated`/`DrawList.translateInto` deslocam a geometria de
+  uma lista de comandos (rects, pontos, centros, clip e posição de texto, com
+  os bytes de texto remontados na lista de destino); o `Compositor` usa isso
+  para levar os comandos LOCAIS de cada janela (viewport local e eventos
+  locais do M101) ao espaço do desktop e executar
+  `software.raster.renderRegion` com viewport = `bounds`, recortado pela
+  região danificada. A danificação é derivada de uma fotografia do desktop:
+  adicionar/mostrar/mover/redimensionar danifica os bounds NOVOS e os antigos
+  (o rastro é recomposto com o fundo e com as janelas de baixo);
+  esconder/remover danifica os antigos; empilhamento danifica a interseção
+  dos pares visíveis cuja ordem relativa mudou; sem fotografia (primeira
+  composição, ou depois de `reset`) o desktop inteiro é danificado. As
+  regiões sujas que cada janela marcou (`Context.dirty_rect`, M98/M99) entram
+  sozinhas e são consumidas. `Style.background` opcional, `invalidate(rect)`
+  para o que o registro não vê (cursor, fundo animado) e `Stats` com
+  danificação, janelas repintadas, regiões e as estatísticas do rasterizador.
+  Janela invisível ou sem `Context` não é desenhada (a área fica com o
+  fundo). Demo `m102` no exemplo: dois `Context` independentes, hover no
+  botão de A repintando só o rect do widget (com sentinela preservada),
+  arraste de slider em B roteado pelo M101, mover (sem redesenhar),
+  esconder/mostrar, subir (dano só na interseção) e um frame ocioso com
+  `damaged=0`.
+
 ## [1.28.0] - 2026-10-17
 
 MINOR estável, 100% compatível: fecha a prioridade **#7** do roadmap

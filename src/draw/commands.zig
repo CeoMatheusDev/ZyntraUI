@@ -165,7 +165,54 @@ pub const DrawCommand = union(enum) {
             },
         }
     }
+
+    /// Cópia de `self` deslocada por (`dx`,`dy`) no espaço do frame: move
+    /// toda a geometria (rects, pontos, centros, posição de texto e clip),
+    /// preservando cores, espessuras e raios. `.clear` não tem geometria;
+    /// `.rect_shadow` desloca o rect mas mantém `offset` (é relativo);
+    /// `.clip` com `null_rect` mantém o rect (ignorado).
+    ///
+    /// Em `.text` só `pos` muda: `start`/`len` continuam válidos na MESMA
+    /// `DrawList` de origem. Para outra lista use
+    /// `DrawList.translateInto`, que remonta os bytes e reescreve os
+    /// offsets.
+    pub fn translated(self: DrawCommand, dx: f32, dy: f32) DrawCommand {
+        var out = self;
+        switch (out) {
+            .clear => {},
+            .clip => |*c| {
+                if (!c.null_rect) moveRect(&c.rect, dx, dy);
+            },
+            .rect_filled => |*c| moveRect(&c.rect, dx, dy),
+            .rect_outline => |*c| moveRect(&c.rect, dx, dy),
+            .rect_rounded => |*c| moveRect(&c.rect, dx, dy),
+            .rect_gradient => |*c| {
+                moveRect(&c.rect, dx, dy);
+                moveVec(&c.p0, dx, dy);
+                moveVec(&c.p1, dx, dy);
+            },
+            .rect_shadow => |*c| moveRect(&c.rect, dx, dy),
+            .blur => |*c| moveRect(&c.rect, dx, dy),
+            .line => |*c| {
+                moveVec(&c.p0, dx, dy);
+                moveVec(&c.p1, dx, dy);
+            },
+            .circle_filled => |*c| moveVec(&c.center, dx, dy),
+            .text => |*c| moveVec(&c.pos, dx, dy),
+        }
+        return out;
+    }
 };
+
+fn moveRect(r: *types.Rect, dx: f32, dy: f32) void {
+    r.x += dx;
+    r.y += dy;
+}
+
+fn moveVec(p: *types.Vec2, dx: f32, dy: f32) void {
+    p.x += dx;
+    p.y += dy;
+}
 
 /// Lista de desenho do frame (bump por frame + retenção de capacidade).
 /// `text_bytes` é a arena dos textos de comandos `.text`; comandos
@@ -216,6 +263,34 @@ pub const DrawList = struct {
     pub fn push(self: *Self, gpa: std.mem.Allocator, cmd: DrawCommand) !void {
         if (!cmd.isValid()) return error.InvalidCommand;
         try self.list.append(gpa, cmd);
+    }
+
+    /// Reconstrói `out` como esta lista deslocada por (`dx`,`dy`): limpa
+    /// `out` (retendo capacidade), desloca cada comando (ver
+    /// `DrawCommand.translated`) e remonta os bytes de texto, reescrevendo
+    /// os offsets — a lista resultante é autocontida em `out`. `out` deve
+    /// ser OUTRA lista (limpar `self` destruiria a origem).
+    pub fn translateInto(
+        self: *const Self,
+        gpa: std.mem.Allocator,
+        out: *Self,
+        dx: f32,
+        dy: f32,
+    ) !void {
+        out.clearRetainingCapacity();
+        for (self.list.items) |cmd| {
+            if (cmd != .text) {
+                try out.push(gpa, cmd.translated(dx, dy));
+                continue;
+            }
+            const bytes = self.textOf(cmd);
+            const start: u32 = @intCast(out.text_bytes.items.len);
+            try out.text_bytes.appendSlice(gpa, bytes);
+            var copy = cmd.translated(dx, dy);
+            copy.text.start = start;
+            copy.text.len = @intCast(bytes.len);
+            try out.push(gpa, copy);
+        }
     }
 
     pub fn clear(self: *Self, gpa: std.mem.Allocator, color: types.Color) !void {
@@ -526,5 +601,80 @@ fn fuzzPushText(_: void, smith: *std.testing.Smith) !void {
     } else |err| {
         try std.testing.expect(err == error.InvalidUtf8 or err == error.InvalidMetrics or err == error.InvalidCommand or err == error.OutOfMemory);
         try std.testing.expectEqual(before, dl.len());
+    }
+}
+
+test "DrawList translateInto desloca geometria e remonta o texto" {
+    const gpa = std.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const red = types.Color.rgb(200, 10, 10);
+
+    var src = DrawList.initEmpty();
+    defer src.deinit(gpa);
+    try src.clear(gpa, types.Color.rgb(1, 1, 1));
+    try src.push(gpa, .{ .clip = .{ .rect = types.Rect.init(0, 0, 20, 20), .null_rect = false } });
+    try src.rectFilled(gpa, types.Rect.init(0, 0, 10, 10), red);
+    try src.rectOutline(gpa, types.Rect.init(1, 1, 8, 8), red, 1.5);
+    try src.line(gpa, types.Vec2.init(0, 0), types.Vec2.init(4, 4), red, 2);
+    try src.circleFilled(gpa, types.Vec2.init(5, 5), 2, red);
+    try src.rectRounded(gpa, types.Rect.init(2, 2, 6, 6), 1, red);
+    try src.rectGradient(
+        gpa,
+        types.Rect.init(0, 0, 8, 8),
+        types.Vec2.init(0, 0),
+        types.Vec2.init(0, 8),
+        red,
+        types.Color.rgb(10, 10, 200),
+    );
+    try src.rectShadow(gpa, types.Rect.init(0, 0, 8, 8), 2, types.Vec2.init(1, 2), 3, red);
+    try src.backdropBlur(gpa, types.Rect.init(0, 0, 6, 6), 2);
+    try src.pushText(gpa, types.Vec2.init(3, 4), red, font, "olá");
+    try std.testing.expectEqual(@as(usize, 11), src.len());
+
+    var out = DrawList.initEmpty();
+    defer out.deinit(gpa);
+    try src.translateInto(gpa, &out, 100, 50);
+
+    // Um comando por origem, mesma ordem.
+    try std.testing.expectEqual(src.len(), out.len());
+    // `.clear` não tem geometria; `.clip` desloca o rect.
+    try std.testing.expect(out.items()[0] == .clear);
+    try std.testing.expectEqual(types.Rect.init(100, 50, 20, 20), out.items()[1].clip.rect);
+    // Rects, pontos e centros deslocados; cores e espessuras intactas.
+    try std.testing.expectEqual(types.Rect.init(100, 50, 10, 10), out.items()[2].rect_filled.rect);
+    try std.testing.expectEqual(red, out.items()[2].rect_filled.color);
+    try std.testing.expectEqual(@as(f32, 1.5), out.items()[3].rect_outline.thickness);
+    try std.testing.expectEqual(types.Vec2.init(100, 50), out.items()[4].line.p0);
+    try std.testing.expectEqual(types.Vec2.init(104, 54), out.items()[4].line.p1);
+    try std.testing.expectEqual(types.Vec2.init(105, 55), out.items()[5].circle_filled.center);
+    try std.testing.expectEqual(types.Rect.init(102, 52, 6, 6), out.items()[6].rect_rounded.rect);
+    try std.testing.expectEqual(types.Vec2.init(100, 50), out.items()[7].rect_gradient.p0);
+    try std.testing.expectEqual(types.Vec2.init(100, 58), out.items()[7].rect_gradient.p1);
+    // Sombra: rect desloca, `offset` é relativo (fica).
+    try std.testing.expectEqual(types.Rect.init(100, 50, 8, 8), out.items()[8].rect_shadow.rect);
+    try std.testing.expectEqual(types.Vec2.init(1, 2), out.items()[8].rect_shadow.offset);
+    try std.testing.expectEqual(types.Rect.init(100, 50, 6, 6), out.items()[9].blur.rect);
+    // Texto: posição deslocada, bytes remontados na arena de `out`.
+    const t = out.items()[10];
+    try std.testing.expectEqual(types.Vec2.init(103, 54), t.text.pos);
+    try std.testing.expectEqualStrings("olá", out.textOf(t));
+    try std.testing.expect(t.text.start + t.text.len <= out.text_bytes.items.len);
+
+    // Reconstruir limpa `out` (sem acumular) e retém capacidade.
+    const cap = out.list.capacity;
+    try src.translateInto(gpa, &out, 0, 0);
+    try std.testing.expectEqual(src.len(), out.len());
+    try std.testing.expect(out.list.capacity >= cap);
+
+    // Sem deslocamento, a geometria é idêntica à origem.
+    for (src.items(), out.items()) |a, b| {
+        if (a == .text) {
+            try std.testing.expectEqual(a.text.pos, b.text.pos);
+            try std.testing.expectEqualStrings(src.textOf(a), out.textOf(b));
+        } else if (a == .clear) {
+            try std.testing.expect(b == .clear);
+        } else {
+            try std.testing.expect(std.meta.eql(a.translated(0, 0), b));
+        }
     }
 }

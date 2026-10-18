@@ -228,8 +228,34 @@ The topmost visible surface wins the hit-test, so a surface without a bound
 context receives nothing (events do not fall through to the ones below).
 Switching the active surface clears the outgoing surface's widget focus
 (`focusWindow`), so a text input does not stay "focused" without receiving
-keys. Repaint composition across overlapping windows (cached per-window
-buffers plus damage tracking) is still the host's job.
+keys.
+
+#### Repaint composition
+
+`window.compositor` paints the desktop into a single framebuffer, composing
+each surface from its own (window-local) draw commands and repainting only
+what changed: geometry, visibility and stacking changes are derived from a
+snapshot, and the `dirty_rect` that widgets mark (hover, press, value change)
+is consumed automatically.
+
+```zig
+var comp: zyntra_ui.WindowCompositor = .{};
+defer comp.deinit(allocator);
+
+// Per frame: mutations + one frame per surface (beginFrame → widgets →
+// endFrame), then a single compose.
+_ = try reg.setBounds(dialog_id, moved);        // move: no re-layout, no redraw
+_ = try comp.compose(allocator, &fb, &reg, .{ .background = bg });
+// Moving a window back recomposes the old bounds, a hidden one restores the
+// background, raising one repaints the intersection, and an idle frame
+// reports `damaged == 0` (nothing rendered at all).
+comp.invalidate(rect);                          // host-driven damage (cursor…)
+```
+
+Surfaces without a bound context (or hidden) are not drawn — their area keeps
+the background. First composition (or after `comp.reset()`) repaints the whole
+desktop, since the framebuffer content is unknown. Composition uses the
+reference rasterizer; the `Context`/`Registry`/framebuffer stay yours.
 
 ## Examples and validation
 
