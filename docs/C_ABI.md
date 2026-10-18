@@ -106,6 +106,49 @@ zyntra_framebuffer_render_region(fb, ctx, dirty, NULL);
 zyntra_context_end_frame(ctx);
 ```
 
+## Widgets
+
+Primeira superfície C dos widgets (M107): ids, tema embutido e o lote de
+caixas/controles sem listas de strings. Os estilos são os mesmos `extern
+struct` da API Zig (`ZyntraButtonStyle`, `ZyntraCheckboxStyle`,
+`ZyntraSwitchStyle`, `ZyntraSliderStyle`, `ZyntraProgressStyle`,
+`ZyntraSeparatorStyle`), com layout travado por `_Static_assert` no C e
+`@compileError` no Zig.
+
+```c
+ZyntraThemeColors tc;
+zyntra_theme_colors(ZYNTRA_THEME_DARK, &tc);  /* bg/surface/text/accent/border */
+
+ZyntraButtonStyle bs;
+zyntra_style_button(ZYNTRA_THEME_DARK, &bs);  /* ou _LIGHT; ajuste e reutilize */
+bs.radius = 4.0f;
+
+const ZyntraId btn = zyntra_id_from_string("app:ok", 6); /* FNV-1a 64; 0 = nulo */
+ZyntraButtonResult bres;
+
+zyntra_context_begin_frame(ctx);
+zyntra_draw_clear(ctx, tc.bg);
+zyntra_widget_button(ctx, btn, (ZyntraRect){8, 8, 120, 32}, &bs, &bres);
+zyntra_widget_label(ctx, zyntra_id_child(btn, 0), (ZyntraRect){16, 16, 100, 16},
+    tc.text, 14.0f, "Ok", 2, false, NULL);  /* rótulo por cima, como na API Zig */
+if (bres.clicked) { /* ... */ }
+zyntra_context_end_frame(ctx);
+```
+
+* Lote atual: `zyntra_widget_label`, `_button`, `_checkbox`, `_switch`,
+  `_slider`, `_progress`, `_separator` — os widgets que não exigem listas
+  de strings nem estado retido.
+* `checked` (checkbox/switch) e `value` (slider) pertencem ao chamador: o
+  widget lê e altera no clique/arraste; o resultado volta em `out_*`
+  (`hovered`/`pressed`/`clicked`/`toggled`/`changed`/`dragging`/...).
+* `progress` e `separator` não têm id: não interagem nem entram no foco.
+* `out_*` pode ser NULL (importa só o efeito na DrawList/estado).
+* Erros: estilo/estado nulo, id nulo (`0`), `size <= 0`, enum fora da
+  faixa (`ZYNTRA_THEME_*`, `ZYNTRA_HORIZONTAL`/`_VERTICAL`) ou `utf8` NULL
+  com `len > 0` ⇒ `ZYNTRA_INVALID_ARGUMENT`; UTF-8 malformado ⇒
+  `ZYNTRA_INVALID_TEXT`.
+* `utf8` é emprestado só durante a chamada (a `DrawList` copia).
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -126,6 +169,10 @@ zyntra_context_end_frame(ctx);
   `@compileError` no Zig): `ZyntraVec2=8`, `ZyntraSize=8`,
   `ZyntraRect=16`, `ZyntraColor=4`, `ZyntraRenderStats=16`;
   `ZyntraResult` é `c_int`.
+* M107: também travados `ZyntraId=8`, `ZyntraThemeColors=20`,
+  `ZyntraTextMetrics=16`, estilos (`Button=24`, `Checkbox=24`, `Switch=28`,
+  `Slider=32`, `Progress=16`, `Separator=12`) e resultados
+  (`Label=20`, `Button=3`, `Checkbox=3`, `Switch=4`, `Slider=8`).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -146,5 +193,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..."
 ```

@@ -328,7 +328,12 @@ surface — solid/outlined/rounded rectangles, lines, circles, linear gradients,
 drop shadows, backdrop blur, clip, copied UTF-8 text runs and text metrics —
 plus the context/frame/event lifecycle. The software rasterizer is reachable
 too: an opaque framebuffer renders the frame's draw list (full or partial
-repaint driven by the dirty rect) and single pixels can be read back. See
+repaint driven by the dirty rect) and single pixels can be read back. The
+first widget surface is exposed as well: stable ids
+(`zyntra_id_from_string`/`zyntra_id_child`), the built-in dark/light theme
+colors and per-widget styles (`zyntra_theme_colors`/`zyntra_style_*`), and
+`label`/`button`/`checkbox`/`switch`/`slider`/`progress`/`separator` with
+their interaction results (click, toggle, drag) handed back to C. See
 [`src/c-abi/zyntra.h`](src/c-abi/zyntra.h) and [`docs/C_ABI.md`](docs/C_ABI.md)
 for the exported interface and integration details.
 

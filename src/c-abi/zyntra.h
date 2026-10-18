@@ -6,6 +6,9 @@
  * Tamanhos travados: ZyntraVec2=8, ZyntraRect=16, ZyntraColor=4,
  * ZyntraRenderStats=16.
  * Todo retorno é ZyntraResult (0 = ok). Ver docs/C_ABI.md.
+ * M107: tamanhos travados também para ZyntraId=8, ZyntraThemeColors=20,
+ * ZyntraTextMetrics=16, estilos (24/24/28/32/16/12) e resultados
+ * (20/3/3/4/8).
  */
 
 #include <stdbool.h>
@@ -133,6 +136,159 @@ ZyntraResult zyntra_framebuffer_render(ZyntraFramebuffer *handle, ZyntraContext 
     ZyntraRenderStats *out_stats);
 ZyntraResult zyntra_framebuffer_render_region(ZyntraFramebuffer *handle, ZyntraContext *ctx,
     ZyntraRect region, ZyntraRenderStats *out_stats);
+
+/* Widgets (M107): primeira superfície C. Os estilos são os mesmos `extern
+ * struct` da API Zig (uma definição só por widget; as travas de layout em
+ * src/c-abi/types.zig falham o build se mudarem). `ZyntraId` é o `u64`
+ * opaco da API Zig: derive com `zyntra_id_from_string`/`zyntra_id_child`;
+ * 0 é o id nulo e os widgets o rejeitam com ZYNTRA_INVALID_ARGUMENT.
+ * `out_*` de resultado é opcional (NULL ignora). */
+
+typedef uint64_t ZyntraId;
+
+typedef enum ZyntraThemeKind {
+    ZYNTRA_THEME_DARK = 0,
+    ZYNTRA_THEME_LIGHT = 1
+} ZyntraThemeKind;
+
+typedef enum ZyntraOrientation {
+    ZYNTRA_HORIZONTAL = 0,
+    ZYNTRA_VERTICAL = 1
+} ZyntraOrientation;
+
+typedef struct ZyntraThemeColors {
+    ZyntraColor bg;
+    ZyntraColor surface;
+    ZyntraColor text;
+    ZyntraColor accent;
+    ZyntraColor border;
+} ZyntraThemeColors;
+
+typedef struct ZyntraTextMetrics {
+    float width;
+    float height;
+    uint32_t lines;
+    uint32_t glyphs;
+} ZyntraTextMetrics;
+
+typedef struct ZyntraButtonStyle {
+    ZyntraColor bg;
+    ZyntraColor bg_hover;
+    ZyntraColor bg_pressed;
+    ZyntraColor border;
+    float border_width;
+    float radius;
+} ZyntraButtonStyle;
+
+typedef struct ZyntraCheckboxStyle {
+    float box_size;
+    ZyntraColor bg;
+    ZyntraColor bg_checked;
+    ZyntraColor border;
+    ZyntraColor check;
+    float border_width;
+} ZyntraCheckboxStyle;
+
+typedef struct ZyntraSwitchStyle {
+    ZyntraColor track;
+    ZyntraColor track_on;
+    ZyntraColor track_hover;
+    ZyntraColor knob;
+    ZyntraColor border;
+    float border_width;
+    float knob_pad;
+} ZyntraSwitchStyle;
+
+typedef struct ZyntraSliderStyle {
+    float track_height;
+    ZyntraColor track_bg;
+    ZyntraColor fill;
+    float handle_w;
+    float handle_h;
+    ZyntraColor handle_bg;
+    ZyntraColor border;
+    float border_width;
+} ZyntraSliderStyle;
+
+typedef struct ZyntraProgressStyle {
+    ZyntraColor bg;
+    ZyntraColor fill;
+    ZyntraColor border;
+    float border_width;
+} ZyntraProgressStyle;
+
+typedef struct ZyntraSeparatorStyle {
+    ZyntraColor color;
+    float thickness;
+    float label_gap;
+} ZyntraSeparatorStyle;
+
+typedef struct ZyntraLabelResult {
+    ZyntraTextMetrics metrics;
+    bool truncated;
+} ZyntraLabelResult;
+
+typedef struct ZyntraButtonResult {
+    bool hovered;
+    bool pressed;
+    bool clicked;
+} ZyntraButtonResult;
+
+typedef struct ZyntraCheckboxResult {
+    bool hovered;
+    bool toggled;
+    bool checked;
+} ZyntraCheckboxResult;
+
+typedef struct ZyntraSwitchResult {
+    bool hovered;
+    bool toggled;
+    bool checked;
+    bool focused;
+} ZyntraSwitchResult;
+
+typedef struct ZyntraSliderResult {
+    float value;
+    bool changed;
+    bool hovered;
+    bool dragging;
+} ZyntraSliderResult;
+
+/* Tema embutido (kind: ZYNTRA_THEME_DARK/LIGHT): cores base e estilos por
+ * widget. O estilo devolvido é mutável — ajuste e passe ao widget. */
+ZyntraResult zyntra_theme_colors(int32_t theme_kind, ZyntraThemeColors *out_colors);
+ZyntraResult zyntra_style_button(int32_t theme_kind, ZyntraButtonStyle *out_style);
+ZyntraResult zyntra_style_checkbox(int32_t theme_kind, ZyntraCheckboxStyle *out_style);
+ZyntraResult zyntra_style_switch(int32_t theme_kind, ZyntraSwitchStyle *out_style);
+ZyntraResult zyntra_style_slider(int32_t theme_kind, ZyntraSliderStyle *out_style);
+ZyntraResult zyntra_style_progress(int32_t theme_kind, ZyntraProgressStyle *out_style);
+ZyntraResult zyntra_style_separator(int32_t theme_kind, ZyntraSeparatorStyle *out_style);
+
+/* Ids estáveis de widget (FNV-1a 64 do texto; len 0 ou NULL ⇒ 0). O filho
+ * de um id nulo também é nulo. */
+ZyntraId zyntra_id_from_string(const char *utf8, size_t utf8_len);
+ZyntraId zyntra_id_child(ZyntraId parent, uint32_t index);
+
+/* Widgets: exigem um frame ativo (como as funções de desenho) e desenham
+ * caixas/linhas; o rótulo do botão é um `zyntra_widget_label` por cima,
+ * como na API Zig. `utf8` é emprestado só durante a chamada (a DrawList
+ * copia). `checked`/`value` pertencem ao chamador: o widget lê e altera. */
+ZyntraResult zyntra_widget_label(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    ZyntraColor color, float size, const char *utf8, size_t utf8_len, bool debug_draw,
+    ZyntraLabelResult *out_result);
+ZyntraResult zyntra_widget_button(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    const ZyntraButtonStyle *style, ZyntraButtonResult *out_result);
+ZyntraResult zyntra_widget_checkbox(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    bool *checked, const ZyntraCheckboxStyle *style, ZyntraCheckboxResult *out_result);
+ZyntraResult zyntra_widget_switch(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    bool *checked, const ZyntraSwitchStyle *style, ZyntraSwitchResult *out_result);
+ZyntraResult zyntra_widget_slider(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    float *value, float min, float max, const ZyntraSliderStyle *style,
+    ZyntraSliderResult *out_result);
+ZyntraResult zyntra_widget_progress(ZyntraContext *handle, ZyntraRect bounds, float frac,
+    const ZyntraProgressStyle *style);
+ZyntraResult zyntra_widget_separator(ZyntraContext *handle, ZyntraRect bounds,
+    int32_t orientation, const ZyntraSeparatorStyle *style);
 
 #ifdef __cplusplus
 }

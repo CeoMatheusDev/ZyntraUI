@@ -5,6 +5,23 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `c-abi`: **primeira superfície de widgets na fronteira C** (M107, aditivo)
+  — ids estáveis (`ZyntraId` + `zyntra_id_from_string`/`zyntra_id_child`,
+  FNV-1a 64 igual ao `Id` da API Zig), tema embutido
+  (`zyntra_theme_colors` com `ZyntraThemeKind` escuro/claro e estilos por
+  widget em `zyntra_style_*`, reexportando os `extern struct` da API Zig —
+  uma definição só) e sete widgets: `zyntra_widget_label` (métricas +
+  `truncated`), `_button`, `_checkbox`, `_switch`, `_slider` (resultado
+  opcional com `hovered`/`pressed`/`clicked`/`toggled`/`changed`/
+  `dragging`/`focused`) e `_progress`/`_separator` (sem id, sem interação).
+  Estados do chamador (`checked`, `value`) são lidos e alterados pelo widget;
+  o rótulo do botão é um `zyntra_widget_label` por cima, como na API Zig.
+  Nada existente mudou de assinatura ou layout; o consumidor C
+  `tests/c/test_c_abi.c` ganhou os frames 5–9 (widgets frios, clique do
+  botão, alternância do checkbox) com checagem de pixels no framebuffer.
+
 ## [1.30.0] - 2026-10-18
 
 MINOR estável, 100% compatível: avança o item #7 do roadmap (dirty rect /

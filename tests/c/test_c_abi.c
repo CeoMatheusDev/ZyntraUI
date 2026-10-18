@@ -251,6 +251,184 @@ int main(void) {
         CHECK(zyntra_context_end_frame(ctx));
     }
 
+    /* Frames 5-8: widgets (M107) — estilos do tema escuro, primeiro lote
+     * desenhado pelo mesmo rasterizador, e a interação (clique da caixa,
+     * alternância do checkbox) reportada de volta ao C. */
+    ZyntraFramebuffer *wfb = NULL;
+    int w_clicked = 0, w_hovered = 0, w_toggled = 0, w_checked = 0;
+    int w_chk_px = 0, w_slide_px = 0, w_sep_px = 0, w_prog_px = 0;
+    float w_slider_value = 0;
+    size_t w_draws = 0;
+    unsigned long long w_id = 0, w_child = 0;
+    {
+        _Static_assert(sizeof(ZyntraId) == 8, "ZyntraId ABI");
+        _Static_assert(sizeof(ZyntraThemeColors) == 20, "ZyntraThemeColors ABI");
+        _Static_assert(sizeof(ZyntraTextMetrics) == 16, "ZyntraTextMetrics ABI");
+        _Static_assert(sizeof(ZyntraButtonStyle) == 24, "ZyntraButtonStyle ABI");
+        _Static_assert(sizeof(ZyntraCheckboxStyle) == 24, "ZyntraCheckboxStyle ABI");
+        _Static_assert(sizeof(ZyntraSwitchStyle) == 28, "ZyntraSwitchStyle ABI");
+        _Static_assert(sizeof(ZyntraSliderStyle) == 32, "ZyntraSliderStyle ABI");
+        _Static_assert(sizeof(ZyntraProgressStyle) == 16, "ZyntraProgressStyle ABI");
+        _Static_assert(sizeof(ZyntraSeparatorStyle) == 12, "ZyntraSeparatorStyle ABI");
+        _Static_assert(sizeof(ZyntraLabelResult) == 20, "ZyntraLabelResult ABI");
+        _Static_assert(sizeof(ZyntraButtonResult) == 3, "ZyntraButtonResult ABI");
+        _Static_assert(sizeof(ZyntraCheckboxResult) == 3, "ZyntraCheckboxResult ABI");
+        _Static_assert(sizeof(ZyntraSwitchResult) == 4, "ZyntraSwitchResult ABI");
+        _Static_assert(sizeof(ZyntraSliderResult) == 8, "ZyntraSliderResult ABI");
+
+        /* Ids: mesmo texto ⇒ mesmo id; filho difere do pai; vazio/NULL
+         * dão o id nulo. */
+        w_id = (unsigned long long)zyntra_id_from_string("c:btn", 5);
+        assert(w_id != 0);
+        assert(zyntra_id_from_string("c:btn", 5) == w_id);
+        assert(zyntra_id_from_string("", 0) == 0);
+        assert(zyntra_id_from_string(NULL, 2) == 0);
+        w_child = (unsigned long long)zyntra_id_child(w_id, 2);
+        assert(w_child != w_id && zyntra_id_child(w_id, 3) != w_child);
+        assert(zyntra_id_child(0, 1) == 0); /* filho de nulo é nulo */
+
+        /* Tema embutido: cores base e estilos por widget. */
+        ZyntraThemeColors tc = {{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}};
+        ZyntraThemeColors tl = tc;
+        ZyntraButtonStyle bs;
+        ZyntraCheckboxStyle cs;
+        ZyntraSwitchStyle ss;
+        ZyntraSliderStyle sls;
+        ZyntraProgressStyle ps;
+        ZyntraSeparatorStyle se;
+        CHECK(zyntra_theme_colors(ZYNTRA_THEME_DARK, &tc));
+        CHECK(zyntra_theme_colors(ZYNTRA_THEME_LIGHT, &tl));
+        assert(tc.bg.r < tl.bg.r && tc.text.r > tl.text.r && tc.text.a == 255);
+        CHECK(zyntra_style_button(ZYNTRA_THEME_DARK, &bs));
+        CHECK(zyntra_style_checkbox(ZYNTRA_THEME_DARK, &cs));
+        CHECK(zyntra_style_switch(ZYNTRA_THEME_DARK, &ss));
+        CHECK(zyntra_style_slider(ZYNTRA_THEME_DARK, &sls));
+        CHECK(zyntra_style_progress(ZYNTRA_THEME_DARK, &ps));
+        CHECK(zyntra_style_separator(ZYNTRA_THEME_DARK, &se));
+        assert(zyntra_style_button(9, &bs) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_button(ZYNTRA_THEME_DARK, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_theme_colors(ZYNTRA_THEME_DARK, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        se.thickness = 2.0f; /* linha em duas linhas de pixel: leitura exata */
+
+        CHECK(zyntra_framebuffer_create(96, 80, &wfb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 96, 80}));
+
+        ZyntraRect lbl = {4, 2, 40, 10};
+        ZyntraRect wbtn = {4, 16, 40, 16};
+        ZyntraRect wsep = {4, 34, 88, 2};
+        ZyntraRect wchk = {4, 38, 18, 18};
+        ZyntraRect wsw = {28, 38, 36, 18};
+        ZyntraRect wsl = {4, 60, 88, 12};
+        ZyntraRect wprog = {4, 74, 88, 4};
+        bool checked = false, switched = true;
+        float value = 30.0f;
+        ZyntraLabelResult lres;
+        ZyntraButtonResult bres;
+        ZyntraCheckboxResult cres;
+        ZyntraSwitchResult sres;
+        ZyntraSliderResult slres;
+        ZyntraColor wpx = {0, 0, 0, 0};
+
+        /* Frame 5: um de cada widget, sem mouse sobre eles, rasterizado. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){90, 4}));
+        CHECK(zyntra_draw_clear(ctx, tc.bg));
+        CHECK(zyntra_widget_label(ctx, w_id, lbl, tc.text, 10.0f, "Ok", 2, false, &lres));
+        assert(lres.metrics.width > 0.0f && lres.metrics.lines == 1 && !lres.truncated);
+        CHECK(zyntra_widget_button(ctx, w_id, wbtn, &bs, &bres));
+        assert(!bres.hovered && !bres.pressed && !bres.clicked);
+        CHECK(zyntra_widget_checkbox(ctx, zyntra_id_child(w_id, 1), wchk, &checked, &cs, &cres));
+        assert(!cres.checked && !cres.toggled && !checked);
+        CHECK(zyntra_widget_switch(ctx, zyntra_id_child(w_id, 2), wsw, &switched, &ss, &sres));
+        assert(sres.checked && !sres.toggled);
+        CHECK(zyntra_widget_slider(ctx, zyntra_id_child(w_id, 3), wsl, &value, 0.0f, 100.0f, &sls, &slres));
+        assert(slres.value == 30.0f && !slres.changed && !slres.dragging);
+        CHECK(zyntra_widget_progress(ctx, wprog, 0.5f, &ps));
+        CHECK(zyntra_widget_separator(ctx, wsep, ZYNTRA_HORIZONTAL, &se));
+
+        /* Inválidos: id nulo, estilo/estado nulo, enum fora da faixa. */
+        assert(zyntra_widget_button(ctx, 0, wbtn, &bs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_button(ctx, w_id, wbtn, NULL, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_checkbox(ctx, w_id, wchk, NULL, &cs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_switch(ctx, w_id, wsw, NULL, &ss, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_slider(ctx, w_id, wsl, NULL, 0.0f, 1.0f, &sls, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_label(ctx, w_id, wbtn, tc.text, 0.0f, "x", 1, false, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_label(ctx, w_id, wbtn, tc.text, 10.0f, NULL, 3, false, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_label(ctx, w_id, wbtn, tc.text, 10.0f, "\xff", 1, false, NULL) == ZYNTRA_INVALID_TEXT);
+        assert(zyntra_widget_label(ctx, w_id, wbtn, tc.text, 10.0f, NULL, 0, false, NULL) == ZYNTRA_OK);
+        assert(zyntra_widget_separator(ctx, wsep, 7, &se) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_progress(NULL, wprog, 0.5f, &ps) == ZYNTRA_INVALID_ARGUMENT);
+
+        CHECK(zyntra_framebuffer_render(wfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(wfb, 24, 24, &wpx)); /* dentro do botão */
+        assert(wpx.r == bs.bg.r && wpx.g == bs.bg.g && wpx.b == bs.bg.b);
+        CHECK(zyntra_framebuffer_pixel(wfb, 6, 47, &wpx)); /* caixa vazia */
+        assert(wpx.r == cs.bg.r && wpx.g == cs.bg.g);
+        CHECK(zyntra_framebuffer_pixel(wfb, 34, 47, &wpx)); /* trilho ligado */
+        assert(wpx.r == ss.track_on.r && wpx.g == ss.track_on.g);
+        CHECK(zyntra_framebuffer_pixel(wfb, 12, 66, &wpx)); /* slider: preenchido */
+        w_slide_px = (wpx.r == sls.fill.r && wpx.g == sls.fill.g);
+        assert(w_slide_px);
+        CHECK(zyntra_framebuffer_pixel(wfb, 80, 66, &wpx)); /* trilho vazio */
+        assert(wpx.r == sls.track_bg.r);
+        CHECK(zyntra_framebuffer_pixel(wfb, 20, 76, &wpx)); /* progresso: metade */
+        w_prog_px = (wpx.r == ps.fill.r);
+        assert(w_prog_px);
+        CHECK(zyntra_framebuffer_pixel(wfb, 80, 76, &wpx));
+        assert(wpx.r == ps.bg.r);
+        CHECK(zyntra_framebuffer_pixel(wfb, 50, 34, &wpx)); /* separador */
+        w_sep_px = (wpx.r == se.color.r);
+        assert(w_sep_px);
+        CHECK(zyntra_draw_count(ctx, &w_draws));
+        assert(w_draws >= 9); /* rótulo, botão, checkbox, switch, slider, ... */
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 6: press no botão ⇒ hovered + pressed, sem clique ainda. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){24, 24}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){24, 24}));
+        CHECK(zyntra_widget_button(ctx, w_id, wbtn, &bs, &bres));
+        assert(bres.hovered && bres.pressed && !bres.clicked);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 7: release no botão ⇒ clique. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){24, 24}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){24, 24}));
+        CHECK(zyntra_widget_button(ctx, w_id, wbtn, &bs, &bres));
+        assert(bres.clicked && bres.hovered);
+        w_clicked = bres.clicked;
+        w_hovered = bres.hovered;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 8: press no checkbox ⇒ captura, sem alternar ainda. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){13, 47}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){13, 47}));
+        CHECK(zyntra_widget_checkbox(ctx, zyntra_id_child(w_id, 1), wchk, &checked, &cs, &cres));
+        assert(!checked && !cres.toggled && cres.hovered);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 9: release no checkbox ⇒ alterna; rasteriza marcada. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){13, 47}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){13, 47}));
+        CHECK(zyntra_draw_clear(ctx, tc.bg));
+        CHECK(zyntra_widget_checkbox(ctx, zyntra_id_child(w_id, 1), wchk, &checked, &cs, &cres));
+        assert(checked && cres.toggled && cres.checked);
+        w_toggled = cres.toggled;
+        w_checked = checked;
+        CHECK(zyntra_framebuffer_render(wfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(wfb, 6, 47, &wpx)); /* agora bg_checked */
+        w_chk_px = (wpx.r == cs.bg_checked.r && wpx.g == cs.bg_checked.g);
+        assert(w_chk_px);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        w_slider_value = value;
+        zyntra_framebuffer_destroy(wfb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -270,6 +448,10 @@ int main(void) {
     printf("C-ABI pixels grad=%d/%d round=%d/%d part=%d kept=%d stats=%zu/%zu/%zu\n",
         grad_left, grad_right, round_in, round_out, part_px, kept_px,
         stats_sub, stats_drawn, stats_culled);
+    printf("C-ABI widgets click=%d hover=%d toggle=%d checked=%d chk=%d slider=%.0f"
+        " fill=%d sep=%d prog=%d id=%llu child=%llu\n",
+        w_clicked, w_hovered, w_toggled, w_checked, w_chk_px, (double)w_slider_value,
+        w_slide_px, w_sep_px, w_prog_px, w_id, w_child);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

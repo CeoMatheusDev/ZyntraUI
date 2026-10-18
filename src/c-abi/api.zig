@@ -21,6 +21,15 @@ const types_mod = @import("../core/types.zig");
 const event_mod = @import("../event/event.zig");
 const metrics_mod = @import("../text/metrics.zig");
 const software_mod = @import("../software/raster.zig");
+const id_mod = @import("../core/id.zig");
+const style_mod = @import("../style/style.zig");
+const label_mod = @import("../widgets/label.zig");
+const button_mod = @import("../widgets/button.zig");
+const checkbox_mod = @import("../widgets/checkbox.zig");
+const switch_mod = @import("../widgets/switch.zig");
+const slider_mod = @import("../widgets/slider.zig");
+const progress_mod = @import("../widgets/progress.zig");
+const separator_mod = @import("../widgets/separator.zig");
 const ct = @import("types.zig");
 
 /// Handle opaco. O layout real (`Context`) nunca é exposto.
@@ -54,6 +63,10 @@ fn toVec2(v: ct.ZyntraVec2) types_mod.Vec2 {
 }
 
 fn toColor(c: ct.ZyntraColor) types_mod.Color {
+    return .{ .r = c.r, .g = c.g, .b = c.b, .a = c.a };
+}
+
+fn fromColor(c: types_mod.Color) ct.ZyntraColor {
     return .{ .r = c.r, .g = c.g, .b = c.b, .a = c.a };
 }
 
@@ -577,6 +590,250 @@ pub export fn zyntra_framebuffer_render_region(
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Widgets: primeira superfície C (M107)
+// ---------------------------------------------------------------------------
+
+/// Deriva um id estável do hash FNV-1a 64 da string (`utf8_len == 0` ou
+/// ponteiro NULL ⇒ id nulo, que os widgets rejeitam com
+/// `ZYNTRA_INVALID_ARGUMENT`).
+pub export fn zyntra_id_from_string(utf8: ?[*]const u8, utf8_len: usize) callconv(.c) ct.ZyntraId {
+    if (utf8_len == 0 or utf8 == null) return 0;
+    return id_mod.Id.fromString(utf8.?[0..utf8_len]).value();
+}
+
+/// Deriva um id filho do pai (itens de lista/tabela/árvore, subwidgets).
+/// Pai nulo ⇒ nulo (não inventa um id a partir do nada); os widgets
+/// rejeitam o `0` com `ZYNTRA_INVALID_ARGUMENT`.
+pub export fn zyntra_id_child(parent: ct.ZyntraId, index: u32) callconv(.c) ct.ZyntraId {
+    if (parent == 0) return 0;
+    return id_mod.Id.fromU64(parent).child(index).value();
+}
+
+fn themeOf(kind: i32) ?style_mod.Theme {
+    const k = std.enums.fromInt(ct.ZyntraThemeKind, kind) orelse return null;
+    return switch (k) {
+        .dark => style_mod.Theme.darkDefault(),
+        .light => style_mod.Theme.lightDefault(),
+    };
+}
+
+fn toOrientation(v: i32) ?separator_mod.SeparatorOrientation {
+    const o = std.enums.fromInt(ct.ZyntraOrientation, v) orelse return null;
+    return switch (o) {
+        .horizontal => .horizontal,
+        .vertical => .vertical,
+    };
+}
+
+/// Mapeia os error sets dos widgets (o C não vê error unions;
+/// `invalid_state` cobre o resto).
+fn mapWidgetErr(err: anyerror) ct.ZyntraResult {
+    return switch (err) {
+        error.InvalidUtf8 => .invalid_text,
+        error.InvalidMetrics => .invalid_argument,
+        else => mapRenderErr(err),
+    };
+}
+
+/// Cores base do tema embutido (`kind`: `ZYNTRA_THEME_DARK`/`ZYNTRA_THEME_LIGHT`).
+pub export fn zyntra_theme_colors(
+    kind: i32,
+    out_colors: ?*ct.ZyntraThemeColors,
+) callconv(.c) ct.ZyntraResult {
+    const out = out_colors orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = .{
+        .bg = fromColor(t.bg),
+        .surface = fromColor(t.surface),
+        .text = fromColor(t.text),
+        .accent = fromColor(t.accent),
+        .border = fromColor(t.border),
+    };
+    return .ok;
+}
+
+/// Estilo de botão do tema embutido (mutável pelo chamador antes do uso).
+pub export fn zyntra_style_button(kind: i32, out_style: ?*ct.ZyntraButtonStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.buttonStyle();
+    return .ok;
+}
+
+pub export fn zyntra_style_checkbox(kind: i32, out_style: ?*ct.ZyntraCheckboxStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.checkboxStyle();
+    return .ok;
+}
+
+pub export fn zyntra_style_switch(kind: i32, out_style: ?*ct.ZyntraSwitchStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.switchStyle();
+    return .ok;
+}
+
+pub export fn zyntra_style_slider(kind: i32, out_style: ?*ct.ZyntraSliderStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.sliderStyle();
+    return .ok;
+}
+
+pub export fn zyntra_style_progress(kind: i32, out_style: ?*ct.ZyntraProgressStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.progressStyle();
+    return .ok;
+}
+
+pub export fn zyntra_style_separator(kind: i32, out_style: ?*ct.ZyntraSeparatorStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.separatorStyle();
+    return .ok;
+}
+
+/// Rótulo de texto (`utf8` é emprestado só na chamada — a `DrawList` copia).
+/// `out_result` é opcional (métricas + `truncated`).
+pub export fn zyntra_widget_label(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    color: ct.ZyntraColor,
+    size: f32,
+    utf8: ?[*]const u8,
+    utf8_len: usize,
+    debug_draw: bool,
+    out_result: ?*ct.ZyntraLabelResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    if (utf8_len > 0 and utf8 == null) return .invalid_argument;
+    const bytes: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
+    const res = label_mod.label(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        bytes,
+        toColor(color),
+        metrics_mod.FontMetrics.withSize(size),
+        debug_draw,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{ .metrics = res.metrics, .truncated = res.truncated };
+    return .ok;
+}
+
+/// Botão (a caixa; o rótulo é um `zyntra_widget_label` por cima, como na
+/// API Zig). `out_result` é opcional (`hovered`/`pressed`/`clicked`).
+pub export fn zyntra_widget_button(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    style: ?*const ct.ZyntraButtonStyle,
+    out_result: ?*ct.ZyntraButtonResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const res = button_mod.button(toCtx(h), id_mod.Id.fromU64(id), toRect(bounds), st.*) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{ .hovered = res.hovered, .pressed = res.pressed, .clicked = res.clicked };
+    return .ok;
+}
+
+/// Caixa de seleção: `checked` é do chamador (lida e alternada pelo widget).
+pub export fn zyntra_widget_checkbox(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    checked: ?*bool,
+    style: ?*const ct.ZyntraCheckboxStyle,
+    out_result: ?*ct.ZyntraCheckboxResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const chk = checked orelse return .invalid_argument;
+    const res = checkbox_mod.checkbox(toCtx(h), id_mod.Id.fromU64(id), toRect(bounds), chk, st.*) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{ .hovered = res.hovered, .toggled = res.toggled, .checked = res.checked };
+    return .ok;
+}
+
+/// Interruptor liga/desliga (mesmo modelo de estado do `checkbox`).
+pub export fn zyntra_widget_switch(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    checked: ?*bool,
+    style: ?*const ct.ZyntraSwitchStyle,
+    out_result: ?*ct.ZyntraSwitchResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const chk = checked orelse return .invalid_argument;
+    const res = switch_mod.beginSwitch(toCtx(h), id_mod.Id.fromU64(id), toRect(bounds), chk, st.*) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .hovered = res.hovered,
+        .toggled = res.toggled,
+        .checked = res.checked,
+        .focused = res.focused,
+    };
+    return .ok;
+}
+
+/// Controle deslizante: `value` é do chamador (lido, preso a `[min, max]` e
+/// alterado pelo arraste/teclado).
+pub export fn zyntra_widget_slider(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    value: ?*f32,
+    min: f32,
+    max: f32,
+    style: ?*const ct.ZyntraSliderStyle,
+    out_result: ?*ct.ZyntraSliderResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const v = value orelse return .invalid_argument;
+    const res = slider_mod.slider(toCtx(h), id_mod.Id.fromU64(id), toRect(bounds), v, min, max, st.*) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .value = res.value,
+        .changed = res.changed,
+        .hovered = res.hovered,
+        .dragging = res.dragging,
+    };
+    return .ok;
+}
+
+/// Barra de progresso (sem id, sem interação: só desenha `frac` em [0, 1]).
+pub export fn zyntra_widget_progress(
+    handle: ?*ZyntraContext,
+    bounds: ct.ZyntraRect,
+    frac: f32,
+    style: ?*const ct.ZyntraProgressStyle,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    progress_mod.progress(toCtx(h), toRect(bounds), frac, st.*) catch |err| return mapWidgetErr(err);
+    return .ok;
+}
+
+/// Separador (sem id): linha centralizada em `bounds`, horizontal ou
+/// vertical conforme `orientation`.
+pub export fn zyntra_widget_separator(
+    handle: ?*ZyntraContext,
+    bounds: ct.ZyntraRect,
+    orientation: i32,
+    style: ?*const ct.ZyntraSeparatorStyle,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const o = toOrientation(orientation) orelse return .invalid_argument;
+    separator_mod.separator(toCtx(h), toRect(bounds), o, st.*) catch |err| return mapWidgetErr(err);
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -893,4 +1150,121 @@ test "C-ABI pixels: framebuffer, render integral/parcial e dirty rect" {
     try eq(ct.ZyntraResult.invalid_argument, zyntra_framebuffer_fill(null, bg));
     try eq(ct.ZyntraResult.invalid_argument, zyntra_context_mark_dirty(null, box));
     zyntra_framebuffer_destroy(null);
+}
+
+test "C-ABI widgets: ids, estilos do tema e primeiro lote desenhado" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+
+    // Ids: string vazia/NULL é nulo; o mesmo texto dá o mesmo id.
+    try eq(@as(ct.ZyntraId, 0), zyntra_id_from_string("", 0));
+    try eq(@as(ct.ZyntraId, 0), zyntra_id_from_string(null, 3));
+    const id = zyntra_id_from_string("c:btn", 5);
+    try stdt.testing.expect(id != 0);
+    try eq(id, zyntra_id_from_string("c:btn", 5));
+    try stdt.testing.expect(zyntra_id_child(id, 0) != zyntra_id_child(id, 1));
+    try eq(@as(ct.ZyntraId, 0), zyntra_id_child(0, 1));
+
+    // Tema: cores base (escuro mais escuro que claro) e estilos.
+    var dark: ct.ZyntraThemeColors = .{};
+    var light: ct.ZyntraThemeColors = .{};
+    try eq(ok, zyntra_theme_colors(0, &dark));
+    try eq(ok, zyntra_theme_colors(1, &light));
+    try stdt.testing.expect(dark.bg.r < light.bg.r);
+    try eq(bad, zyntra_theme_colors(2, &dark));
+    try eq(bad, zyntra_theme_colors(0, null));
+
+    var bs: ct.ZyntraButtonStyle = undefined;
+    var bsl: ct.ZyntraButtonStyle = undefined;
+    var cs: ct.ZyntraCheckboxStyle = undefined;
+    var ss: ct.ZyntraSwitchStyle = undefined;
+    var sls: ct.ZyntraSliderStyle = undefined;
+    var ps: ct.ZyntraProgressStyle = undefined;
+    var ses: ct.ZyntraSeparatorStyle = undefined;
+    try eq(ok, zyntra_style_button(0, &bs));
+    try eq(ok, zyntra_style_button(1, &bsl));
+    try eq(ok, zyntra_style_checkbox(0, &cs));
+    try eq(ok, zyntra_style_switch(0, &ss));
+    try eq(ok, zyntra_style_slider(0, &sls));
+    try eq(ok, zyntra_style_progress(0, &ps));
+    try eq(ok, zyntra_style_separator(0, &ses));
+    try stdt.testing.expect(bs.bg.r != bsl.bg.r);
+    try eq(bad, zyntra_style_button(3, &bs));
+    try eq(bad, zyntra_style_button(0, null));
+
+    var ctx_handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 96, .h = 64 }, &ctx_handle));
+    defer zyntra_context_destroy(ctx_handle);
+    var fb_handle: ?*ZyntraFramebuffer = null;
+    try eq(ok, zyntra_framebuffer_create(96, 64, &fb_handle));
+    defer zyntra_framebuffer_destroy(fb_handle);
+
+    // Frame frio: um de cada widget do lote.
+    const bounds: ct.ZyntraRect = .{ .x = 4, .y = 4, .w = 40, .h = 16 };
+    var label_res: ct.ZyntraLabelResult = .{};
+    var btn_res: ct.ZyntraButtonResult = .{};
+    var chk_res: ct.ZyntraCheckboxResult = .{};
+    var sw_res: ct.ZyntraSwitchResult = .{};
+    var sl_res: ct.ZyntraSliderResult = .{};
+    var checked = false;
+    var switched = true;
+    var value: f32 = 30;
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_draw_clear(ctx_handle, dark.bg));
+    try eq(ok, zyntra_widget_label(ctx_handle, id, .{ .x = 6, .y = 6, .w = 36, .h = 12 }, dark.text, 10, "Ok", 2, false, &label_res));
+    try stdt.testing.expect(label_res.metrics.width > 0 and !label_res.truncated);
+    try eq(ok, zyntra_widget_button(ctx_handle, id, bounds, &bs, &btn_res));
+    try stdt.testing.expect(!btn_res.clicked and !btn_res.hovered);
+    try eq(ok, zyntra_widget_checkbox(ctx_handle, zyntra_id_child(id, 1), .{ .x = 4, .y = 26, .w = 18, .h = 18 }, &checked, &cs, &chk_res));
+    try eq(false, chk_res.checked);
+    try eq(ok, zyntra_widget_switch(ctx_handle, zyntra_id_child(id, 2), .{ .x = 28, .y = 26, .w = 36, .h = 18 }, &switched, &ss, &sw_res));
+    try eq(true, sw_res.checked);
+    try eq(ok, zyntra_widget_slider(ctx_handle, zyntra_id_child(id, 3), .{ .x = 4, .y = 48, .w = 88, .h = 12 }, &value, 0, 100, &sls, &sl_res));
+    try eq(@as(f32, 30), sl_res.value);
+    try eq(ok, zyntra_widget_progress(ctx_handle, .{ .x = 4, .y = 60, .w = 88, .h = 4 }, 0.5, &ps));
+    try eq(ok, zyntra_widget_separator(ctx_handle, .{ .x = 4, .y = 30, .w = 88, .h = 2 }, 0, &ses));
+
+    // Estilos inválidos e argumentos nulos são rejeitados sem crash.
+    var bad_bs = bs;
+    bad_bs.radius = -1;
+    try eq(bad, zyntra_widget_button(ctx_handle, id, bounds, &bad_bs, null));
+    try eq(bad, zyntra_widget_button(ctx_handle, 0, bounds, &bs, null));
+    try eq(bad, zyntra_widget_button(ctx_handle, id, bounds, null, null));
+    try eq(bad, zyntra_widget_label(ctx_handle, id, bounds, dark.text, 0, "x", 1, false, null));
+    try eq(bad, zyntra_widget_label(ctx_handle, id, bounds, dark.text, 10, null, 3, false, null));
+    try eq(ct.ZyntraResult.invalid_text, zyntra_widget_label(ctx_handle, id, bounds, dark.text, 10, "\xff", 1, false, null));
+    try eq(ok, zyntra_widget_label(ctx_handle, id, bounds, dark.text, 10, null, 0, false, null));
+    try eq(bad, zyntra_widget_checkbox(ctx_handle, id, bounds, null, &cs, null));
+    try eq(bad, zyntra_widget_switch(ctx_handle, id, bounds, null, &ss, null));
+    try eq(bad, zyntra_widget_slider(ctx_handle, id, bounds, null, 0, 1, &sls, null));
+    try eq(bad, zyntra_widget_progress(ctx_handle, bounds, 0.5, null));
+    try eq(bad, zyntra_widget_separator(ctx_handle, bounds, 9, &ses));
+    try eq(bad, zyntra_widget_separator(null, bounds, 0, &ses));
+
+    // Rasteriza: botão no centro, fundo fora dele.
+    try eq(ok, zyntra_framebuffer_render(fb_handle, ctx_handle, null));
+    var px: ct.ZyntraColor = .{};
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 24, 12, &px));
+    try eq(bs.bg.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 90, 2, &px));
+    try eq(dark.bg.r, px.r);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Press sobre o botão: press_owner + `pressed` (sem clique ainda).
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 24, .y = 12 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 24, .y = 12 }));
+    try eq(ok, zyntra_widget_button(ctx_handle, id, bounds, &bs, &btn_res));
+    try stdt.testing.expect(btn_res.hovered and btn_res.pressed and !btn_res.clicked);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Release sobre o botão: clique.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 24, .y = 12 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, false, .{ .x = 24, .y = 12 }));
+    try eq(ok, zyntra_widget_button(ctx_handle, id, bounds, &bs, &btn_res));
+    try stdt.testing.expect(btn_res.clicked);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
 }
