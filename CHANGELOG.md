@@ -5,6 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.30.0] - 2026-10-18
+
+MINOR estável, 100% compatível: avança o item #7 do roadmap (dirty rect /
+repintura parcial) nos **dois lados** da biblioteca. Na API Zig, todos os
+widgets interativos passam a alimentar o dirty rect sozinhos (M105); na
+fronteira C, o rasterizador de software fica alcançável de C, com render
+integral, repintura parcial dirigida pelo dirty rect e leitura de pixel
+(M106). Nada que já existia mudou de assinatura ou layout; a única mudança
+de comportamento é a correção do hover fantasma do `list_view`.
+
 ### Adicionado
 
 - `c-abi`: **caminho de pixels na fronteira C** (M106, aditivo) — o
