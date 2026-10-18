@@ -35,6 +35,8 @@ const radio_mod = @import("../widgets/radio.zig");
 const tab_bar_mod = @import("../widgets/tab_bar.zig");
 const list_view_mod = @import("../widgets/list_view.zig");
 const panel_mod = @import("../widgets/panel.zig");
+const menu_mod = @import("../widgets/menu.zig");
+const table_mod = @import("../widgets/table.zig");
 const ct = @import("types.zig");
 
 /// Handle opaco. O layout real (`Context`) nunca é exposto.
@@ -855,15 +857,34 @@ fn strOf(s: ct.ZyntraStr) ?[]const u8 {
     return p[0..s.len];
 }
 
-/// Lista de `ZyntraStr` convertida para as fatias Zig que os widgets
-/// esperam. O caminho comum não aloca (scratch na pilha do chamador); listas
-/// maiores usam o alocador do contexto e são liberadas no `deinit`.
+/// Buffer de `T` apoiado em scratch da pilha do chamador: usa o scratch
+/// quando cabe (caminho comum, sem alocação) e o alocador do contexto caso
+/// contrário, liberando no `deinit`.
+fn Buf(comptime T: type) type {
+    return struct {
+        slice: []T = &.{},
+        owned: ?[]T = null,
+        allocator: std.mem.Allocator = undefined,
+
+        fn init(allocator: std.mem.Allocator, count: usize, scratch: []T) error{OutOfMemory}!@This() {
+            if (count <= scratch.len) return .{ .slice = scratch[0..count] };
+            const buf = try allocator.alloc(T, count);
+            return .{ .slice = buf, .owned = buf, .allocator = allocator };
+        }
+
+        fn deinit(self: @This()) void {
+            if (self.owned) |buf| self.allocator.free(buf);
+        }
+    };
+}
+
+/// Lista de `ZyntraStr` convertida para as fatias Zig que os widgets esperam.
 const StrList = struct {
     items: []const []const u8 = &.{},
-    owned: ?[][]const u8 = null,
+    buf: Buf([]const u8) = .{},
 
-    fn deinit(self: StrList, allocator: std.mem.Allocator) void {
-        if (self.owned) |buf| allocator.free(buf);
+    fn deinit(self: StrList) void {
+        self.buf.deinit();
     }
 };
 
@@ -875,17 +896,115 @@ fn strListOf(
 ) error{ InvalidArgument, OutOfMemory }!StrList {
     if (count == 0) return .{};
     const in = src orelse return error.InvalidArgument;
-    var owned: ?[][]const u8 = null;
-    const dst: [][]const u8 = if (count <= scratch.len) scratch[0..count] else blk: {
-        const buf = try allocator.alloc([]const u8, count);
-        owned = buf;
-        break :blk buf;
-    };
-    errdefer if (owned) |buf| allocator.free(buf);
-    for (dst, 0..) |*slot, i| {
+    var buf = try Buf([]const u8).init(allocator, count, scratch);
+    errdefer buf.deinit();
+    for (buf.slice, 0..) |*slot, i| {
         slot.* = strOf(in[i]) orelse return error.InvalidArgument;
     }
-    return .{ .items = dst, .owned = owned };
+    return .{ .items = buf.slice, .buf = buf };
+}
+
+/// Itens de menu convertidos para os `MenuItem` da API Zig.
+const MenuList = struct {
+    items: []const menu_mod.MenuItem = &.{},
+    buf: Buf(menu_mod.MenuItem) = .{},
+
+    fn deinit(self: MenuList) void {
+        self.buf.deinit();
+    }
+};
+
+fn menuListOf(
+    allocator: std.mem.Allocator,
+    src: ?[*]const ct.ZyntraMenuItem,
+    count: usize,
+    scratch: []menu_mod.MenuItem,
+) error{ InvalidArgument, OutOfMemory }!MenuList {
+    if (count == 0) return .{};
+    const in = src orelse return error.InvalidArgument;
+    var buf = try Buf(menu_mod.MenuItem).init(allocator, count, scratch);
+    errdefer buf.deinit();
+    for (buf.slice, 0..) |*slot, i| {
+        const it = in[i];
+        slot.* = .{
+            .label = strOf(it.label) orelse return error.InvalidArgument,
+            .shortcut = if (it.shortcut.len == 0) null else (strOf(it.shortcut) orelse return error.InvalidArgument),
+            .enabled = it.enabled,
+            .separator = it.separator,
+            .checked = if (it.has_checked) it.checked else null,
+        };
+    }
+    return .{ .items = buf.slice, .buf = buf };
+}
+
+/// Colunas, linhas e células da tabela convertidas para os tipos da API Zig.
+const TableArgs = struct {
+    columns: []const table_mod.TableColumn = &.{},
+    rows: []const table_mod.TableRow = &.{},
+    buf_columns: Buf(table_mod.TableColumn) = .{},
+    buf_rows: Buf(table_mod.TableRow) = .{},
+    buf_cells: Buf([]const u8) = .{},
+
+    fn deinit(self: TableArgs) void {
+        self.buf_columns.deinit();
+        self.buf_rows.deinit();
+        self.buf_cells.deinit();
+    }
+};
+
+fn tableArgsOf(
+    allocator: std.mem.Allocator,
+    columns: ?[*]const ct.ZyntraTableColumn,
+    columns_len: usize,
+    rows: ?[*]const ct.ZyntraTableRow,
+    rows_len: usize,
+    scratch_columns: []table_mod.TableColumn,
+    scratch_rows: []table_mod.TableRow,
+    scratch_cells: [][]const u8,
+) error{ InvalidArgument, OutOfMemory }!TableArgs {
+    if (columns_len == 0) return error.InvalidArgument;
+    const in_columns = columns orelse return error.InvalidArgument;
+    const in_rows: ?[*]const ct.ZyntraTableRow = if (rows_len == 0) null else (rows orelse return error.InvalidArgument);
+    var total_cells: usize = 0;
+    if (in_rows) |rs| {
+        for (rs[0..rows_len]) |r| {
+            total_cells = std.math.add(usize, total_cells, r.cells_len) catch return error.InvalidArgument;
+        }
+    }
+
+    var columns_buf = try Buf(table_mod.TableColumn).init(allocator, columns_len, scratch_columns);
+    errdefer columns_buf.deinit();
+    var rows_buf = try Buf(table_mod.TableRow).init(allocator, rows_len, scratch_rows);
+    errdefer rows_buf.deinit();
+    var cells_buf = try Buf([]const u8).init(allocator, total_cells, scratch_cells);
+    errdefer cells_buf.deinit();
+
+    for (columns_buf.slice, 0..) |*slot, i| {
+        const c = in_columns[i];
+        slot.* = .{ .title = strOf(c.title) orelse return error.InvalidArgument, .width = c.width };
+    }
+    var at: usize = 0;
+    if (in_rows) |rs| {
+        for (rows_buf.slice, 0..) |*slot, i| {
+            const r = rs[i];
+            const cells = cells_buf.slice[at .. at + r.cells_len];
+            at += r.cells_len;
+            if (r.cells_len > 0) {
+                const in_cells = r.cells orelse return error.InvalidArgument;
+                for (cells, 0..) |*cslot, j| {
+                    cslot.* = strOf(in_cells[j]) orelse return error.InvalidArgument;
+                }
+            }
+            slot.* = .{ .cells = cells };
+        }
+    }
+    return .{
+        .columns = columns_buf.slice,
+        .rows = rows_buf.slice,
+        .buf_columns = columns_buf,
+        .buf_rows = rows_buf,
+        .buf_cells = cells_buf,
+    };
 }
 
 /// Índice opcional da API Zig -> `i64` do C (`-1` = nenhum).
@@ -926,6 +1045,22 @@ pub export fn zyntra_style_panel(kind: i32, out_style: ?*ct.ZyntraPanelStyle) ca
     return .ok;
 }
 
+/// Estilo de menu do tema embutido.
+pub export fn zyntra_style_menu(kind: i32, out_style: ?*ct.ZyntraMenuStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.menuStyle();
+    return .ok;
+}
+
+/// Estilo de tabela do tema embutido.
+pub export fn zyntra_style_table(kind: i32, out_style: ?*ct.ZyntraTableStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.tableStyle();
+    return .ok;
+}
+
 /// Grupo de opções exclusivas: `options` é uma lista de `ZyntraStr`
 /// (emprestada só na chamada) e `selected` pertence ao chamador (o widget lê
 /// e altera no clique/setas). `size` é a fonte do rótulo.
@@ -947,7 +1082,7 @@ pub export fn zyntra_widget_radio(
     const ctx = toCtx(h);
     var scratch: [64][]const u8 = undefined;
     const list = strListOf(ctx.allocator, options, options_len, &scratch) catch |err| return mapWidgetErr(err);
-    defer list.deinit(ctx.allocator);
+    defer list.deinit();
     const res = radio_mod.radio(
         ctx,
         id_mod.Id.fromU64(id),
@@ -979,7 +1114,7 @@ pub export fn zyntra_widget_tab_bar(
     const ctx = toCtx(h);
     var scratch: [64][]const u8 = undefined;
     const list = strListOf(ctx.allocator, tabs, tabs_len, &scratch) catch |err| return mapWidgetErr(err);
-    defer list.deinit(ctx.allocator);
+    defer list.deinit();
     const res = tab_bar_mod.beginTabBar(
         ctx,
         id_mod.Id.fromU64(id),
@@ -1018,7 +1153,7 @@ pub export fn zyntra_widget_list_view(
     const ctx = toCtx(h);
     var scratch: [64][]const u8 = undefined;
     const list = strListOf(ctx.allocator, items, items_len, &scratch) catch |err| return mapWidgetErr(err);
-    defer list.deinit(ctx.allocator);
+    defer list.deinit();
     const res = list_view_mod.beginListView(
         ctx,
         id_mod.Id.fromU64(id),
@@ -1070,6 +1205,104 @@ pub export fn zyntra_widget_panel(
         .toggled = res.toggled,
         .close_requested = res.close_requested,
         .hovered = res.hovered,
+    };
+    return .ok;
+}
+
+// ---------------------------------------------------------------------------
+// Widgets com estruturas planas: menu e tabela (M109)
+// ---------------------------------------------------------------------------
+
+/// Menu suspenso: `items` é o vetor de itens (rótulos/atalhos emprestados só
+/// na chamada) e `active` pertence ao chamador (hover, teclado e escolha).
+pub export fn zyntra_widget_menu(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    items: ?[*]const ct.ZyntraMenuItem,
+    items_len: usize,
+    active: ?*usize,
+    size: f32,
+    style: ?*const ct.ZyntraMenuStyle,
+    out_result: ?*ct.ZyntraMenuResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const act = active orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    const ctx = toCtx(h);
+    var scratch: [64]menu_mod.MenuItem = undefined;
+    const list = menuListOf(ctx.allocator, items, items_len, &scratch) catch |err| return mapWidgetErr(err);
+    defer list.deinit();
+    const res = menu_mod.menu(
+        ctx,
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        list.items,
+        act,
+        metrics_mod.FontMetrics.withSize(size),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .chosen = fromIndex(res.chosen),
+        .hovered_index = fromIndex(res.hovered_index),
+        .dismissed = res.dismissed,
+        .hovered = res.hovered,
+        .focus_parent = res.focus_parent,
+    };
+    return .ok;
+}
+
+/// Tabela: `columns` é o vetor de colunas (título + largura) e `rows` o vetor
+/// de linhas, cada uma com seu vetor de células (`ZyntraStr`); `selected` e
+/// `scroll_offset` pertencem ao chamador (clique, roda e teclado).
+pub export fn zyntra_widget_table(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    columns: ?[*]const ct.ZyntraTableColumn,
+    columns_len: usize,
+    rows: ?[*]const ct.ZyntraTableRow,
+    rows_len: usize,
+    selected: ?*usize,
+    scroll_offset: ?*f32,
+    style: ?*const ct.ZyntraTableStyle,
+    out_result: ?*ct.ZyntraTableResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const sel = selected orelse return .invalid_argument;
+    const scroll = scroll_offset orelse return .invalid_argument;
+    const ctx = toCtx(h);
+    var col_scratch: [16]table_mod.TableColumn = undefined;
+    var row_scratch: [64]table_mod.TableRow = undefined;
+    var cell_scratch: [256][]const u8 = undefined;
+    const args = tableArgsOf(
+        ctx.allocator,
+        columns,
+        columns_len,
+        rows,
+        rows_len,
+        &col_scratch,
+        &row_scratch,
+        &cell_scratch,
+    ) catch |err| return mapWidgetErr(err);
+    defer args.deinit();
+    const res = table_mod.beginTable(
+        ctx,
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        args.columns,
+        args.rows,
+        sel,
+        scroll,
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .selected = res.selected,
+        .hovered_index = fromIndex(res.hovered_index),
+        .scroll_offset = res.scroll_offset,
+        .changed = res.changed,
     };
     return .ok;
 }
@@ -1650,5 +1883,147 @@ test "C-ABI listas: abas, lista, radio e painel" {
     var big_res: ct.ZyntraRadioResult = .{};
     try eq(ok, zyntra_widget_radio(ctx_handle, id, radio_bounds, &big, big.len, &big_sel, 10, &rs, &big_res));
     try stdt.testing.expect(big_sel == 69 and !big_res.changed);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+}
+
+test "C-ABI estruturas: menu e tabela" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+
+    var ms: ct.ZyntraMenuStyle = undefined;
+    var ts: ct.ZyntraTableStyle = undefined;
+    try eq(ok, zyntra_style_menu(0, &ms));
+    try eq(ok, zyntra_style_table(0, &ts));
+    try eq(bad, zyntra_style_menu(2, &ms));
+    try eq(bad, zyntra_style_table(1, null));
+
+    var ctx_handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 240, .h = 200 }, &ctx_handle));
+    defer zyntra_context_destroy(ctx_handle);
+    var fb_handle: ?*ZyntraFramebuffer = null;
+    try eq(ok, zyntra_framebuffer_create(240, 200, &fb_handle));
+    defer zyntra_framebuffer_destroy(fb_handle);
+
+    const id = zyntra_id_from_string("c:rich", 6);
+    const menu_bounds: ct.ZyntraRect = .{ .x = 8, .y = 8, .w = 160, .h = 104 };
+    const table_bounds: ct.ZyntraRect = .{ .x = 8, .y = 120, .w = 220, .h = 72 };
+    // size 16 ⇒ altura de item do menu = 17 + 8 = 25 px (linhas previsíveis).
+    const menu_items = [_]ct.ZyntraMenuItem{
+        .{ .label = .{ .ptr = "Abrir", .len = 5 } },
+        .{ .label = .{ .ptr = "", .len = 0 }, .separator = true },
+        .{ .label = .{ .ptr = "Salvar", .len = 6 }, .shortcut = .{ .ptr = "Ctrl+S", .len = 6 }, .has_checked = true, .checked = true },
+        .{ .label = .{ .ptr = "Sair", .len = 4 }, .enabled = false },
+    };
+    const columns = [_]ct.ZyntraTableColumn{
+        .{ .title = .{ .ptr = "Nome", .len = 4 }, .width = 120 },
+        .{ .title = .{ .ptr = "Tipo", .len = 4 }, .width = 100 },
+    };
+    const row_cells = [_][2]ct.ZyntraStr{
+        .{ .{ .ptr = "um", .len = 2 }, .{ .ptr = "tipo1", .len = 5 } },
+        .{ .{ .ptr = "dois", .len = 4 }, .{ .ptr = "tipo2", .len = 5 } },
+        .{ .{ .ptr = "tres", .len = 4 }, .{ .ptr = "tipo3", .len = 5 } },
+    };
+    const rows = [_]ct.ZyntraTableRow{
+        .{ .cells = &row_cells[0], .cells_len = 2 },
+        .{ .cells = &row_cells[1], .cells_len = 2 },
+        .{ .cells = &row_cells[2], .cells_len = 2 },
+    };
+    var mres: ct.ZyntraMenuResult = .{};
+    var tres: ct.ZyntraTableResult = .{};
+    var active: usize = 0;
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+    var px: ct.ZyntraColor = .{};
+
+    // Frame frio: menu sem hover e tabela com linha 0 selecionada.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 236, .y = 196 }));
+    try eq(ok, zyntra_draw_clear(ctx_handle, .{ .r = 24, .g = 24, .b = 28, .a = 255 }));
+    try eq(ok, zyntra_widget_menu(ctx_handle, id, menu_bounds, &menu_items, menu_items.len, &active, 16, &ms, &mres));
+    try stdt.testing.expect(mres.chosen == -1 and mres.hovered_index == -1 and !mres.hovered and !mres.dismissed);
+    try eq(ok, zyntra_widget_table(ctx_handle, id, table_bounds, &columns, columns.len, &rows, rows.len, &selected, &scroll, &ts, &tres));
+    try stdt.testing.expect(tres.selected == 0 and tres.hovered_index == -1 and !tres.changed);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, ctx_handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 50, 20, &px));
+    try eq(ms.bg.r, px.r); // linha 0 sem hover
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 130, &px));
+    try eq(ts.bg.r, px.r); // cabeçalho
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 158, &px));
+    try eq(ts.bg_selected.r, px.r); // linha 0 selecionada
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 182, &px));
+    try eq(ts.bg_alt.r, px.r); // linha 1 alternada
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Hover na linha 2 do menu (y 58..83): realce + índice no resultado.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_draw_clear(ctx_handle, .{ .r = 24, .g = 24, .b = 28, .a = 255 }));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 50, .y = 70 }));
+    try eq(ok, zyntra_widget_menu(ctx_handle, id, menu_bounds, &menu_items, menu_items.len, &active, 16, &ms, &mres));
+    try stdt.testing.expect(mres.hovered and mres.hovered_index == 2 and active == 2);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, ctx_handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 50, 70, &px));
+    try eq(ms.item_hover.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 50, 20, &px));
+    try eq(ms.bg.r, px.r);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Press na linha 2 escolhe (one-shot); press fora dispensa.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 50, .y = 70 }));
+    try eq(ok, zyntra_widget_menu(ctx_handle, id, menu_bounds, &menu_items, menu_items.len, &active, 16, &ms, &mres));
+    try stdt.testing.expect(mres.chosen == 2 and !mres.dismissed);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 236, .y = 196 }));
+    try eq(ok, zyntra_widget_menu(ctx_handle, id, menu_bounds, &menu_items, menu_items.len, &active, 16, &ms, &mres));
+    try stdt.testing.expect(mres.chosen == -1 and mres.dismissed);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Tabela: clique na linha 1 (y 170..194) muda a seleção.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_draw_clear(ctx_handle, .{ .r = 24, .g = 24, .b = 28, .a = 255 }));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 20, .y = 182 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 20, .y = 182 }));
+    try eq(ok, zyntra_widget_table(ctx_handle, id, table_bounds, &columns, columns.len, &rows, rows.len, &selected, &scroll, &ts, &tres));
+    try stdt.testing.expect(tres.changed and tres.selected == 1 and selected == 1);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, ctx_handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 182, &px));
+    try eq(ts.bg_selected.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 158, &px));
+    try eq(ts.bg.r, px.r);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Inválidos: vetores nulos, célula sem ponteiro, estados nulos, size,
+    // colunas vazias e bounds sem corpo.
+    try eq(bad, zyntra_widget_menu(ctx_handle, id, menu_bounds, null, 3, &active, 16, &ms, null));
+    try eq(bad, zyntra_widget_menu(ctx_handle, id, menu_bounds, &menu_items, menu_items.len, &active, 0, &ms, null));
+    try eq(bad, zyntra_widget_menu(ctx_handle, id, menu_bounds, &menu_items, menu_items.len, null, 16, &ms, null));
+    const broken_items = [_]ct.ZyntraMenuItem{.{ .label = .{ .ptr = null, .len = 3 } }};
+    try eq(bad, zyntra_widget_menu(ctx_handle, id, menu_bounds, &broken_items, 1, &active, 16, &ms, null));
+    try eq(bad, zyntra_widget_table(ctx_handle, id, table_bounds, &columns, 0, &rows, rows.len, &selected, &scroll, &ts, null));
+    try eq(bad, zyntra_widget_table(ctx_handle, id, table_bounds, null, 2, &rows, rows.len, &selected, &scroll, &ts, null));
+    try eq(bad, zyntra_widget_table(ctx_handle, id, table_bounds, &columns, columns.len, null, 1, &selected, &scroll, &ts, null));
+    try eq(bad, zyntra_widget_table(ctx_handle, id, table_bounds, &columns, columns.len, &rows, rows.len, null, &scroll, &ts, null));
+    try eq(bad, zyntra_widget_table(ctx_handle, id, table_bounds, &columns, columns.len, &rows, rows.len, &selected, null, &ts, null));
+    const broken_rows = [_]ct.ZyntraTableRow{.{ .cells = null, .cells_len = 2 }};
+    try eq(bad, zyntra_widget_table(ctx_handle, id, table_bounds, &columns, columns.len, &broken_rows, 1, &selected, &scroll, &ts, null));
+    const short_bounds: ct.ZyntraRect = .{ .x = 8, .y = 120, .w = 220, .h = 20 };
+    try eq(bad, zyntra_widget_table(ctx_handle, id, short_bounds, &columns, columns.len, &rows, rows.len, &selected, &scroll, &ts, null));
+
+    // Tabela maior que o scratch da pilha (65 linhas): caminho com alocação.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    var many_cells: [65][1]ct.ZyntraStr = undefined;
+    var many_rows: [65]ct.ZyntraTableRow = undefined;
+    for (&many_cells, 0..) |*cells, i| {
+        cells[0] = .{ .ptr = "linha", .len = 5 };
+        many_rows[i] = .{ .cells = cells, .cells_len = 1 };
+    }
+    var many_sel: usize = 64;
+    var many_scroll: f32 = 0;
+    try eq(ok, zyntra_widget_table(ctx_handle, id, table_bounds, &columns, columns.len, &many_rows, many_rows.len, &many_sel, &many_scroll, &ts, &tres));
+    try stdt.testing.expect(many_sel == 64 and tres.selected == 64 and !tres.changed);
     try eq(ok, zyntra_context_end_frame(ctx_handle));
 }

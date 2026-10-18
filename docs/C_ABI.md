@@ -196,6 +196,48 @@ zyntra_widget_panel(ctx, panel_id, (ZyntraRect){168, 32, 160, 276},
   `×` e sinaliza `close_requested`; `content` volta zerado quando
   colapsado.
 
+Terceiro lote (M109): estruturas planas — `menu` e `table`.
+
+```c
+ZyntraMenuStyle ms;
+zyntra_style_menu(ZYNTRA_THEME_DARK, &ms);
+ZyntraTableStyle ts;
+zyntra_style_table(ZYNTRA_THEME_DARK, &ts);
+
+const ZyntraMenuItem itens[3] = {
+    {{"Abrir", 5}, {"Ctrl+O", 6}, true, false, false, false},
+    {{"", 0}, {"", 0}, true, true, false, false},          /* separador */
+    {{"Grade", 5}, {"", 0}, true, false, true, true},      /* marcável/marcado */
+};
+size_t active = 0;
+ZyntraMenuResult mres;
+zyntra_widget_menu(ctx, menu_id, (ZyntraRect){8, 8, 200, 76}, itens, 3,
+    &active, 14.0f, &ms, &mres);   /* mres.chosen = índice no press/Enter */
+
+const ZyntraTableColumn cols[2] = {{{"Nome", 4}, 160.0f}, {{"Tipo", 4}, 120.0f}};
+const ZyntraStr linha0[2] = {{"audio.wav", 9}, {"audio", 5}};
+const ZyntraTableRow linhas[1] = {{linha0, 2}};
+size_t row = 0;
+float row_scroll = 0.0f;
+ZyntraTableResult tres;
+zyntra_widget_table(ctx, table_id, (ZyntraRect){8, 92, 280, 200}, cols, 2,
+    linhas, 1, &row, &row_scroll, &ts, &tres);
+```
+
+* Lote M109: `zyntra_widget_menu` (rótulos/atalhos, itens desabilitados,
+  separadores, coluna de tique com `has_checked`/`checked`) e
+  `zyntra_widget_table` (colunas com título/largura, linhas de células,
+  seleção, hover, rolagem, linhas alternadas); estilos
+  `ZyntraMenuStyle`/`ZyntraTableStyle` via `zyntra_style_menu`/`_table`.
+* `has_checked == false` = item não marcável (o tique só aparece quando há
+  item marcável no menu), espelhando o `checked == null` da API Zig.
+* Tabela: `columns_len == 0` ou `bounds.h <= style.header_height` ⇒
+  `ZYNTRA_INVALID_ARGUMENT`; células além das colunas são ignoradas e
+  células faltantes ficam vazias, como na API Zig.
+* Vetores pequenos são convertidos sem alocação (scratch na pilha: 64
+  itens de menu; 16 colunas, 64 linhas e 256 células na tabela); acima
+  disso o alocador do contexto é usado e liberado no retorno.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -224,6 +266,9 @@ zyntra_widget_panel(ctx, panel_id, (ZyntraRect){168, 32, 160, 276},
   `ZyntraPanelOptions=24`, estilos (`Radio=20`, `TabBar=36`, `ListView=36`,
   `Panel=48`) e resultados (`Radio=3`, `TabBar=24`, `ListView=24`,
   `Panel=20`).
+* M109: também travados `ZyntraMenuItem=40`, `ZyntraTableColumn=24`,
+  `ZyntraTableRow=16`, estilos (`Menu=24`, `Table=48`) e resultados
+  (`Menu=24`, `Table=24`).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -244,5 +289,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..."
 ```

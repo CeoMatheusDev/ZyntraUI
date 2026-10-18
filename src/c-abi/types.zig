@@ -100,6 +100,30 @@ pub const ZyntraPanelOptions = extern struct {
     closable: bool = false,
 };
 
+/// Item de menu (espelha `menu.MenuItem`): rótulo e atalho emprestados só na
+/// chamada; `has_checked == false` = item não marcável (`checked == null`).
+pub const ZyntraMenuItem = extern struct {
+    label: ZyntraStr = .{},
+    shortcut: ZyntraStr = .{},
+    enabled: bool = true,
+    separator: bool = false,
+    has_checked: bool = false,
+    checked: bool = false,
+};
+
+/// Coluna da tabela (espelha `table.TableColumn`).
+pub const ZyntraTableColumn = extern struct {
+    title: ZyntraStr = .{},
+    width: f32 = 0,
+};
+
+/// Linha da tabela (espelha `table.TableRow`): `cells` é o vetor de
+/// `ZyntraStr` com um rótulo por coluna (emprestado só na chamada).
+pub const ZyntraTableRow = extern struct {
+    cells: ?[*]const ZyntraStr = null,
+    cells_len: usize = 0,
+};
+
 // Estilos: reexportados dos `extern struct` da API Zig — uma definição só,
 // com a trava de layout abaixo falhando o build se o backend mudar.
 pub const ZyntraButtonStyle = style_mod.ButtonStyle;
@@ -112,6 +136,8 @@ pub const ZyntraRadioStyle = style_mod.RadioStyle;
 pub const ZyntraTabBarStyle = style_mod.TabBarStyle;
 pub const ZyntraListViewStyle = style_mod.ListViewStyle;
 pub const ZyntraPanelStyle = style_mod.PanelStyle;
+pub const ZyntraMenuStyle = style_mod.MenuStyle;
+pub const ZyntraTableStyle = style_mod.TableStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -177,6 +203,22 @@ pub const ZyntraPanelResult = extern struct {
     hovered: bool = false,
 };
 
+pub const ZyntraMenuResult = extern struct {
+    /// Índice escolhido no press/Enter (-1 = nenhum; one-shot).
+    chosen: i64 = -1,
+    hovered_index: i64 = -1,
+    dismissed: bool = false,
+    hovered: bool = false,
+    focus_parent: bool = false,
+};
+
+pub const ZyntraTableResult = extern struct {
+    selected: usize = 0,
+    hovered_index: i64 = -1,
+    scroll_offset: f32 = 0,
+    changed: bool = false,
+};
+
 // Trava de ABI: falhe o build se o layout mudar.
 comptime {
     if (@sizeOf(ZyntraResult) != @sizeOf(c_int)) @compileError("ZyntraResult ABI drift");
@@ -205,6 +247,13 @@ comptime {
     if (@sizeOf(ZyntraTabBarResult) != 24 or @alignOf(ZyntraTabBarResult) != 8) @compileError("ZyntraTabBarResult ABI drift");
     if (@sizeOf(ZyntraListViewResult) != 24 or @alignOf(ZyntraListViewResult) != 8) @compileError("ZyntraListViewResult ABI drift");
     if (@sizeOf(ZyntraPanelResult) != 20 or @alignOf(ZyntraPanelResult) != 4) @compileError("ZyntraPanelResult ABI drift");
+    if (@sizeOf(ZyntraMenuItem) != 40 or @alignOf(ZyntraMenuItem) != 8) @compileError("ZyntraMenuItem ABI drift");
+    if (@sizeOf(ZyntraTableColumn) != 24 or @alignOf(ZyntraTableColumn) != 8) @compileError("ZyntraTableColumn ABI drift");
+    if (@sizeOf(ZyntraTableRow) != 16 or @alignOf(ZyntraTableRow) != 8) @compileError("ZyntraTableRow ABI drift");
+    if (@sizeOf(ZyntraMenuStyle) != 24 or @alignOf(ZyntraMenuStyle) != 4) @compileError("ZyntraMenuStyle ABI drift");
+    if (@sizeOf(ZyntraTableStyle) != 48 or @alignOf(ZyntraTableStyle) != 4) @compileError("ZyntraTableStyle ABI drift");
+    if (@sizeOf(ZyntraMenuResult) != 24 or @alignOf(ZyntraMenuResult) != 8) @compileError("ZyntraMenuResult ABI drift");
+    if (@sizeOf(ZyntraTableResult) != 24 or @alignOf(ZyntraTableResult) != 8) @compileError("ZyntraTableResult ABI drift");
     if (@sizeOf(ZyntraVec2) != 8 or @alignOf(ZyntraVec2) != 4) @compileError("ZyntraVec2 ABI drift");
     if (@sizeOf(ZyntraSize) != 8 or @alignOf(ZyntraSize) != 4) @compileError("ZyntraSize ABI drift");
     if (@sizeOf(ZyntraRect) != 16 or @alignOf(ZyntraRect) != 4) @compileError("ZyntraRect ABI drift");
@@ -227,6 +276,12 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraRadioStyle));
     try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraPanelStyle));
     try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraTabBarResult));
+    try stdt.testing.expectEqual(@as(usize, 40), @sizeOf(ZyntraMenuItem));
+    try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraTableColumn));
+    try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraTableRow));
+    try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraMenuStyle));
+    try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraTableStyle));
+    try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraMenuResult));
     try stdt.testing.expectEqual(@as(c_int, 0), @backingInt(ZyntraResult.ok));
     try stdt.testing.expectEqual(@as(i32, 0), @backingInt(ZyntraThemeKind.dark));
     try stdt.testing.expectEqual(@as(i32, 1), @backingInt(ZyntraThemeKind.light));

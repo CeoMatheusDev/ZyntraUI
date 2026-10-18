@@ -5,6 +5,21 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `c-abi`: **terceiro lote de widgets na fronteira C** (M109, aditivo) —
+  estruturas planas: `zyntra_widget_menu` (rótulos e atalhos emprestados só
+  na chamada, itens desabilitados, separadores, coluna de tique via
+  `ZyntraMenuItem.has_checked`/`checked`, `chosen`/`hovered_index`/
+  `dismissed` de volta ao C) e `zyntra_widget_table` (colunas com
+  título/largura, linhas com vetor de células, seleção, hover, rolagem e
+  linhas alternadas), com estilos do tema via `zyntra_style_menu`/
+  `zyntra_style_table`. Conversão sem alocação no caminho comum (scratch na
+  pilha) e alocador do contexto para vetores grandes; layout travado por
+  `_Static_assert`/`@compileError`. O consumidor C ganhou os frames 15–19
+  (menu e tabela frios, hover, escolha one-shot, dispensa e clique na
+  linha) com checagem de pixels.
+
 ## [1.32.0] - 2026-10-18
 
 MINOR estável, 100% compatível: o item #1 do roadmap (superfície C) ganha o

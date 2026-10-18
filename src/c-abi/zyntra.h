@@ -11,6 +11,8 @@
  * (20/3/3/4/8).
  * M108: ZyntraStr=16, ZyntraPanelOptions=24, estilos (20/36/36/48) e
  * resultados (3/24/24/20).
+ * M109: ZyntraMenuItem=40, ZyntraTableColumn=24, ZyntraTableRow=16,
+ * estilos Menu=24/Table=48 e resultados Menu=24/Table=24.
  */
 
 #include <stdbool.h>
@@ -404,6 +406,84 @@ ZyntraResult zyntra_widget_list_view(ZyntraContext *handle, ZyntraId id, ZyntraR
 ZyntraResult zyntra_widget_panel(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
     bool *collapsed, ZyntraPanelOptions options, float size, const ZyntraPanelStyle *style,
     ZyntraPanelResult *out_result);
+
+/* Estruturas planas (M109): menu e tabela. `ZyntraMenuItem` espelha o
+ * `MenuItem` da API Zig (`has_checked == false` = item não marcável) e a
+ * tabela usa um vetor de colunas mais um vetor de linhas, cada linha com seu
+ * vetor de células. Tudo emprestado só durante a chamada. */
+
+typedef struct ZyntraMenuItem {
+    ZyntraStr label;
+    ZyntraStr shortcut;
+    bool enabled;
+    bool separator;
+    bool has_checked;
+    bool checked;
+} ZyntraMenuItem;
+
+typedef struct ZyntraTableColumn {
+    ZyntraStr title;
+    float width;
+} ZyntraTableColumn;
+
+typedef struct ZyntraTableRow {
+    const ZyntraStr *cells;
+    size_t cells_len;
+} ZyntraTableRow;
+
+typedef struct ZyntraMenuStyle {
+    ZyntraColor bg;
+    ZyntraColor border;
+    ZyntraColor item_hover;
+    ZyntraColor text;
+    ZyntraColor text_disabled;
+    float border_width;
+} ZyntraMenuStyle;
+
+typedef struct ZyntraTableStyle {
+    ZyntraColor bg;
+    ZyntraColor bg_alt;
+    ZyntraColor bg_selected;
+    ZyntraColor bg_hover;
+    ZyntraColor text;
+    ZyntraColor text_header;
+    ZyntraColor text_selected;
+    ZyntraColor border;
+    float border_width;
+    float row_height;
+    float header_height;
+    float padding_x;
+} ZyntraTableStyle;
+
+typedef struct ZyntraMenuResult {
+    int64_t chosen;
+    int64_t hovered_index;
+    bool dismissed;
+    bool hovered;
+    bool focus_parent;
+} ZyntraMenuResult;
+
+typedef struct ZyntraTableResult {
+    size_t selected;
+    int64_t hovered_index;
+    float scroll_offset;
+    bool changed;
+} ZyntraTableResult;
+
+ZyntraResult zyntra_style_menu(int32_t theme_kind, ZyntraMenuStyle *out_style);
+ZyntraResult zyntra_style_table(int32_t theme_kind, ZyntraTableStyle *out_style);
+
+/* `items` (menu) e `columns`/`rows` (tabela) são vetores emprestados só na
+ * chamada; `active` e `selected`/`scroll_offset` pertencem ao chamador (o
+ * widget lê e altera). `size` é a fonte dos itens do menu; a tabela usa a
+ * fonte padrão dos widgets (10). */
+ZyntraResult zyntra_widget_menu(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    const ZyntraMenuItem *items, size_t items_len, size_t *active, float size,
+    const ZyntraMenuStyle *style, ZyntraMenuResult *out_result);
+ZyntraResult zyntra_widget_table(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    const ZyntraTableColumn *columns, size_t columns_len, const ZyntraTableRow *rows,
+    size_t rows_len, size_t *selected, float *scroll_offset, const ZyntraTableStyle *style,
+    ZyntraTableResult *out_result);
 
 #ifdef __cplusplus
 }

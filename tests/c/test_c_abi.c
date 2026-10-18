@@ -603,6 +603,151 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 15-19: menu e tabela (M109) — estruturas planas na fronteira C,
+     * com hover, escolha one-shot, seleção e checagem de pixel. */
+    ZyntraFramebuffer *rfb = NULL;
+    long long r_chosen = -1, r_menu_hover = -1;
+    size_t r_table_sel = 0;
+    int r_changed = 0, r_dismissed = 0;
+    int r_px_menu = 0, r_px_hover = 0, r_px_sel = 0, r_px_alt = 0;
+    {
+        _Static_assert(sizeof(ZyntraMenuItem) == 40, "ZyntraMenuItem ABI");
+        _Static_assert(sizeof(ZyntraTableColumn) == 24, "ZyntraTableColumn ABI");
+        _Static_assert(sizeof(ZyntraTableRow) == 16, "ZyntraTableRow ABI");
+        _Static_assert(sizeof(ZyntraMenuStyle) == 24, "ZyntraMenuStyle ABI");
+        _Static_assert(sizeof(ZyntraTableStyle) == 48, "ZyntraTableStyle ABI");
+        _Static_assert(sizeof(ZyntraMenuResult) == 24, "ZyntraMenuResult ABI");
+        _Static_assert(sizeof(ZyntraTableResult) == 24, "ZyntraTableResult ABI");
+
+        ZyntraMenuStyle ms;
+        ZyntraTableStyle rts;
+        CHECK(zyntra_style_menu(ZYNTRA_THEME_DARK, &ms));
+        CHECK(zyntra_style_table(ZYNTRA_THEME_DARK, &rts));
+        assert(zyntra_style_table(7, &rts) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_menu(ZYNTRA_THEME_DARK, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(rts.row_height == 24.0f && rts.header_height == 26.0f);
+
+        /* size 16 ⇒ altura de item do menu = 17 + 8 = 25 px. */
+        const ZyntraMenuItem mitems[4] = {
+            {{"Abrir", 5}, {"", 0}, true, false, false, false},
+            {{"", 0}, {"", 0}, true, true, false, false},
+            {{"Salvar", 6}, {"Ctrl+S", 6}, true, false, true, true},
+            {{"Sair", 4}, {"", 0}, false, false, false, false},
+        };
+        const ZyntraTableColumn cols[2] = {{{"Nome", 4}, 120.0f}, {{"Tipo", 4}, 100.0f}};
+        const ZyntraStr cells0[2] = {{"um", 2}, {"tipo1", 5}};
+        const ZyntraStr cells1[2] = {{"dois", 4}, {"tipo2", 5}};
+        const ZyntraStr cells2[2] = {{"tres", 4}, {"tipo3", 5}};
+        const ZyntraTableRow trows[3] = {{cells0, 2}, {cells1, 2}, {cells2, 2}};
+        const ZyntraId rid = zyntra_id_from_string("c:rich", 6);
+        assert(rid != 0);
+
+        ZyntraRect menu_bounds = {8, 8, 160, 104};
+        ZyntraRect table_bounds = {8, 120, 220, 72};
+        ZyntraMenuResult mr;
+        ZyntraTableResult tr;
+        ZyntraColor rpx = {0, 0, 0, 0};
+        ZyntraColor rbg = {24, 24, 28, 255};
+        size_t r_active = 0, r_selected = 0;
+        float r_scroll = 0.0f;
+
+        CHECK(zyntra_framebuffer_create(240, 200, &rfb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 240, 200}));
+
+        /* Frame 15: frio — menu sem hover, tabela com linha 0 selecionada. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){236, 196}));
+        CHECK(zyntra_draw_clear(ctx, rbg));
+        CHECK(zyntra_widget_menu(ctx, rid, menu_bounds, mitems, 4, &r_active, 16.0f, &ms, &mr));
+        assert(mr.chosen == -1 && mr.hovered_index == -1 && !mr.hovered && !mr.dismissed);
+        CHECK(zyntra_widget_table(ctx, rid, table_bounds, cols, 2, trows, 3, &r_selected, &r_scroll, &rts, &tr));
+        assert(tr.selected == 0 && tr.hovered_index == -1 && !tr.changed);
+        CHECK(zyntra_framebuffer_render(rfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(rfb, 50, 20, &rpx)); /* linha 0 sem hover */
+        r_px_menu = (rpx.r == ms.bg.r && rpx.b == ms.bg.b);
+        assert(r_px_menu);
+        CHECK(zyntra_framebuffer_pixel(rfb, 20, 130, &rpx)); /* cabeçalho */
+        assert(rpx.r == rts.bg.r);
+        CHECK(zyntra_framebuffer_pixel(rfb, 20, 158, &rpx)); /* linha 0 selecionada */
+        r_px_sel = (rpx.r == rts.bg_selected.r && rpx.b == rts.bg_selected.b);
+        assert(r_px_sel);
+        CHECK(zyntra_framebuffer_pixel(rfb, 20, 182, &rpx)); /* linha 1 alternada */
+        r_px_alt = (rpx.r == rts.bg_alt.r);
+        assert(r_px_alt);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 16: hover na linha 2 do menu (y 58..83) realça a linha. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, rbg));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){50, 70}));
+        CHECK(zyntra_widget_menu(ctx, rid, menu_bounds, mitems, 4, &r_active, 16.0f, &ms, &mr));
+        assert(mr.hovered && mr.hovered_index == 2 && r_active == 2);
+        r_menu_hover = (long long)mr.hovered_index;
+        CHECK(zyntra_framebuffer_render(rfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(rfb, 50, 70, &rpx));
+        r_px_hover = (rpx.r == ms.item_hover.r && rpx.b == ms.item_hover.b);
+        assert(r_px_hover);
+        CHECK(zyntra_framebuffer_pixel(rfb, 50, 20, &rpx));
+        assert(rpx.r == ms.bg.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 17: press na linha 2 escolhe (one-shot). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){50, 70}));
+        CHECK(zyntra_widget_menu(ctx, rid, menu_bounds, mitems, 4, &r_active, 16.0f, &ms, &mr));
+        assert(mr.chosen == 2 && !mr.dismissed);
+        r_chosen = (long long)mr.chosen;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 18: press fora dispensa. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){236, 196}));
+        CHECK(zyntra_widget_menu(ctx, rid, menu_bounds, mitems, 4, &r_active, 16.0f, &ms, &mr));
+        assert(mr.chosen == -1 && mr.dismissed);
+        r_dismissed = mr.dismissed;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 19: clique na linha 1 da tabela (y 170..194). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, rbg));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){20, 182}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){20, 182}));
+        CHECK(zyntra_widget_table(ctx, rid, table_bounds, cols, 2, trows, 3, &r_selected, &r_scroll, &rts, &tr));
+        assert(tr.changed && tr.selected == 1 && r_selected == 1);
+        r_table_sel = r_selected;
+        r_changed = tr.changed;
+        CHECK(zyntra_framebuffer_render(rfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(rfb, 20, 182, &rpx));
+        assert(rpx.r == rts.bg_selected.r);
+        CHECK(zyntra_framebuffer_pixel(rfb, 20, 158, &rpx));
+        assert(rpx.r == rts.bg.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Inválidos: vetores nulos, célula sem ponteiro, estados nulos. */
+        assert(zyntra_widget_menu(ctx, rid, menu_bounds, NULL, 3, &r_active, 16.0f, &ms, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_menu(ctx, rid, menu_bounds, mitems, 4, &r_active, 0.0f, &ms, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_menu(ctx, rid, menu_bounds, mitems, 4, NULL, 16.0f, &ms, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        {
+            const ZyntraMenuItem broken[1] = {{{NULL, 3}, {"", 0}, true, false, false, false}};
+            assert(zyntra_widget_menu(ctx, rid, menu_bounds, broken, 1, &r_active, 16.0f, &ms, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        }
+        assert(zyntra_widget_table(ctx, rid, table_bounds, cols, 0, trows, 3, &r_selected, &r_scroll, &rts, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_table(ctx, rid, table_bounds, NULL, 2, trows, 3, &r_selected, &r_scroll, &rts, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_table(ctx, rid, table_bounds, cols, 2, NULL, 1, &r_selected, &r_scroll, &rts, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_table(ctx, rid, table_bounds, cols, 2, trows, 3, NULL, &r_scroll, &rts, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_table(ctx, rid, table_bounds, cols, 2, trows, 3, &r_selected, NULL, &rts, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_table(ctx, rid, (ZyntraRect){8, 120, 220, 20}, cols, 2, trows, 3, &r_selected, &r_scroll, &rts, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        {
+            const ZyntraTableRow broken[1] = {{NULL, 2}};
+            assert(zyntra_widget_table(ctx, rid, table_bounds, cols, 2, broken, 1, &r_selected, &r_scroll, &rts, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        }
+        assert(zyntra_widget_menu(NULL, rid, menu_bounds, mitems, 4, &r_active, 16.0f, &ms, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_table(NULL, rid, table_bounds, cols, 2, trows, 3, &r_selected, &r_scroll, &rts, NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+        zyntra_framebuffer_destroy(rfb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -630,6 +775,10 @@ int main(void) {
         " px_tab=%d px_list=%d px_radio=%d px_panel=%d\n",
         l_active, l_sel, l_radio, l_collapsed, l_toggled,
         l_tab_px, l_list_px, l_radio_px, l_panel_px);
+    printf("C-ABI rich chosen=%lld menu_hover=%lld table_sel=%zu changed=%d dismissed=%d"
+        " px_menu=%d px_hover=%d px_sel=%d px_alt=%d\n",
+        r_chosen, r_menu_hover, r_table_sel, r_changed, r_dismissed,
+        r_px_menu, r_px_hover, r_px_sel, r_px_alt);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }
