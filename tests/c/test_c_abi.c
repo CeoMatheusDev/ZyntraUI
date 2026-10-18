@@ -93,6 +93,55 @@ int main(void) {
     CHECK(zyntra_context_frame_index(ctx, &idx));
     assert(idx == 1);
 
+    /* Frame 2: desenho moderno (SDF/gradiente/sombra/blur), clip e
+     * métricas de texto — a mesma DrawList da API Zig. */
+    size_t modern = 0;
+    float mw = 0, mh = 0;
+    size_t kept = 0;
+    {
+        CHECK(zyntra_context_begin_frame(ctx));
+        ZyntraRect box = {10, 10, 40, 30};
+        ZyntraColor white = {255, 255, 255, 255};
+        ZyntraColor dark = {10, 10, 20, 255};
+        ZyntraVec2 o = {0, 2};
+        ZyntraVec2 g0 = {0, 0};
+        ZyntraVec2 g1 = {0, 30};
+        ZyntraVec2 l0 = {0, 0}, l1 = {40, 30};
+        ZyntraVec2 c = {30, 20};
+
+        CHECK(zyntra_draw_clear(ctx, dark));
+        CHECK(zyntra_draw_clip(ctx, box));
+        CHECK(zyntra_draw_rect_shadow(ctx, box, 6, o, 4, dark));
+        CHECK(zyntra_draw_rect_rounded(ctx, box, 6, white));
+        CHECK(zyntra_draw_rect_gradient(ctx, box, g0, g1, white, dark));
+        CHECK(zyntra_draw_rect_outline(ctx, box, white, 1.5f));
+        CHECK(zyntra_draw_line(ctx, l0, l1, white, 2.0f));
+        CHECK(zyntra_draw_circle_filled(ctx, c, 8.0f, white));
+        CHECK(zyntra_draw_blur(ctx, box, 3.0f));
+        CHECK(zyntra_draw_clip_reset(ctx));
+
+        /* Inválidos não enfileiram (contagem preservada). */
+        assert(zyntra_draw_rect_rounded(ctx, box, -1.0f, white) == ZYNTRA_INVALID_COMMAND);
+        assert(zyntra_draw_rect_outline(ctx, box, white, 0.0f) == ZYNTRA_INVALID_COMMAND);
+        assert(zyntra_draw_blur(ctx, box, 3.0f) == ZYNTRA_OK);
+
+        CHECK(zyntra_draw_count(ctx, &modern));
+        assert(modern == 11); /* 10 + o blur extra acima */
+
+        CHECK(zyntra_text_measure("abc", 3, 10.0f, &mw, &mh));
+        assert(mw > 0.0f && mh > 0.0f);
+        /* 3 glifos * avanço 6px de `withSize(10)` ≈ 18px de largura
+         * (comparação com tolerância: avanço é float). */
+        assert(mw > 17.9f && mw < 18.1f);
+        CHECK(zyntra_text_truncate("abcdef", 6, 10.0f, mw + 1.0f, &kept));
+        assert(kept == 3);
+        assert(zyntra_text_measure("\xff", 1, 10.0f, &mw, &mh) == ZYNTRA_INVALID_TEXT);
+        assert(zyntra_text_measure("a", 1, 0.0f, &mw, &mh) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_text_truncate("a", 1, 10.0f, -1.0f, &kept) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_text_truncate("a", 1, 10.0f, 5.0f, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_context_end_frame(ctx));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -101,5 +150,7 @@ int main(void) {
     zyntra_context_destroy(ctx);
     printf("C-ABI OK events=%zu draws=%zu frame=%llu\n",
         events, draws, (unsigned long long)idx);
+    printf("C-ABI modern draws=%zu width=%.0f height=%.0f kept=%zu\n",
+        modern, (double)mw, (double)mh, kept);
     return 0;
 }

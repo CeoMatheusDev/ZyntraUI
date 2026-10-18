@@ -35,10 +35,11 @@ Rather than tying UI logic to a window system or GPU API, ZyntraUI keeps those c
 - **Allocation-aware design:** A per-frame arena supports transient draw commands and text copies, avoiding hidden hot-path allocations.
 - **Deterministic behavior:** Explicit inputs and draw lists make UI logic suitable for automated and snapshot testing.
 - **Pure Zig core:** Use the native Zig API or the optional C ABI without introducing a heavyweight GUI runtime.
+- **Multi-surface ready:** A window registry, per-surface input routing, repaint composition and draggable/resizable window frames, all on top of the same draw-command pipeline.
 
 ## Widgets
 
-ZyntraUI provides **31 public widgets**, organized around common interface needs:
+ZyntraUI provides **31 widget modules**, organized around common interface needs (some modules expose more than one entry point, such as `label`/wrapped label or `separator`/labeled separator):
 
 | Category | Widgets |
 | --- | --- |
@@ -67,7 +68,8 @@ src/
 ├── timeline/      Timeline model (time↔pixel, ruler steps, tracks/keys)
 ├── inspector/     Property inspector model (values, row metrics, formatting)
 ├── dnd/           Drag-and-drop service (payload, targets, drop resolution)
-├── window/        Window registry (identity, z-order, focus, hit-test)
+├── window/        Registry (identity, z-order, focus) + input routing +
+│                  repaint composition + window decorations/drag (M100-M103)
 ├── text/          UTF-8 metrics, wrapping, and text-edit helpers
 ├── anim/          Optional animation helpers
 ├── software/      Reference software rasterizer
@@ -322,7 +324,12 @@ The included examples exercise the UI pipeline; they do not provide a standalone
 
 ## C interoperability
 
-An optional C ABI is available for non-Zig consumers. See [`src/c-abi/zyntra.h`](src/c-abi/zyntra.h) and [`docs/C_ABI.md`](docs/C_ABI.md) for the exported interface and integration details.
+An optional C ABI is available for non-Zig consumers. It mirrors the Zig draw
+surface — solid/outlined/rounded rectangles, lines, circles, linear gradients,
+drop shadows, backdrop blur, clip, copied UTF-8 text runs and text metrics —
+plus the context/frame/event lifecycle. See
+[`src/c-abi/zyntra.h`](src/c-abi/zyntra.h) and [`docs/C_ABI.md`](docs/C_ABI.md)
+for the exported interface and integration details.
 
 ## Project resources
 

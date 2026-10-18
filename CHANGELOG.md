@@ -87,6 +87,23 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   espaço local), redimensionar pela moldura (cresce, estica até a borda e
   encolhe até o mínimo) e fechar escondendo a janela.
 
+- `c-abi` + `draw/commands`: **C-ABI cobre todo o desenho + métricas de
+  texto** (M104, aditivo) — a fronteira C passa a espelhar a `DrawList` da
+  API Zig: `zyntra_draw_clear`, `zyntra_draw_clip`/`zyntra_draw_clip_reset`,
+  `zyntra_draw_rect_outline`, `zyntra_draw_line`, `zyntra_draw_circle_filled`,
+  `zyntra_draw_rect_rounded` (SDF anti-serrilhado no backend de referência),
+  `zyntra_draw_rect_gradient`, `zyntra_draw_rect_shadow` e
+  `zyntra_draw_blur`, além de `zyntra_text_measure` (largura/altura com as
+  métricas fallback) e `zyntra_text_truncate` (bytes que cabem em
+  `max_width`, cortando em fronteira de codepoint). Comando inválido devolve
+  `ZYNTRA_INVALID_COMMAND` sem enfileirar (mesma validação da API Zig) e
+  `size`/`max_width` inválidos, `ZYNTRA_INVALID_ARGUMENT`. `DrawList.clip`
+  (rect opcional: `null` remove) entra como helper da própria lista — os
+  widgets seguiam empilhando `.clip` na mão. `zyntra.h` e `docs/C_ABI.md`
+  documentam a superfície; o consumidor C de `tests/c/test_c_abi.c` exercita
+  tudo num segundo frame (mantendo a linha de saída anterior e somando
+  `C-ABI modern draws=… width=… height=… kept=…`).
+
 ## [1.28.0] - 2026-10-17
 
 MINOR estável, 100% compatível: fecha a prioridade **#7** do roadmap

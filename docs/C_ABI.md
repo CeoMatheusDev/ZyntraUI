@@ -38,9 +38,32 @@ Toda função retorna `ZyntraResult` (`0 == ZYNTRA_OK`):
 | `ZYNTRA_INVALID_ARGUMENT` | handle/saída nulo, viewport negativo, botão > 2 |
 | `ZYNTRA_OUT_OF_MEMORY` | falha de alocação do `page_allocator` |
 | `ZYNTRA_INVALID_EVENT` | evento rejeitado na validação |
-| `ZYNTRA_INVALID_COMMAND` | comando de desenho inválido (ex.: largura negativa) |
+| `ZYNTRA_INVALID_COMMAND` | comando de desenho inválido (ex.: largura/raio negativos, NaN) |
 | `ZYNTRA_INVALID_STATE` | `begin` com frame ativo / `end` sem frame ativo |
-| `ZYNTRA_INVALID_TEXT` | UTF-8 malformado em `zyntra_draw_text` |
+| `ZYNTRA_INVALID_TEXT` | UTF-8 malformado em `zyntra_draw_text`/`zyntra_text_*` |
+
+## Desenho
+
+Cada `zyntra_draw_*` enfileira um comando na `DrawList` do frame corrente
+(geometria em pixels lógicos). Comando inválido (largura/raio negativos,
+NaN/Inf) devolve `ZYNTRA_INVALID_COMMAND` e **não** entra na lista.
+
+| Função | Comando |
+|---|---|
+| `zyntra_draw_clear` | limpa o viewport com cor sólida |
+| `zyntra_draw_clip` / `zyntra_draw_clip_reset` | clip retangular (scissor) para os próximos / remoção |
+| `zyntra_draw_rect_filled` | retângulo sólido |
+| `zyntra_draw_rect_outline` | moldura retangular de `thickness` px |
+| `zyntra_draw_line` | reta entre dois pontos |
+| `zyntra_draw_circle_filled` | círculo sólido |
+| `zyntra_draw_rect_rounded` | cantos arredondados (SDF anti-serrilhado no backend de referência) |
+| `zyntra_draw_rect_gradient` | gradiente linear `color0`(p0) → `color1`(p1) contido em `rect` |
+| `zyntra_draw_rect_shadow` | sombra projetada da silhueta arredondada (não desenha a forma) |
+| `zyntra_draw_blur` | backdrop blur do que já foi desenhado dentro de `rect` (ordem importa) |
+
+Todas as variantes de `DrawCommand` da API Zig têm wrapper C; a ordem dos
+comandos é a ordem de chamada e `zyntra_draw_count` conta o que está na
+lista.
 
 ## Strings, buffers, callbacks
 
@@ -48,6 +71,12 @@ Toda função retorna `ZyntraResult` (`0 == ZYNTRA_OK`):
   bytes para a arena da `DrawList` — o chamador pode liberar o buffer logo
   após o retorno. UTF-8 malformado retorna `ZYNTRA_INVALID_TEXT`.
   `utf8_len == 0` aceita ponteiro NULL (run vazio válido).
+* Métricas fallback (mesmas da API Zig: avanço fixo por glifo,
+  `FontMetrics.withSize`): `zyntra_text_measure(utf8, len, size, &w, &h)`
+  mede e `zyntra_text_truncate(utf8, len, size, max_width, &bytes)` devolve
+  quantos bytes iniciais cabem (corte em fronteira de codepoint). `size` ou
+  `max_width` inválidos ⇒ `ZYNTRA_INVALID_ARGUMENT`; UTF-8 malformado ⇒
+  `ZYNTRA_INVALID_TEXT`.
 * Sem callbacks na fronteira. Demais strings/buffers: fora de escopo.
 
 ## Compatibilidade ABI
@@ -75,5 +104,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..."
 ```

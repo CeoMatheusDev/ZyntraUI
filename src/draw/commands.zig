@@ -297,6 +297,15 @@ pub const DrawList = struct {
         try self.push(gpa, .{ .clear = .{ .color = color } });
     }
 
+    /// Define o clip retangular (scissor) para os comandos seguintes;
+    /// `null` remove o clip. Vale até o próximo `clip`/`clear` da lista.
+    pub fn clip(self: *Self, gpa: std.mem.Allocator, rect: ?types.Rect) !void {
+        try self.push(gpa, .{ .clip = .{
+            .rect = rect orelse .{},
+            .null_rect = rect == null,
+        } });
+    }
+
     pub fn rectFilled(self: *Self, gpa: std.mem.Allocator, rect: types.Rect, color: types.Color) !void {
         try self.push(gpa, .{ .rect_filled = .{ .rect = rect, .color = color } });
     }
@@ -402,8 +411,13 @@ test "DrawList helpers + validação" {
     try dl.line(gpa, types.Vec2.init(0, 0), types.Vec2.init(5, 5), types.Color.rgb(0, 0, 255), 2.0);
     try dl.circleFilled(gpa, types.Vec2.init(3, 3), 4.0, types.Color.rgb(255, 255, 0));
     try dl.rectRounded(gpa, types.Rect.init(0, 0, 10, 10), 3.0, types.Color.rgb(10, 20, 30));
-    try stdt.testing.expectEqual(@as(usize, 6), dl.len());
+    try dl.clip(gpa, types.Rect.init(0, 0, 10, 10));
+    try dl.clip(gpa, null);
+    try stdt.testing.expectEqual(@as(usize, 8), dl.len());
     try stdt.testing.expect(dl.items()[5].isValid());
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 10, 10), dl.items()[6].clip.rect);
+    try stdt.testing.expect(!dl.items()[6].clip.null_rect);
+    try stdt.testing.expect(dl.items()[7].clip.null_rect);
 
     // Inválidos:
     try stdt.testing.expectError(error.InvalidCommand, dl.rectFilled(
