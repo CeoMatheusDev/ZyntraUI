@@ -151,6 +151,11 @@ pub fn beginScroll(
         res.content.y = bounds.y - scroll_y.*;
     }
 
+    // Estado de interação (M105): rolagem (roda/teclado) e arraste do
+    // thumb deslocam o conteúdo ⇒ alimenta o dirty rect. Hover puro não
+    // muda o desenho (a barra não tem cor de realce).
+    try ctx.mark_hot(id, bounds, res.scrolled or res.dragging);
+
     ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = bounds, .null_rect = false } }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
@@ -371,5 +376,47 @@ test "scroll rejeita bounds não-finitos" {
     ctx.beginFrame();
     try stdt.testing.expectError(error.InvalidArgument, beginScroll(&ctx, id, nan_bounds, &off, 300, 24, style));
     try stdt.testing.expectEqual(@as(f32, 0), off);
+    ctx.endFrame();
+}
+
+test "scroll alimenta o dirty rect (M105): rolagem marca os bounds" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().scrollStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 100);
+    const id = id_mod.Id.fromString("test:sc:hot");
+    var off: f32 = 0;
+    const away = types.Vec2.init(500, 500);
+    const inside = types.Vec2.init(50, 50);
+
+    // Hover puro não muda o desenho (barra sem realce) ⇒ nada sujo.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = inside } });
+    _ = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+
+    // Roda com o mouse dentro: o conteúdo rola ⇒ bounds sujos.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = inside } });
+    try ctx.pushEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = 1, .pos = inside } });
+    const scrolled = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expect(scrolled.scrolled);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    // Saiu da rolagem: repinta uma última vez e depois fica frio.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginScroll(&ctx, id, bounds, &off, 300, 24, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
     ctx.endFrame();
 }

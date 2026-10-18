@@ -576,6 +576,10 @@ fn textInputInner(
     // e nenhum highlight (evita faixa fantasma com estado retido).
     if (anchor) |a| res.selected = res.focused and a.* != cursor.*;
 
+    // Estado de interação (M105): fundo/borda de foco, realce de seleção
+    // e caret mudam com o foco e com a edição ⇒ alimenta o dirty rect.
+    try ctx.mark_hot(id, bounds, focused or res.changed);
+
     const bg = if (res.focused) style.bg_focus else style.bg;
     const border = if (res.focused) style.border_focus else style.border;
     ctx.draw.rectFilled(ctx.allocator, bounds, bg) catch |err| switch (err) {
@@ -1557,5 +1561,57 @@ test "text_input bounds não-finitos rejeitados nas 4 variantes" {
     try stdt.testing.expectError(error.InvalidArgument, textInputClipboard(4, 16, &ctx, id, nan_bounds, &buf, &len, &cursor, &anchor, &hist, &clip, font, style));
     try stdt.testing.expectEqual(@as(usize, 0), len);
     try stdt.testing.expectEqual(@as(usize, 0), cursor);
+    ctx.endFrame();
+}
+
+test "text_input alimenta o dirty rect (M105): foco marca os bounds" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti:hot");
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    const away = types.Vec2.init(500, 500);
+    const inside = types.Vec2.init(10, 15);
+
+    // Sem foco e mouse fora: frio.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+
+    // Click foca: fundo/borda de foco + caret ⇒ bounds sujos.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = true, .pos = inside } });
+    const focused = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expect(focused.focused);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    // Mouse fora mas ainda com foco: continua quente (sem hover).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    // Perda de foco (o host limpa): o realce que ficou é repintado.
+    ctx.beginFrame();
+    ctx.focus_owner = null;
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
     ctx.endFrame();
 }

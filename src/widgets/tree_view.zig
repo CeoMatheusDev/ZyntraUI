@@ -299,6 +299,10 @@ pub fn beginTreeView(
         }
     }
 
+    // Estado de interação (M105): hover de nó, seleção e expansão por
+    // clique no expansor mudam a aparência ⇒ alimenta o dirty rect.
+    try ctx.mark_hot(id, bounds, res.hovered_index != null or res.changed or res.toggled_index != null);
+
     // Desenho: fundo
     ctx.draw.rectFilled(ctx.allocator, bounds, style.bg) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -1371,5 +1375,48 @@ test "TreeView expansão por teclado não gera thumb NaN (viewport que cabia)" {
         }
     }
     try testing.expect(found_thumb);
+    ctx.endFrame();
+}
+
+test "tree_view alimenta o dirty rect (M105): hover marca só os bounds" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().treeViewStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(10, 10, 160, 90);
+    const id = id_mod.Id.fromString("test:tv:hot");
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+    var items = [_]TreeItem{
+        .{ .label = "A", .children = &[_]TreeItem{} },
+        .{ .label = "B", .children = &[_]TreeItem{} },
+        .{ .label = "C", .children = &[_]TreeItem{} },
+    };
+    const away = types.Vec2.init(500, 500);
+    const inside = types.Vec2.init(40, 12);
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = inside } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginTreeView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
     ctx.endFrame();
 }

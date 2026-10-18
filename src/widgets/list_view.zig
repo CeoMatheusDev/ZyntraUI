@@ -62,7 +62,6 @@ pub fn beginListView(
     scroll_offset.* = std.math.clamp(scroll_offset.*, 0, max_scroll);
 
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
-    _ = if (ctx.mouse_pos) |p| bounds.contains(p) else false;
     var res = ListViewResult{ .selected = selected.*, .scroll_offset = scroll_offset.* };
 
     // Focável
@@ -160,14 +159,24 @@ pub fn beginListView(
         scroll_offset.* = std.math.clamp(scroll_offset.*, 0, max_scroll);
     }
 
-    // Hover index
+    // Hover (M105): só com o ponteiro DENTRO dos bounds — antes o índice
+    // vinha também de fora no eixo X (realce fantasma em linhas da lista
+    // quando o mouse estava ao lado dela).
     if (ctx.mouse_pos) |p| {
-        const rel_y = p.y - bounds.y + scroll_offset.*;
-        const idx: usize = @as(usize, @intFromFloat(@floor(rel_y / style.item_height)));
-        if (idx >= first_visible and idx < last_visible) {
-            res.hovered_index = idx;
+        if (bounds.contains(p)) {
+            const rel_y = p.y - bounds.y + scroll_offset.*;
+            const idx: usize = @as(usize, @intFromFloat(@floor(rel_y / style.item_height)));
+            if (idx >= first_visible and idx < last_visible) {
+                res.hovered_index = idx;
+            }
         }
     }
+
+    // Estado de interação (M105): hover da linha e seleção mudam o
+    // fundo ⇒ alimenta o dirty rect (entrada e saída do realce). Roda a
+    // roda exige o mouse dentro de `bounds`, logo o hover já cobre o
+    // frame da rolagem.
+    try ctx.mark_hot(id, bounds, res.hovered_index != null or res.changed);
 
     // Desenho: fundo
     ctx.draw.rectFilled(ctx.allocator, bounds, style.bg) catch |err| switch (err) {
@@ -349,5 +358,48 @@ test "listView limites: bounds/scroll não-finitos, scroll e wheel extremos" {
     try stdt.testing.expectError(error.InvalidArgument, beginListView(&ctx, id, nan_bounds, &items, &selected, &scroll, style));
     const inf_bounds = types.Rect.init(0, 0, 200, std.math.inf(f32));
     try stdt.testing.expectError(error.InvalidArgument, beginListView(&ctx, id, inf_bounds, &items, &selected, &scroll, style));
+    ctx.endFrame();
+}
+
+test "list_view alimenta o dirty rect (M105): hover marca só os bounds" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().listViewStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(10, 10, 120, 60);
+    const id = id_mod.Id.fromString("test:lv:hot");
+    const items = [_][]const u8{ "A", "B", "C" };
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+    const away = types.Vec2.init(500, 500);
+    const inside = types.Vec2.init(20, 20);
+
+    // Frio: nada sujo (a aplicação não marcou nada).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginListView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+
+    // Hover: exatamente os bounds do widget entram na região suja.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = inside } });
+    _ = try beginListView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    // Saída do hover: o realce que ficou no framebuffer é repintado.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginListView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    // Frio de novo: nada a repintar.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginListView(&ctx, id, bounds, &items, &selected, &scroll, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
     ctx.endFrame();
 }

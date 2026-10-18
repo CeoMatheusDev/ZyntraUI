@@ -212,6 +212,10 @@ pub fn beginTable(
         }
     }
 
+    // Estado de interação (M105): hover de linha (só no corpo) e seleção
+    // mudam o fundo ⇒ alimenta o dirty rect.
+    try ctx.mark_hot(id, bounds, res.hovered_index != null or res.changed);
+
     // Desenho: fundo
     ctx.draw.rectFilled(ctx.allocator, bounds, style.bg) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -562,5 +566,50 @@ test "Table encolhe linhas, área pequena e última linha por click" {
     });
     _ = try beginTable(&ctx, id, types.Rect.init(0, 0, 200, 150), &columns, rows8[0..8], &selected, &scroll, style);
     try stdt.testing.expectEqual(@as(usize, 7), selected);
+    ctx.endFrame();
+}
+
+test "table alimenta o dirty rect (M105): hover de linha marca os bounds" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().tableStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(10, 10, 200, 150); // header 26 → corpo em y=36
+    const id = id_mod.Id.fromString("test:tb:hot");
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+    const columns = [_]TableColumn{
+        .{ .title = "Nome", .width = 120 },
+        .{ .title = "Idade", .width = 80 },
+    };
+    const c0 = [_][]const u8{ "Ana", "30" };
+    const c1 = [_][]const u8{ "Bia", "25" };
+    const rows = [_]TableRow{ .{ .cells = &c0 }, .{ .cells = &c1 } };
+    const away = types.Vec2.init(500, 500);
+    const body = types.Vec2.init(20, 60); // dentro do corpo
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginTable(&ctx, id, bounds, &columns, &rows, &selected, &scroll, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = body } });
+    _ = try beginTable(&ctx, id, bounds, &columns, &rows, &selected, &scroll, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginTable(&ctx, id, bounds, &columns, &rows, &selected, &scroll, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginTable(&ctx, id, bounds, &columns, &rows, &selected, &scroll, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
     ctx.endFrame();
 }

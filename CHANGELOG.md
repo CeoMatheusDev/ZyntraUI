@@ -5,6 +5,34 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `widgets` (`list_view`, `table`, `tree_view`, `tab_bar`, `splitter`,
+  `scroll`, `menu`, `text_input`, `textarea`): **repintura parcial nos
+  widgets restantes** (M105, aditivo) — os nove passam a declarar o próprio
+  estado de interação via `Context.mark_hot`, como `button`/`checkbox`/
+  `radio`/`switch`/`slider` já faziam desde a M99. Cada um marca os PRÓPRIOS
+  bounds quando a aparência pode diferir do desenho frio: hover de linha
+  (`list_view`/`table`/`tree_view`), hover de aba (`tab_bar`), hover/arraste
+  do puxador (`splitter`), rolagem por roda/teclado e arraste do thumb
+  (`scroll`), hover de item e navegação por teclado (`menu`) e foco/edição
+  (`text_input`/`textarea`, incluindo o realce de foco que o host apaga).
+  Na saída do estado o rect entra de novo (registro quente do frame
+  anterior), então o realce deixado no framebuffer é apagado sem nenhuma
+  linha de `mark_dirty` na aplicação. Hover puro de `scroll` e foco de
+  `tab_bar` ficam de fora de propósito: não mudam o desenho. Demo `m105` no
+  exemplo (lista + barra de abas com hover/união/saída/ocioso e campo de
+  texto com foco ligado/desligado, todos com região danificada medida).
+
+### Corrigido
+
+- `widgets/list_view` (M105): o índice de hover passa a exigir o ponteiro
+  DENTRO dos bounds. Antes o realce da linha vinha só do eixo Y, então a
+  linha correspondente em outra coluna aparecia "quente" com o mouse ao
+  lado da lista (o teste M105 cobriu o caso; a linha morta
+  `_ = if (ctx.mouse_pos) |p| bounds.contains(p) else false` que sobrava ali
+  foi removida).
+
 ## [1.29.0] - 2026-10-18
 
 MINOR estável, 100% compatível: fecha a prioridade **#6** do roadmap

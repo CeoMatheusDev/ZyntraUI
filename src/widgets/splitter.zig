@@ -175,6 +175,10 @@ pub fn beginSplitter(
     res.pos = pos.*;
     res.changed = pos.* != entry;
 
+    // Estado de interação (M105): hover/arraste realçam o puxador e a
+    // mudança de posição move as divisórias ⇒ alimenta o dirty rect.
+    try ctx.mark_hot(id, bounds, res.hovered or res.dragging or res.changed);
+
     ctx.draw.rectFilled(ctx.allocator, bounds, style.bg) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
@@ -345,4 +349,50 @@ test "splitterPanes: dois lados + divisória, clamp e aninhamento" {
     const top_left = splitterPanes(h.a, .vertical, 200, style);
     try stdt.testing.expectEqual(types.Rect.init(0, 0, 196, 146), top_left.a);
     try stdt.testing.expectEqual(types.Rect.init(204, 0, 196, 146), top_left.b);
+}
+
+test "splitter alimenta o dirty rect (M105): hover e arraste marcam os bounds" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().splitterStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 100);
+    const id = id_mod.Id.fromString("test:sp:hot");
+    var pos: f32 = 100;
+    const away = types.Vec2.init(500, 500);
+    const handle = types.Vec2.init(100, 50); // puxador (pos=100, largura 8)
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = handle } });
+    _ = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    // Arraste: o puxador se move com o mouse ⇒ a divisória é repintada.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = true, .pos = handle } });
+    const dragging = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expect(dragging.dragging);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = false, .pos = away } });
+    _ = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginSplitter(&ctx, id, bounds, .vertical, &pos, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
 }

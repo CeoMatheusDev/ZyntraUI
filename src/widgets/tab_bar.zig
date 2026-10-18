@@ -144,6 +144,10 @@ pub fn beginTabBar(
         }
     }
 
+    // Estado de interação (M105): hover de aba e troca de ativa mudam o
+    // fundo ⇒ alimenta o dirty rect (o foco não altera o desenho).
+    try ctx.mark_hot(id, bounds, res.hovered_index != null or res.changed);
+
     // Desenho
     const active_i = active.*;
     // Fundo da barra
@@ -339,5 +343,56 @@ test "tabBar limites: bordas do teclado, aba única, teto e NaN" {
     try stdt.testing.expectError(error.InvalidArgument, beginTabBar(&ctx, id, bounds, &many, &active, style));
     const nan_bounds = types.Rect.init(0, 0, std.math.nan(f32), 30);
     try stdt.testing.expectError(error.InvalidArgument, beginTabBar(&ctx, id, nan_bounds, &tabs, &active, style));
+    ctx.endFrame();
+}
+
+test "tab_bar alimenta o dirty rect (M105): hover e troca marcam os bounds" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().tabBarStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:tab:hot");
+    const tabs = [_][]const u8{ "A", "BB", "CCC" };
+    var active: usize = 0;
+    const away = types.Vec2.init(500, 500);
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+
+    // Hover sobre a 1ª aba: bounds sujos.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(8, 15) } });
+    _ = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    // Mouse fora mas troca de aba por teclado com foco: também sujo.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(8, 15) } });
+    _ = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    const moved = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    try stdt.testing.expect(moved.changed);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect); // sai do estado
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try beginTabBar(&ctx, id, bounds, &tabs, &active, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
     ctx.endFrame();
 }

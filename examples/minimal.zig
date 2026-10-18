@@ -24,6 +24,7 @@ const panel_mod = @import("zyntra_ui").widgets.panel;
 const splitter_mod = @import("zyntra_ui").widgets.splitter;
 const dock_view_mod = @import("zyntra_ui").widgets.dock_view;
 const tab_bar_mod = @import("zyntra_ui").widgets.tab_bar;
+const list_view_mod = @import("zyntra_ui").widgets.list_view;
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}).init;
@@ -2177,5 +2178,162 @@ pub fn main() !void {
             m103_idle.damaged,
             m103_idle.regions,
         },
+    );
+
+    // Widgets de vista e de campo alimentam o dirty rect sozinhos (M105):
+    // hover de linha/aba e foco de campo marcam os PRÓPRIOS bounds,
+    // inclusive na SAÍDA do estado (registro quente do frame anterior).
+    // Duas vistas lado a lado (lista em (8,8,80,44) e barra de abas em
+    // (96,8,96,20)) sobre fundo; a aplicação só marca o 1º frame.
+    // Frame 1: mouse longe, tudo frio ⇒ região = viewport (1º desenho).
+    // Frame 2: mouse na LINHA 1 da lista ⇒ região = bounds da lista.
+    // Frame 3: mouse na ABA 2 ⇒ região = bounds da lista ∪ bounds da barra
+    //          (a lista sai do hover e a aba entra).
+    // Frame 4: mouse longe ⇒ região = bounds da barra (sai o hover).
+    // Frame 5: frio de novo ⇒ nada sujo, nenhuma repintura.
+    var m105_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 200, 60);
+    defer m105_fb.deinit(allocator);
+    const m105_vp = zyntra_ui.Rect.init(0, 0, 200, 60);
+    const m105_bg = zyntra_ui.Color.rgb(24, 24, 28);
+    const m105_list = zyntra_ui.Rect.init(8, 8, 80, 44);
+    const m105_tabs_rect = zyntra_ui.Rect.init(96, 8, 96, 20);
+    var m105_lv_style = theme.listViewStyle();
+    m105_lv_style.item_height = 12; // 3 itens cabem no viewport
+    var m105_tb_style = theme.tabBarStyle();
+    m105_tb_style.padding_x = 12; // aba 0 em 96..144, aba 1 em 144..192
+    const m105_items = [_][]const u8{ "um", "dois", "tres" };
+    const m105_tab_labels = [_][]const u8{ "AAAA", "BBBB" };
+    const m105_list_id = zyntra_ui.Id.fromString("examples/m105:list");
+    const m105_tab_id = zyntra_ui.Id.fromString("examples/m105:tab");
+    var m105_selected: usize = 0;
+    var m105_scroll: f32 = 0;
+    var m105_active: usize = 0;
+
+    var m105_cold_list: u8 = 0;
+    var m105_hover_list: u8 = 0;
+    var m105_out_list: u8 = 0;
+    var m105_keep_tab: u8 = 0;
+    var m105_hover_tab: u8 = 0;
+    var m105_union_ok = false;
+    var m105_out_ok = false;
+    var m105_idle_ok = false;
+    var m105_frame: usize = 0;
+    while (m105_frame < 5) : (m105_frame += 1) {
+        ctx.beginFrame();
+        const m105_mouse: zyntra_ui.Vec2 = switch (m105_frame) {
+            1 => .{ .x = 20, .y = 24 }, // linha 1 da lista
+            2 => .{ .x = 150, .y = 18 }, // aba 1 (não ativa)
+            else => .{ .x = 190, .y = 55 }, // longe das duas
+        };
+        try ctx.pushEvent(.{ .mouse_move = .{ .pos = m105_mouse } });
+        try ctx.draw.rectFilled(allocator, m105_vp, m105_bg);
+        _ = try list_view_mod.beginListView(
+            &ctx,
+            m105_list_id,
+            m105_list,
+            &m105_items,
+            &m105_selected,
+            &m105_scroll,
+            m105_lv_style,
+        );
+        _ = try tab_bar_mod.beginTabBar(&ctx, m105_tab_id, m105_tabs_rect, &m105_tab_labels, &m105_active, m105_tb_style);
+
+        if (m105_frame == 0) ctx.mark_dirty(m105_vp); // 1º frame: tudo sujo
+        const m105_dirty = ctx.dirty_rect;
+        if (!m105_dirty.isEmpty()) {
+            _ = try zyntra_ui.software.raster.renderRegion(&m105_fb, ctx.drawCommands(), m105_vp, m105_dirty);
+        }
+        switch (m105_frame) {
+            0 => {
+                m105_cold_list = m105_fb.get(20, 24)[0];
+                m105_keep_tab = m105_fb.get(150, 18)[0]; // aba fora da região
+            },
+            1 => m105_hover_list = m105_fb.get(20, 24)[0],
+            2 => {
+                m105_hover_tab = m105_fb.get(150, 18)[0];
+                m105_out_list = m105_fb.get(20, 24)[0]; // hover desfeito
+                m105_union_ok = std.meta.eql(m105_dirty, m105_list.unionWith(m105_tabs_rect));
+            },
+            3 => m105_out_ok = std.meta.eql(m105_dirty, m105_tabs_rect),
+            else => m105_idle_ok = m105_dirty.isEmpty(),
+        }
+        ctx.endFrame();
+    }
+    std.debug.print(
+        "m105 hover cold_list={d} hover_list={d} out_list={d} keep_tab={d} hover_tab={d} union={} out={} idle={}\n",
+        .{
+            m105_cold_list,
+            m105_hover_list,
+            m105_out_list,
+            m105_keep_tab,
+            m105_hover_tab,
+            m105_union_ok,
+            m105_out_ok,
+            m105_idle_ok,
+        },
+    );
+
+    // Foco também é estado quente (M105) mesmo SEM hover: campo de texto
+    // em (8,8,120,20) num framebuffer 140x40.
+    // Frame 1: mouse longe, sem foco ⇒ região = viewport (1º desenho).
+    // Frame 2: press no campo ⇒ foco ⇒ região = bounds do campo.
+    // Frame 3: mouse longe, foco mantido ⇒ região = bounds (repinta foco).
+    // Frame 4: host tira o foco ⇒ região = bounds (apaga o realce).
+    // Frame 5: frio ⇒ nada sujo.
+    var m105_ti_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 140, 40);
+    defer m105_ti_fb.deinit(allocator);
+    const m105_ti_vp = zyntra_ui.Rect.init(0, 0, 140, 40);
+    const m105_ti_bounds = zyntra_ui.Rect.init(8, 8, 120, 20);
+    const m105_ti_style = theme.textInputStyle();
+    const m105_ti_font = zyntra_ui.FontMetrics.withSize(10);
+    const m105_ti_id = zyntra_ui.Id.fromString("examples/m105:input");
+    var m105_ti_buf: [16]u8 = undefined;
+    var m105_ti_len: usize = 0;
+    var m105_ti_cursor: usize = 0;
+
+    var m105_ti_cold: u8 = 0;
+    var m105_ti_on: u8 = 0;
+    var m105_ti_kept: u8 = 0;
+    var m105_ti_off: u8 = 0;
+    var m105_ti_idle = false;
+    var m105_ti_frame: usize = 0;
+    while (m105_ti_frame < 5) : (m105_ti_frame += 1) {
+        ctx.beginFrame();
+        if (m105_ti_frame == 1) {
+            try ctx.pushEvent(.{
+                .mouse_button = .{ .button = .left, .pressed = true, .pos = .{ .x = 20, .y = 18 } },
+            });
+        } else {
+            try ctx.pushEvent(.{ .mouse_move = .{ .pos = .{ .x = 130, .y = 35 } } });
+        }
+        if (m105_ti_frame == 3) ctx.focus_owner = null; // o host devolve o foco
+        try ctx.draw.rectFilled(allocator, m105_ti_vp, m105_bg);
+        _ = try text_input_mod.textInput(
+            &ctx,
+            m105_ti_id,
+            m105_ti_bounds,
+            &m105_ti_buf,
+            &m105_ti_len,
+            &m105_ti_cursor,
+            m105_ti_font,
+            m105_ti_style,
+        );
+        if (m105_ti_frame == 0) ctx.mark_dirty(m105_ti_vp);
+        const m105_ti_dirty = ctx.dirty_rect;
+        if (!m105_ti_dirty.isEmpty()) {
+            _ = try zyntra_ui.software.raster.renderRegion(&m105_ti_fb, ctx.drawCommands(), m105_ti_vp, m105_ti_dirty);
+        }
+        switch (m105_ti_frame) {
+            0 => m105_ti_cold = m105_ti_fb.get(20, 18)[0],
+            1 => m105_ti_on = m105_ti_fb.get(20, 18)[0],
+            2 => m105_ti_kept = m105_ti_fb.get(20, 18)[0],
+            3 => m105_ti_off = m105_ti_fb.get(20, 18)[0],
+            else => m105_ti_idle = m105_ti_dirty.isEmpty(),
+        }
+        ctx.endFrame();
+    }
+    std.debug.print(
+        "m105 focus cold={d} on={d} kept={d} off={d} idle={}\n",
+        .{ m105_ti_cold, m105_ti_on, m105_ti_kept, m105_ti_off, m105_ti_idle },
     );
 }

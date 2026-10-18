@@ -851,6 +851,10 @@ fn textAreaInner(
     }
 
     // ---- Desenho ---------------------------------------------------------
+    // Estado de interação (M105): fundo/borda de foco, realce de seleção
+    // e caret mudam com o foco e com a edição ⇒ alimenta o dirty rect.
+    try ctx.mark_hot(id, bounds, focused or res.changed);
+
     const bg = if (res.focused) style.bg_focus else style.bg;
     const border = if (res.focused) style.border_focus else style.border;
     ctx.draw.rectFilled(ctx.allocator, bounds, bg) catch |err| switch (err) {
@@ -1813,5 +1817,55 @@ test "TextArea quebra suave + clipboard/histórico combinados" {
     const ru = try textAreaWrappedClipboard(4, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, &clip, font, style);
     try stdt.testing.expect(ru.undone);
     try stdt.testing.expectEqualStrings("abcdef", buf[0..len]);
+    ctx.endFrame();
+}
+
+test "textarea alimenta o dirty rect (M105): foco marca os bounds" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 60);
+    const id = id_mod.Id.fromString("test:ta:hot");
+    var buf: [32]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    const away = types.Vec2.init(500, 500);
+    const inside = types.Vec2.init(10, 15);
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = true, .pos = inside } });
+    const focused = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(focused.focused);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    ctx.focus_owner = null;
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expectEqual(bounds, ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
+    _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
     ctx.endFrame();
 }
