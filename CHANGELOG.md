@@ -5,6 +5,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.32.0] - 2026-10-18
+
+MINOR estável, 100% compatível: o item #1 do roadmap (superfície C) ganha o
+**segundo lote de widgets** na fronteira C (M108) — abas, grupo de radio,
+lista e painel —, agora que listas de rótulos cruzam a fronteira como
+`ZyntraStr` (ptr + len, emprestado só na chamada) e índices opcionais usam
+`-1` = nenhum. Nada que já existia mudou de assinatura ou layout.
+
 ### Adicionado
 
 - `c-abi`: **segundo lote de widgets na fronteira C** (M108, aditivo) —
