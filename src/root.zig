@@ -71,6 +71,10 @@ pub const timeline = struct {
     pub const view = @import("timeline/view.zig");
 };
 
+pub const window = struct {
+    pub const registry = @import("window/registry.zig");
+};
+
 pub const widgets = struct {
     pub const button = @import("widgets/button.zig");
     pub const checkbox = @import("widgets/checkbox.zig");
@@ -262,6 +266,10 @@ pub const DndAcceptResult = dnd.service.AcceptResult;
 pub const DndState = dnd.service.State;
 pub const DragGhostResult = widgets.drag_ghost.DragGhostResult;
 
+pub const Window = window.registry.Window;
+pub const WindowRegistry = window.registry.Registry;
+pub const WindowError = window.registry.WindowError;
+
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
 pub const version_patch = core.types.version_patch;
@@ -289,6 +297,7 @@ test {
     _ = @import("graph/view.zig");
     _ = @import("timeline/view.zig");
     _ = @import("inspector/view.zig");
+    _ = @import("window/registry.zig");
     _ = @import("dnd/service.zig");
     _ = @import("text/metrics.zig");
     _ = @import("text/wrap.zig");

@@ -1637,4 +1637,79 @@ pub fn main() !void {
             hot_region.h,
         },
     );
+
+    // Multi-janela (M100): o registro puro organiza identidade, geometria
+    // no desktop, ordem de empilhamento (z-order) e foco. Sem framebuffer
+    // e sem `Context`: as perguntas do host (quem está sob o cursor, quem
+    // recebe foco, em que ordem desenhar, coordenadas locais) saem do
+    // modelo. A em (10,10,100,80), B em (60,40,100,80) e C em (0,0,30,20)
+    // sobrepostas; a última adicionada fica no topo.
+    var mw: zyntra_ui.WindowRegistry = .{};
+    const mw_a_id = zyntra_ui.Id.fromString("examples/m100:a");
+    const mw_b_id = zyntra_ui.Id.fromString("examples/m100:b");
+    const mw_c_id = zyntra_ui.Id.fromString("examples/m100:c");
+    const mw_a = zyntra_ui.Rect.init(10, 10, 100, 80); // 10..110 x 10..90
+    const mw_b = zyntra_ui.Rect.init(60, 40, 100, 80); // 60..160 x 40..120
+    try mw.add(mw_a_id, mw_a);
+    try mw.add(mw_b_id, mw_b);
+    try mw.add(mw_c_id, zyntra_ui.Rect.init(0, 0, 30, 20)); // 0..30 x 0..20
+    const mw_count = mw.count();
+
+    // Ponto na sobreposição de A e B: o hit-test devolve a de CIMA (B) e
+    // o clique a traz para frente + dá foco; clique no vazio não muda
+    // ordem nem foco.
+    const mw_hit_b = mw.windowAt(.{ .x = 70, .y = 50 }) == mw_b_id;
+    const mw_click_b = mw.activateAt(.{ .x = 70, .y = 50 }) == mw_b_id;
+    const mw_b_top = mw.indexOf(mw_b_id).? + 1 == mw.count();
+    const mw_click_void = mw.activateAt(.{ .x = 300, .y = 300 }) == null;
+    // Desktop → local: A começa em (10,10).
+    const mw_local = mw.toLocal(mw_a_id, .{ .x = 20, .y = 15 }).?;
+
+    // Esconder a janela ativa: sai do hit-test mas mantém o foco
+    // (visibilidade != foco); o clique passa a atingir A, que sobe.
+    _ = mw.setVisible(mw_b_id, false);
+    const mw_hidden_keeps_focus = mw.activeId() == mw_b_id;
+    const mw_hit_a = mw.windowAt(.{ .x = 70, .y = 50 }) == mw_a_id;
+    const mw_click_a = mw.activateAt(.{ .x = 70, .y = 50 }) == mw_a_id;
+
+    // Array fixo: cheio recusa (`TooManyWindows`) e `clear` devolve espaço.
+    var mw_cap: zyntra_ui.WindowRegistry = .{};
+    var mw_i: u32 = 0;
+    while (mw_i < zyntra_ui.WindowRegistry.max_windows) : (mw_i += 1) {
+        try mw_cap.add(zyntra_ui.Id.fromU64(mw_i + 1), mw_a);
+    }
+    const mw_full = mw_cap.isFull();
+    var mw_overflow = false;
+    mw_cap.add(zyntra_ui.Id.fromU64(1000), mw_a) catch |err| {
+        mw_overflow = err == error.TooManyWindows;
+    };
+    mw_cap.clear();
+    const mw_cleared = mw_cap.count();
+
+    // Remover a janela ativa zera o foco; as outras mantêm a ordem.
+    const mw_removed = mw.remove(mw_a_id);
+    const mw_active_null = mw.activeId() == null;
+    const mw_left = mw.count();
+
+    std.debug.print(
+        "m100 win count={d} hit_b={} click_b={} b_top={} click_void={} local={d:.1},{d:.1} hidden_keeps_focus={} hit_a={} click_a={} full={} overflow={} cleared={d} removed={} active_null={} left={d}\n",
+        .{
+            mw_count,
+            mw_hit_b,
+            mw_click_b,
+            mw_b_top,
+            mw_click_void,
+            mw_local.x,
+            mw_local.y,
+            mw_hidden_keeps_focus,
+            mw_hit_a,
+            mw_click_a,
+            mw_full,
+            mw_overflow,
+            mw_cleared,
+            mw_removed,
+            mw_active_null,
+            mw_left,
+        },
+    );
 }

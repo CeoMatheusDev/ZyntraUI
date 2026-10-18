@@ -39,6 +39,26 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   Demo `m99` no exemplo: hover entra e sai de um botão com repintura
   parcial apenas dos bounds dele.
 
+- `window/registry`: **registro de janelas multi-janela** (M100, aditivo) —
+  modelo puro (sem `Context`, sem alocação e sem backend; o chamador é dono
+  do valor) que organiza as superfícies de UI de uma aplicação: identidade
+  estável, geometria no espaço do desktop, ordem de empilhamento e foco.
+  `WindowRegistry` guarda até `max_windows` janelas num array fixo (sem
+  `deinit`) com `add`/`remove`/`raise`/`activate`/`activateAt`/`setBounds`/
+  `setVisible`/`clear` e as consultas `order` (base→topo, ordem de
+  desenho), `windowAt` (janela VISÍVEL do topo sob o cursor, iteração
+  reversa como no hit-test do grafo), `indexOf`/`get`/`at`/`count`/
+  `isFull`/`activeId`, além da conversão de coordenadas `toLocal`/
+  `toDesktop`. Regras: `add` NÃO ativa (foco é decisão explícita do
+  chamador); `activateAt` sobe e foca a janela sob o ponto, e clique no
+  vazio não mexe em ordem nem foco; visibilidade afeta hit-test e desenho,
+  nunca o foco; remover a janela ativa zera o foco; ids nulos/ausentes e
+  rect inválido (não-finito, `w`/`h` <= 0) são rejeitados sem efeito.
+  `Window.viewport()` devolve o viewport local (origem em 0,0) para o
+  `Context` daquela janela. Demo `m100` no exemplo: sobreposição, clique
+  que traz para frente, janela escondida fora do hit-test, limite do array
+  fixo e remoção da ativa.
+
 ## [1.27.0] - 2026-10-17
 
 MINOR estável, 100% compatível: acrescenta **arrastar-e-soltar** (M97) ao

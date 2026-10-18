@@ -64,6 +64,7 @@ src/
 ├── timeline/      Timeline model (time↔pixel, ruler steps, tracks/keys)
 ├── inspector/     Property inspector model (values, row metrics, formatting)
 ├── dnd/           Drag-and-drop service (payload, targets, drop resolution)
+├── window/        Window registry (identity, z-order, focus, hit-test)
 ├── text/          UTF-8 metrics, wrapping, and text-edit helpers
 ├── anim/          Optional animation helpers
 ├── software/      Reference software rasterizer
@@ -166,6 +167,37 @@ framebuffer is erased. Currently wired: `button`, `checkbox`, `radio`,
 design: while hot, the widget is treated as changing and its own rect is
 repainted every frame, while the rest of the frame stays skipped. A widget
 that is no longer drawn is unknown to the context — mark its rect yourself.
+
+### Multi-window registry
+
+`WindowRegistry` is a pure, allocation-free model of the UI surfaces an
+application presents: identity, geometry in desktop space, stacking order
+(z-order) and focus. It owns no `Context` and draws nothing — it answers the
+questions a host would ask.
+
+```zig
+var reg: zyntra_ui.WindowRegistry = .{};
+try reg.add(main_id, zyntra_ui.Rect.init(0, 0, 800, 600));      // bottom
+try reg.add(dialog_id, zyntra_ui.Rect.init(200, 150, 320, 200)); // on top
+
+// Input: topmost visible surface under the cursor, raised and focused.
+const focused = reg.activateAt(cursor); // ?Id
+
+// Draw: bottom → top, one Context per surface.
+for (reg.order()) |w| {
+    const ctx = contextFor(w.id);
+    try ctx.setViewport(w.viewport()); // (0, 0, w, h)
+    // ... widgets ... then submit ctx.drawCommands()
+}
+
+// Coordinates: desktop ⇄ window-local.
+if (reg.toLocal(main_id, cursor)) |local| { /* ... */ }
+```
+
+`windows[0]` is the bottom window and the topmost one wins the hit-test
+(`windowAt`), skipping hidden surfaces. `add` does not activate anything, and
+hiding a window leaves focus untouched — policy stays with your host. The
+registry does not create OS windows; it organizes the surfaces you present.
 
 ## Examples and validation
 
