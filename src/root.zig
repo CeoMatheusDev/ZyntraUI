@@ -75,6 +75,8 @@ pub const window = struct {
     pub const registry = @import("window/registry.zig");
     pub const input = @import("window/input.zig");
     pub const compositor = @import("window/compositor.zig");
+    pub const decorations = @import("window/decorations.zig");
+    pub const interact = @import("window/interact.zig");
 };
 
 pub const widgets = struct {
@@ -275,6 +277,11 @@ pub const WindowRoute = window.input.Route;
 pub const WindowRouter = window.input.Router;
 pub const WindowCompositor = window.compositor.Compositor;
 pub const WindowCompositorError = window.compositor.CompositorError;
+pub const WindowDecorationStyle = window.decorations.Style;
+pub const WindowInteractor = window.interact.Interactor;
+pub const WindowInteractOptions = window.interact.Options;
+pub const WindowAction = window.interact.Action;
+pub const WindowInteractError = window.interact.InteractError;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -306,6 +313,8 @@ test {
     _ = @import("window/registry.zig");
     _ = @import("window/input.zig");
     _ = @import("window/compositor.zig");
+    _ = @import("window/decorations.zig");
+    _ = @import("window/interact.zig");
     _ = @import("dnd/service.zig");
     _ = @import("text/metrics.zig");
     _ = @import("text/wrap.zig");

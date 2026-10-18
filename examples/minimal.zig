@@ -1984,4 +1984,198 @@ pub fn main() !void {
             m102_idle.regions,
         },
     );
+
+    // Janelas interativas (M103): decorações (título/moldura/fechar) + máquina
+    // de arrasto transformam o mouse de DESKTOP em mutações do registro. O
+    // press na decoração é CONSUMIDO (não vai ao contexto da janela); a
+    // recomposição continua com o M102 (o dano é derivado da fotografia, então
+    // mover/redimensionar não redesenha nada).
+    const M103 = struct {
+        const deco: zyntra_ui.WindowDecorationStyle = .{}; // título 24, moldura 4, botão 16
+        const bg = zyntra_ui.Color.rgb(18, 18, 24);
+        const win_a = zyntra_ui.Color.rgb(34, 40, 52);
+        const title_a = zyntra_ui.Color.rgb(56, 68, 88);
+        const win_b = zyntra_ui.Color.rgb(52, 42, 44);
+        const title_b = zyntra_ui.Color.rgb(88, 58, 68);
+        const block = zyntra_ui.Color.rgb(120, 100, 40);
+
+        fn is(fb: *const zyntra_ui.SoftwareFramebuffer, x: f32, y: f32, c: zyntra_ui.Color) bool {
+            const p = fb.get(@intFromFloat(x), @intFromFloat(y));
+            return p[0] == c.r and p[1] == c.g and p[2] == c.b;
+        }
+
+        /// Um frame da janela: fundo + barra de título (+ bloco no cliente).
+        fn drawWindow(
+            alloc: std.mem.Allocator,
+            win_ctx: *zyntra_ui.Context,
+            windows: *const zyntra_ui.WindowRegistry,
+            wid: zyntra_ui.Id,
+            fill: zyntra_ui.Color,
+            title: zyntra_ui.Color,
+            block_rect: ?zyntra_ui.Rect,
+        ) !void {
+            const w = windows.get(wid).?;
+            try win_ctx.setViewport(w.viewport());
+            win_ctx.beginFrame();
+            try win_ctx.draw.clear(alloc, fill);
+            try win_ctx.draw.rectFilled(alloc, zyntra_ui.Rect.init(0, 0, w.bounds.w, @This().deco.title_height), title);
+            if (block_rect) |b| try win_ctx.draw.rectFilled(alloc, b, @This().block);
+            win_ctx.endFrame();
+        }
+    };
+
+    var m103_fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 220, 140);
+    defer m103_fb.deinit(allocator);
+    var m103_ctx_a = try zyntra_ui.Context.init(allocator, .{
+        .viewport = zyntra_ui.Rect.init(0, 0, 90, 80),
+    });
+    defer m103_ctx_a.deinit();
+    var m103_ctx_b = try zyntra_ui.Context.init(allocator, .{
+        .viewport = zyntra_ui.Rect.init(0, 0, 100, 70),
+    });
+    defer m103_ctx_b.deinit();
+    var m103_reg: zyntra_ui.WindowRegistry = .{};
+    var m103_router: zyntra_ui.WindowRouter = .{};
+    var m103_comp: zyntra_ui.WindowCompositor = .{};
+    defer m103_comp.deinit(allocator);
+    var m103_mgr: zyntra_ui.WindowInteractor = .{};
+    const m103_opts: zyntra_ui.WindowInteractOptions = .{
+        .bounds = zyntra_ui.Rect.init(0, 0, 220, 140), // o desktop
+    };
+    const m103_a = zyntra_ui.Id.fromString("examples/m103:a");
+    const m103_b = zyntra_ui.Id.fromString("examples/m103:b");
+    try m103_reg.add(m103_a, zyntra_ui.Rect.init(10, 10, 90, 80));
+    try m103_reg.add(m103_b, zyntra_ui.Rect.init(100, 40, 100, 70));
+    _ = m103_reg.bind(m103_a, &m103_ctx_a);
+    _ = m103_reg.bind(m103_b, &m103_ctx_b);
+    const m103_probe = zyntra_ui.Vec2.init(200, 100);
+
+    // Geometria pura das decorações (a mesma conta do arrasto e do desenho).
+    const m103_geo = zyntra_ui.Rect.init(10, 10, 100, 80);
+    const m103_close = zyntra_ui.window.decorations.closeButton(m103_geo, M103.deco);
+    const m103_hit_title = zyntra_ui.window.decorations.hit(m103_geo, M103.deco, .{ .x = 40, .y = 20 });
+    const m103_hit_close = zyntra_ui.window.decorations.hit(m103_geo, M103.deco, .{ .x = 96, .y = 22 });
+    const m103_hit_edge = zyntra_ui.window.decorations.hit(m103_geo, M103.deco, .{ .x = 108, .y = 50 });
+    const m103_hit_corner = zyntra_ui.window.decorations.hit(m103_geo, M103.deco, .{ .x = 109, .y = 11 });
+    const m103_hit_out = zyntra_ui.window.decorations.hit(m103_geo, M103.deco, .{ .x = 9, .y = 10 });
+
+    // Frame 1: um frame por janela + primeira composição.
+    try M103.drawWindow(allocator, &m103_ctx_a, &m103_reg, m103_a, M103.win_a, M103.title_a, null);
+    try M103.drawWindow(
+        allocator,
+        &m103_ctx_b,
+        &m103_reg,
+        m103_b,
+        M103.win_b,
+        M103.title_b,
+        zyntra_ui.Rect.init(10, 40, 30, 20),
+    );
+    const m103_first = try m103_comp.compose(allocator, &m103_fb, &m103_reg, .{ .background = M103.bg });
+    const m103_first_ok = M103.is(&m103_fb, 20, 20, M103.title_a) and
+        M103.is(&m103_fb, 150, 45, M103.title_b);
+
+    // Frame 2: arrastar a barra de título de B (150,50 está no título: o press
+    // é consumido pelo gerenciador e NÃO chega ao contexto da janela).
+    const m103_move_press = m103_mgr.press(&m103_reg, .{ .x = 150, .y = 50 }, M103.deco, m103_opts) == .move;
+    const m103_activated = m103_reg.activeId() == m103_b;
+    _ = try m103_mgr.update(&m103_reg, .{ .x = 160, .y = 58 }, m103_opts);
+    const m103_moved = try m103_comp.compose(allocator, &m103_fb, &m103_reg, .{ .background = M103.bg });
+    // Arrasto absurdo: o gerenciador trava nas bordas do desktop.
+    _ = try m103_mgr.update(&m103_reg, .{ .x = 400, .y = 400 }, m103_opts);
+    const m103_clamped = try m103_comp.compose(allocator, &m103_fb, &m103_reg, .{ .background = M103.bg });
+    const m103_after_move = m103_reg.get(m103_b).?.bounds;
+    const m103_clamp_ok = m103_after_move.x == 120 and m103_after_move.y == 70; // 220-100, 140-70
+    const m103_px_b = M103.is(&m103_fb, m103_probe.x, m103_probe.y, M103.win_b);
+    _ = m103_mgr.release();
+
+    // Frame 3: press no CLIENTE (170,110) → o host foca e roteia pelo M101
+    // (o evento chega em coordenadas LOCAIS).
+    const m103_client_press = m103_mgr.press(&m103_reg, .{ .x = 170, .y = 110 }, M103.deco, m103_opts) == .client;
+    _ = zyntra_ui.window.input.focusAt(&m103_reg, .{ .x = 170, .y = 110 });
+    _ = try zyntra_ui.window.input.pushButton(&m103_router, &m103_reg, .left, true, .{ .x = 170, .y = 110 });
+    _ = try zyntra_ui.window.input.pushButton(&m103_router, &m103_reg, .left, false, .{ .x = 170, .y = 110 });
+    const m103_routed = m103_ctx_b.pendingEvents().len;
+
+    // Frame 4: redimensionar pela moldura esquerda de B: cresce, estica até a
+    // borda do desktop e encolhe até o mínimo.
+    const m103_resize_press = m103_mgr.press(&m103_reg, .{ .x = 122, .y = 100 }, M103.deco, m103_opts) == .resize;
+    _ = try m103_mgr.update(&m103_reg, .{ .x = 82, .y = 100 }, m103_opts);
+    _ = try m103_comp.compose(allocator, &m103_fb, &m103_reg, .{ .background = M103.bg });
+    const m103_w_grown = m103_reg.get(m103_b).?.bounds.w; // 140 (direita fixa)
+    _ = try m103_mgr.update(&m103_reg, .{ .x = -500, .y = 100 }, m103_opts);
+    _ = try m103_comp.compose(allocator, &m103_fb, &m103_reg, .{ .background = M103.bg });
+    const m103_w_stretch = m103_reg.get(m103_b).?.bounds.w; // 220 (borda do desktop)
+    _ = try m103_mgr.update(&m103_reg, .{ .x = 200, .y = 100 }, m103_opts);
+    const m103_resized = try m103_comp.compose(allocator, &m103_fb, &m103_reg, .{ .background = M103.bg });
+    const m103_w_min = m103_reg.get(m103_b).?.bounds.w; // 48 (mínimo)
+    _ = m103_mgr.release();
+
+    // Frame 5: fechar — o gerenciador só classifica; esconder é do host.
+    const m103_close_rect = zyntra_ui.window.decorations.closeButton(
+        m103_reg.get(m103_b).?.bounds,
+        M103.deco,
+    );
+    const m103_close_press = m103_mgr.press(
+        &m103_reg,
+        .{ .x = m103_close_rect.x + 2, .y = m103_close_rect.y + 2 },
+        M103.deco,
+        m103_opts,
+    ) == .close;
+    _ = m103_reg.setVisible(m103_b, false);
+    const m103_hidden = try m103_comp.compose(allocator, &m103_fb, &m103_reg, .{ .background = M103.bg });
+    const m103_px_bg = M103.is(&m103_fb, m103_probe.x, m103_probe.y, M103.bg);
+
+    // Frame 6: ocioso.
+    const m103_idle = try m103_comp.compose(allocator, &m103_fb, &m103_reg, .{ .background = M103.bg });
+
+    std.debug.print(
+        "m103 deco title_h={d:.0} close={d:.0},{d:.0} {d:.0}x{d:.0} title={} close={} edge={} corner={} out={}\n",
+        .{
+            M103.deco.title_height,
+            m103_close.x,
+            m103_close.y,
+            m103_close.w,
+            m103_close.h,
+            m103_hit_title == .title,
+            m103_hit_close == .close,
+            m103_hit_edge == .resize and m103_hit_edge.resize.right,
+            m103_hit_corner == .resize and m103_hit_corner.resize.top and m103_hit_corner.resize.right,
+            m103_hit_out == .outside,
+        },
+    );
+    std.debug.print(
+        "m103 compose first={d}/{d}/{d} ok={} | drag move={} active={} bounds={d:.0},{d:.0} clamp={} px_b={} damaged={d}/{d} | client={} routed={d}\n",
+        .{
+            m103_first.damaged,
+            m103_first.windows,
+            m103_first.regions,
+            m103_first_ok,
+            m103_move_press,
+            m103_activated,
+            m103_after_move.x,
+            m103_after_move.y,
+            m103_clamp_ok,
+            m103_px_b,
+            m103_moved.damaged + m103_clamped.damaged,
+            m103_moved.regions + m103_clamped.regions,
+            m103_client_press,
+            m103_routed,
+        },
+    );
+    std.debug.print(
+        "m103 resize={} w={d:.0}->{d:.0}->{d:.0} damaged={d}/{d} | close={} hidden={d} px_bg={} | idle={d}/{d}\n",
+        .{
+            m103_resize_press,
+            m103_w_grown,
+            m103_w_stretch,
+            m103_w_min,
+            m103_resized.damaged,
+            m103_resized.regions,
+            m103_close_press,
+            m103_hidden.damaged,
+            m103_px_bg,
+            m103_idle.damaged,
+            m103_idle.regions,
+        },
+    );
 }

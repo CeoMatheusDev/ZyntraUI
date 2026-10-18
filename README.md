@@ -257,6 +257,52 @@ the background. First composition (or after `comp.reset()`) repaints the whole
 desktop, since the framebuffer content is unknown. Composition uses the
 reference rasterizer; the `Context`/`Registry`/framebuffer stay yours.
 
+#### Interactive windows
+
+`window.decorations` is the pure geometry of a window frame — title bar,
+resize border, close button, client area — plus the hit-test that classifies a
+desktop point. No drawing, no state; the same contract serves your renderer and
+the drag:
+
+```zig
+const deco: zyntra_ui.WindowDecorationStyle = .{}; // title 24, border 4, button 16
+const hit = zyntra_ui.window.decorations.hit(bounds, deco, cursor);
+switch (hit) {
+    .title, .close, .client => {},          // consumed / client: host routes it
+    .resize => |e| hostSetCursor(e.right),  // host: resize cursor feedback
+    .outside => {},
+}
+const bar = zyntra_ui.window.decorations.titleBar(bounds, deco); // draw it
+```
+
+`window.interact` turns routed desktop mouse input into registry mutations
+(`moved`/`resized` never accumulate rounding error: they always apply the total
+offset to the rect captured at press time). `WindowInteractor` holds the drag,
+so a decoration press does not need the input router's capture:
+
+```zig
+var mgr: zyntra_ui.WindowInteractor = .{};
+const opts: zyntra_ui.WindowInteractOptions = .{ .bounds = desktop }; // clamp + min size
+
+// Press decides who consumes it:
+switch (mgr.press(&reg, cursor, deco, opts)) {
+    .move, .resize, .close => {},                              // consumed
+    .client => { _ = zyntra_ui.window.input.focusAt(&reg, cursor); route(cursor); },
+    .none => {},
+}
+if (mgr.isDragging()) {
+    _ = try mgr.update(&reg, cursor, opts);   // geometry moves; compose sees damage
+} else routeMove(cursor);
+if (mgr.release()) |id| persistLayout(id);    // mgr.changed tells if it moved
+mgr.cancel();                                 // Esc: restore from mgr.origin
+```
+
+Pressing the title bar or the border raises and focuses the surface before the
+drag (`Options.activate`); pressing the client only focuses it. `.close` never
+touches the registry — hiding or removing is your policy. Moves and resizes are
+plain `setBounds` calls, so the compositor's snapshot damage already repaints
+the vacated and the new area.
+
 ## Examples and validation
 
 Run these commands from the repository root:

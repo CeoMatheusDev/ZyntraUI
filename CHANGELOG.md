@@ -57,6 +57,36 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   esconder/mostrar, subir (dano só na interseção) e um frame ocioso com
   `damaged=0`.
 
+- `window/decorations` + `window/interact`: **janelas interativas** (M103,
+  aditivo) — decorações (barra de título, moldura de redimensionar, botão de
+  fechar) e a máquina de arrasto que transforma mouse de DESKTOP em mutações
+  do registro. `window/decorations` é geometria PURA e sem estado:
+  `titleBar`/`closeButton`/`client` para desenhar e `hit(bounds, style, p)`
+  classificando `.title`/`.close`/`.resize` (cantos marcam duas bordas)/
+  `.client`/`.outside`, com prioridade moldura → botão → título → cliente;
+  a faixa da moldura é limitada a metade do lado (esquerda/direita e
+  topo/base nunca se sobrepõem) e o estilo é normalizado (finito e
+  não-negativo) antes de qualquer conta, então estilo estranho degrada em
+  geometria vazia (`Style.isValid` para o host validar). `moved`/`resized`
+  aplicam o arrasto com a borda oposta fixa, respeitando `min` e `bounds`
+  (janela maior que o limite encosta no topo/esquerda; com `bounds` menor que
+  `min`, `bounds` vence). `window/interact` traz `Interactor.press`
+  (classifica e já inicia o arrasto de mover/redimensionar),
+  `update` (aplica a posição atual — sempre a partir do rect do press, sem
+  acumular erro — e devolve se a geometria mudou), `release`/`cancel`
+  (`origin` é o ponto de restauração), `dragging`/`isDragging` e `changed`.
+  Política: press na decoração é CONSUMIDO pelo gerenciador (não precisa da
+  captura do `window/input` e não chega ao widget), press no cliente é
+  classificado (`.client`) para o host rotear; `Options.activate` ergue e foca
+  ao pegar título/moldura (cliente só foca) e `.close` não mexe no registro
+  (esconder/remover é decisão do host). Como o arrasto só chama `setBounds`,
+  o dano da recomposição continua por conta do `window/compositor` (M102).
+  Demo `m103` no exemplo: geometria/hit-test das decorações, arrasto do
+  título de B (press consumido, `activate`, trava nas bordas do desktop, o
+  dano repinta só o rastro), press no cliente roteado pelo M101 (chegando no
+  espaço local), redimensionar pela moldura (cresce, estica até a borda e
+  encolhe até o mínimo) e fechar escondendo a janela.
+
 ## [1.28.0] - 2026-10-17
 
 MINOR estável, 100% compatível: fecha a prioridade **#7** do roadmap
