@@ -5,6 +5,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.27.0] - 2026-10-17
+
+MINOR estável, 100% compatível: acrescenta **arrastar-e-soltar** (M97) ao
+bloco "ferramentas profissionais", sobre os modelos puros já lançados em
+1.26.0 (grafo de nós, linha de tempo e property inspector).
+
 ### Adicionado
 
 - `dnd/service` + `widgets/drag_ghost`: **arrastar-e-soltar** (M97,
