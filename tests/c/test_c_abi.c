@@ -748,6 +748,127 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 20-23: tree_view (M110) — árvore recursiva na fronteira C, com
+     * expansor clicável, `expanded` devolvido na árvore e checagem de pixel. */
+    ZyntraFramebuffer *tfb = NULL;
+    long long t_toggled = -1;
+    size_t t_sel = 0;
+    int t_changed = 0, t_expand_root = 0, t_expand_child = 0;
+    int t_px_sel = 0, t_px_exp = 0, t_px_text = 0;
+    {
+        _Static_assert(sizeof(ZyntraTreeItem) == 40, "ZyntraTreeItem ABI");
+        _Static_assert(sizeof(ZyntraTreeViewStyle) == 40, "ZyntraTreeViewStyle ABI");
+        _Static_assert(sizeof(ZyntraTreeViewResult) == 32, "ZyntraTreeViewResult ABI");
+
+        ZyntraTreeViewStyle tvs;
+        CHECK(zyntra_style_tree_view(ZYNTRA_THEME_DARK, &tvs));
+        assert(zyntra_style_tree_view(3, &tvs) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_tree_view(ZYNTRA_THEME_DARK, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(tvs.item_height == 24.0f && tvs.indent == 16.0f && tvs.expander_size == 12.0f);
+
+        /* src > (ui > widget.zig, app.zig), build.zig */
+        ZyntraTreeItem neto[1] = {{{"widget.zig", 10}, NULL, 0, false}};
+        ZyntraTreeItem filhos[2] = {
+            {{"ui", 2}, neto, 1, false},
+            {{"app.zig", 7}, NULL, 0, false},
+        };
+        ZyntraTreeItem raizes[2] = {
+            {{"src", 3}, filhos, 2, false},
+            {{"build.zig", 9}, NULL, 0, false},
+        };
+        const ZyntraId tid = zyntra_id_from_string("c:tree", 6);
+        assert(tid != 0);
+
+        ZyntraRect tree_bounds = {8, 8, 200, 128};
+        ZyntraTreeViewResult tvr;
+        ZyntraColor tpx = {0, 0, 0, 0};
+        ZyntraColor tbg = {24, 24, 28, 255};
+        size_t t_sel_local = 0;
+        float t_scroll = 0.0f;
+
+        CHECK(zyntra_framebuffer_create(240, 200, &tfb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 240, 200}));
+
+        /* Frame 20: frio — só as duas raízes visíveis. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){236, 196}));
+        CHECK(zyntra_draw_clear(ctx, tbg));
+        CHECK(zyntra_widget_tree_view(ctx, tid, tree_bounds, raizes, 2, &t_sel_local, &t_scroll, &tvs, &tvr));
+        assert(tvr.selected == 0 && tvr.toggled_index == -1 && !tvr.changed);
+        assert(!raizes[0].expanded && !filhos[0].expanded);
+        CHECK(zyntra_framebuffer_render(tfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(tfb, 100, 20, &tpx)); /* nó 0 selecionado */
+        t_px_sel = (tpx.r == tvs.bg_selected.r && tpx.b == tvs.bg_selected.b);
+        assert(t_px_sel);
+        CHECK(zyntra_framebuffer_pixel(tfb, 12, 12, &tpx)); /* expansor do nó 0 */
+        t_px_exp = (tpx.r == tvs.text_selected.r && tpx.g == tvs.text_selected.g);
+        assert(t_px_exp);
+        CHECK(zyntra_framebuffer_pixel(tfb, 100, 44, &tpx)); /* nó 1 sem expansor */
+        assert(tpx.r == tvs.bg.r);
+        CHECK(zyntra_framebuffer_pixel(tfb, 28, 32, &tpx)); /* sem nó em profundidade 1 */
+        assert(tpx.r == tvs.bg.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 21: clique no expansor do nó 0 — alterna e devolve `expanded`. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, tbg));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){12, 12}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){12, 12}));
+        CHECK(zyntra_widget_tree_view(ctx, tid, tree_bounds, raizes, 2, &t_sel_local, &t_scroll, &tvs, &tvr));
+        assert(tvr.toggled_index == 0 && raizes[0].expanded && tvr.selected == 0);
+        t_toggled = (long long)tvr.toggled_index;
+        t_expand_root = raizes[0].expanded;
+        CHECK(zyntra_framebuffer_render(tfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(tfb, 28, 32, &tpx)); /* expansor de "ui" (nó 1) */
+        t_px_text = (tpx.r == tvs.text.r && tpx.g == tvs.text.g);
+        assert(t_px_text);
+        CHECK(zyntra_framebuffer_pixel(tfb, 100, 44, &tpx));
+        assert(tpx.r == tvs.bg.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 22: clique no expansor de "ui" — alterna o nível aninhado. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){28, 32}));
+        CHECK(zyntra_widget_tree_view(ctx, tid, tree_bounds, raizes, 2, &t_sel_local, &t_scroll, &tvs, &tvr));
+        assert(tvr.toggled_index == 1 && filhos[0].expanded && raizes[0].expanded);
+        t_expand_child = filhos[0].expanded;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 23: clique no nó 4 ("build.zig", sem expansor) seleciona. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){100, 116}));
+        CHECK(zyntra_widget_tree_view(ctx, tid, tree_bounds, raizes, 2, &t_sel_local, &t_scroll, &tvs, &tvr));
+        assert(tvr.changed && tvr.selected == 4 && t_sel_local == 4 && tvr.toggled_index == -1);
+        t_changed = tvr.changed;
+        t_sel = t_sel_local;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Inválidos: vetores nulos, rótulo/filhos sem ponteiro, estados nulos
+         * e ciclo na árvore (cortado pela profundidade máxima). */
+        assert(zyntra_widget_tree_view(ctx, tid, tree_bounds, raizes, 0, &t_sel_local, &t_scroll, &tvs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_tree_view(ctx, tid, tree_bounds, NULL, 1, &t_sel_local, &t_scroll, &tvs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_tree_view(ctx, tid, tree_bounds, raizes, 2, NULL, &t_scroll, &tvs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_tree_view(ctx, tid, tree_bounds, raizes, 2, &t_sel_local, NULL, &tvs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_tree_view(ctx, tid, tree_bounds, raizes, 2, &t_sel_local, &t_scroll, NULL, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        {
+            ZyntraTreeItem sem_rotulo[1] = {{{NULL, 3}, NULL, 0, false}};
+            assert(zyntra_widget_tree_view(ctx, tid, tree_bounds, sem_rotulo, 1, &t_sel_local, &t_scroll, &tvs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        }
+        {
+            ZyntraTreeItem sem_filhos[1] = {{{"x", 1}, NULL, 2, false}};
+            assert(zyntra_widget_tree_view(ctx, tid, tree_bounds, sem_filhos, 1, &t_sel_local, &t_scroll, &tvs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        }
+        {
+            ZyntraTreeItem ciclo[1];
+            ciclo[0] = (ZyntraTreeItem){{"loop", 4}, ciclo, 1, false};
+            assert(zyntra_widget_tree_view(ctx, tid, tree_bounds, ciclo, 1, &t_sel_local, &t_scroll, &tvs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        }
+        assert(zyntra_widget_tree_view(NULL, tid, tree_bounds, raizes, 2, &t_sel_local, &t_scroll, &tvs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+        zyntra_framebuffer_destroy(tfb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -779,6 +900,10 @@ int main(void) {
         " px_menu=%d px_hover=%d px_sel=%d px_alt=%d\n",
         r_chosen, r_menu_hover, r_table_sel, r_changed, r_dismissed,
         r_px_menu, r_px_hover, r_px_sel, r_px_alt);
+    printf("C-ABI tree toggled=%lld sel=%zu changed=%d expand_root=%d expand_child=%d"
+        " px_sel=%d px_exp=%d px_text=%d\n",
+        t_toggled, t_sel, t_changed, t_expand_root, t_expand_child,
+        t_px_sel, t_px_exp, t_px_text);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

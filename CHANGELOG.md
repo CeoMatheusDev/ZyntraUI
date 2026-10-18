@@ -7,6 +7,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `c-abi`: **`zyntra_widget_tree_view`** (M110, aditivo) — a árvore
+  recursiva na fronteira C: `ZyntraTreeItem` (rótulo, filhos, `expanded`)
+  com estilo do tema via `zyntra_style_tree_view`. A árvore é do chamador e
+  **mutável**: o clique no expansor alterna `expanded` do nó exato e o
+  estado volta escrito na árvore; clique fora do expansor seleciona
+  (`changed`/`selected`) e `toggled_index` reporta o expansor clicado. A
+  conversão é recursiva com defesas (nós > 65536 ou profundidade > 128 —
+  inclusive ciclos — ⇒ `ZYNTRA_INVALID_ARGUMENT`), sem alocação para
+  árvores pequenas (scratch da pilha) e com o alocador do contexto acima
+  disso. O consumidor C ganhou os frames 20–23 (árvore fria, expansor da
+  raiz, expansor aninhado e seleção) com checagem de pixels e do estado
+  devolvido na árvore.
 - `c-abi`: **terceiro lote de widgets na fronteira C** (M109, aditivo) —
   estruturas planas: `zyntra_widget_menu` (rótulos e atalhos emprestados só
   na chamada, itens desabilitados, separadores, coluna de tique via

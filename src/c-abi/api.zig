@@ -37,6 +37,7 @@ const list_view_mod = @import("../widgets/list_view.zig");
 const panel_mod = @import("../widgets/panel.zig");
 const menu_mod = @import("../widgets/menu.zig");
 const table_mod = @import("../widgets/table.zig");
+const tree_mod = @import("../widgets/tree_view.zig");
 const ct = @import("types.zig");
 
 /// Handle opaco. O layout real (`Context`) nunca é exposto.
@@ -1007,6 +1008,97 @@ fn tableArgsOf(
     };
 }
 
+/// Limites defensivos da árvore convertida: cortam recursão infinita
+/// (ciclos vindos da fronteira C) e profundidade absurda.
+const tree_max_nodes: usize = 1 << 16;
+const tree_max_depth: usize = 128;
+
+/// Conta os nós da subárvore de `in` (recursivo, com limites).
+fn treeCount(in: [*]ct.ZyntraTreeItem, count: usize, depth: usize, total: *usize) error{InvalidArgument}!void {
+    if (depth > tree_max_depth) return error.InvalidArgument;
+    total.* = std.math.add(usize, total.*, count) catch return error.InvalidArgument;
+    if (total.* > tree_max_nodes) return error.InvalidArgument;
+    for (in[0..count]) |node| {
+        if (node.children_len > 0) {
+            const kids = node.children orelse return error.InvalidArgument;
+            try treeCount(kids, node.children_len, depth + 1, total);
+        }
+    }
+}
+
+/// Preenche `nodes` (árvore Zig) e `owners` (nós da árvore C, na mesma
+/// ordem): os filhos diretos de cada grupo ficam contíguos e as subárvores
+/// deles em seguida.
+fn treeFill(
+    nodes: []tree_mod.TreeItem,
+    owners: []*ct.ZyntraTreeItem,
+    in: [*]ct.ZyntraTreeItem,
+    count: usize,
+    at: *usize,
+) error{InvalidArgument}!void {
+    const base = at.*;
+    at.* = base + count;
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const node = &in[i];
+        const children = nodes[at.* .. at.* + node.children_len];
+        if (node.children_len > 0) {
+            const kids = node.children orelse return error.InvalidArgument;
+            try treeFill(nodes, owners, kids, node.children_len, at);
+        }
+        owners[base + i] = node;
+        nodes[base + i] = .{
+            .label = strOf(node.label) orelse return error.InvalidArgument,
+            .children = children,
+            .expanded = node.expanded,
+        };
+    }
+}
+
+/// Árvore convertida para os `TreeItem` da API Zig, com o mapa de nós
+/// originais para devolver `expanded` (única mutação do widget).
+const TreeArgs = struct {
+    items: []tree_mod.TreeItem = &.{},
+    owners: []*ct.ZyntraTreeItem = &.{},
+    buf_nodes: Buf(tree_mod.TreeItem) = .{},
+    buf_owners: Buf(*ct.ZyntraTreeItem) = .{},
+
+    fn deinit(self: TreeArgs) void {
+        self.buf_nodes.deinit();
+        self.buf_owners.deinit();
+    }
+
+    /// Escreve de volta na árvore do chamador o estado de expansão.
+    fn writeBack(self: TreeArgs) void {
+        for (self.owners, self.items) |owner, node| owner.expanded = node.expanded;
+    }
+};
+
+fn treeArgsOf(
+    allocator: std.mem.Allocator,
+    items: ?[*]ct.ZyntraTreeItem,
+    items_len: usize,
+    scratch_nodes: []tree_mod.TreeItem,
+    scratch_owners: []*ct.ZyntraTreeItem,
+) error{ InvalidArgument, OutOfMemory }!TreeArgs {
+    if (items_len == 0) return error.InvalidArgument;
+    const in = items orelse return error.InvalidArgument;
+    var total: usize = 0;
+    try treeCount(in, items_len, 0, &total);
+    var nodes_buf = try Buf(tree_mod.TreeItem).init(allocator, total, scratch_nodes);
+    errdefer nodes_buf.deinit();
+    var owners_buf = try Buf(*ct.ZyntraTreeItem).init(allocator, total, scratch_owners);
+    errdefer owners_buf.deinit();
+    var at: usize = 0;
+    try treeFill(nodes_buf.slice, owners_buf.slice, in, items_len, &at);
+    return .{
+        .items = nodes_buf.slice,
+        .owners = owners_buf.slice,
+        .buf_nodes = nodes_buf,
+        .buf_owners = owners_buf,
+    };
+}
+
 /// Índice opcional da API Zig -> `i64` do C (`-1` = nenhum).
 fn fromIndex(idx: ?usize) i64 {
     if (idx) |i| return @intCast(i);
@@ -1058,6 +1150,14 @@ pub export fn zyntra_style_table(kind: i32, out_style: ?*ct.ZyntraTableStyle) ca
     const out = out_style orelse return .invalid_argument;
     const t = themeOf(kind) orelse return .invalid_argument;
     out.* = t.tableStyle();
+    return .ok;
+}
+
+/// Estilo de árvore do tema embutido.
+pub export fn zyntra_style_tree_view(kind: i32, out_style: ?*ct.ZyntraTreeViewStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.treeViewStyle();
     return .ok;
 }
 
@@ -1303,6 +1403,52 @@ pub export fn zyntra_widget_table(
         .hovered_index = fromIndex(res.hovered_index),
         .scroll_offset = res.scroll_offset,
         .changed = res.changed,
+    };
+    return .ok;
+}
+
+/// Árvore: `items` é a árvore **do chamador** (rótulos emprestados só na
+/// chamada; `expanded` volta atualizado na própria árvore) e `selected`/
+/// `scroll_offset` pertencem ao chamador (clique, roda e teclado).
+pub export fn zyntra_widget_tree_view(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    items: ?[*]ct.ZyntraTreeItem,
+    items_len: usize,
+    selected: ?*usize,
+    scroll_offset: ?*f32,
+    style: ?*const ct.ZyntraTreeViewStyle,
+    out_result: ?*ct.ZyntraTreeViewResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const sel = selected orelse return .invalid_argument;
+    const scroll = scroll_offset orelse return .invalid_argument;
+    const ctx = toCtx(h);
+    var node_scratch: [64]tree_mod.TreeItem = undefined;
+    var owner_scratch: [64]*ct.ZyntraTreeItem = undefined;
+    const args = treeArgsOf(ctx.allocator, items, items_len, &node_scratch, &owner_scratch) catch |err| return mapWidgetErr(err);
+    defer args.deinit();
+    // O widget commita as expansões pendentes mesmo em caminhos de erro, logo
+    // o estado devolvido à árvore C é escrito antes de mapear o resultado.
+    const outcome = tree_mod.beginTreeView(
+        ctx,
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        args.items,
+        sel,
+        scroll,
+        st.*,
+    );
+    args.writeBack();
+    const res = outcome catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .selected = res.selected,
+        .hovered_index = fromIndex(res.hovered_index),
+        .scroll_offset = res.scroll_offset,
+        .changed = res.changed,
+        .toggled_index = fromIndex(res.toggled_index),
     };
     return .ok;
 }
@@ -2025,5 +2171,113 @@ test "C-ABI estruturas: menu e tabela" {
     var many_scroll: f32 = 0;
     try eq(ok, zyntra_widget_table(ctx_handle, id, table_bounds, &columns, columns.len, &many_rows, many_rows.len, &many_sel, &many_scroll, &ts, &tres));
     try stdt.testing.expect(many_sel == 64 and tres.selected == 64 and !tres.changed);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+}
+
+test "C-ABI árvore: tree_view com estado devolvido" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+
+    var tvs: ct.ZyntraTreeViewStyle = undefined;
+    try eq(ok, zyntra_style_tree_view(0, &tvs));
+    try eq(bad, zyntra_style_tree_view(9, &tvs));
+    try eq(bad, zyntra_style_tree_view(0, null));
+
+    var ctx_handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 240, .h = 200 }, &ctx_handle));
+    defer zyntra_context_destroy(ctx_handle);
+    var fb_handle: ?*ZyntraFramebuffer = null;
+    try eq(ok, zyntra_framebuffer_create(240, 200, &fb_handle));
+    defer zyntra_framebuffer_destroy(fb_handle);
+
+    const id = zyntra_id_from_string("c:tree", 6);
+    const bounds: ct.ZyntraRect = .{ .x = 8, .y = 8, .w = 200, .h = 128 };
+    // src > (ui > widget.zig, app.zig), build.zig
+    var neto = [_]ct.ZyntraTreeItem{.{ .label = .{ .ptr = "widget.zig", .len = 10 } }};
+    var filhos = [_]ct.ZyntraTreeItem{
+        .{ .label = .{ .ptr = "ui", .len = 2 }, .children = &neto, .children_len = 1 },
+        .{ .label = .{ .ptr = "app.zig", .len = 7 } },
+    };
+    var raizes = [_]ct.ZyntraTreeItem{
+        .{ .label = .{ .ptr = "src", .len = 3 }, .children = &filhos, .children_len = 2 },
+        .{ .label = .{ .ptr = "build.zig", .len = 9 } },
+    };
+    var res: ct.ZyntraTreeViewResult = .{};
+    var selected: usize = 0;
+    var scroll: f32 = 0;
+    var px: ct.ZyntraColor = .{};
+
+    // Frame frio: só as duas raízes visíveis (hash de opções).
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_draw_clear(ctx_handle, .{ .r = 24, .g = 24, .b = 28, .a = 255 }));
+    try eq(ok, zyntra_widget_tree_view(ctx_handle, id, bounds, &raizes, raizes.len, &selected, &scroll, &tvs, &res));
+    try stdt.testing.expect(res.selected == 0 and res.toggled_index == -1 and !res.changed);
+    try stdt.testing.expect(!raizes[0].expanded and !filhos[0].expanded);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, ctx_handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 100, 20, &px));
+    try eq(tvs.bg_selected.r, px.r); // nó 0 selecionado
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 12, 12, &px));
+    try eq(tvs.text_selected.r, px.r); // expansor do nó 0 (selecionado)
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 100, 44, &px));
+    try eq(tvs.bg.r, px.r); // nó 1 (sem expansor, não selecionado)
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 28, 32, &px));
+    try eq(tvs.bg.r, px.r); // ainda não há nó em profundidade 1
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Clique no expansor do nó 0: alterna e devolve `expanded` na árvore.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_draw_clear(ctx_handle, .{ .r = 24, .g = 24, .b = 28, .a = 255 }));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 12, .y = 12 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 12, .y = 12 }));
+    try eq(ok, zyntra_widget_tree_view(ctx_handle, id, bounds, &raizes, raizes.len, &selected, &scroll, &tvs, &res));
+    try stdt.testing.expect(res.toggled_index == 0 and raizes[0].expanded and res.selected == 0);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, ctx_handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 28, 32, &px));
+    try eq(tvs.text.r, px.r); // expansor do nó "ui" (profundidade 1)
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 100, 44, &px));
+    try eq(tvs.bg.r, px.r); // linha 1 = "ui", sem seleção
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Clique no expansor do nó "ui": alterna o filho (estado aninhado).
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 28, .y = 32 }));
+    try eq(ok, zyntra_widget_tree_view(ctx_handle, id, bounds, &raizes, raizes.len, &selected, &scroll, &tvs, &res));
+    try stdt.testing.expect(res.toggled_index == 1 and filhos[0].expanded and raizes[0].expanded);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Clique no nó 4 ("build.zig", sem expansor) seleciona.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 100, .y = 116 }));
+    try eq(ok, zyntra_widget_tree_view(ctx_handle, id, bounds, &raizes, raizes.len, &selected, &scroll, &tvs, &res));
+    try stdt.testing.expect(res.changed and res.selected == 4 and selected == 4 and res.toggled_index == -1);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Inválidos: vetores nulos, rótulo/filhos sem ponteiro, estados nulos e
+    // ciclo na árvore (corta pela profundidade máxima).
+    try eq(bad, zyntra_widget_tree_view(ctx_handle, id, bounds, &raizes, 0, &selected, &scroll, &tvs, null));
+    try eq(bad, zyntra_widget_tree_view(ctx_handle, id, bounds, null, 1, &selected, &scroll, &tvs, null));
+    try eq(bad, zyntra_widget_tree_view(ctx_handle, id, bounds, &raizes, raizes.len, null, &scroll, &tvs, null));
+    try eq(bad, zyntra_widget_tree_view(ctx_handle, id, bounds, &raizes, raizes.len, &selected, null, &tvs, null));
+    try eq(bad, zyntra_widget_tree_view(ctx_handle, id, bounds, &raizes, raizes.len, &selected, &scroll, null, null));
+    var broken_label = [_]ct.ZyntraTreeItem{.{ .label = .{ .ptr = null, .len = 3 } }};
+    try eq(bad, zyntra_widget_tree_view(ctx_handle, id, bounds, &broken_label, 1, &selected, &scroll, &tvs, null));
+    var broken_kids = [_]ct.ZyntraTreeItem{.{ .label = .{ .ptr = "x", .len = 1 }, .children_len = 2 }};
+    try eq(bad, zyntra_widget_tree_view(ctx_handle, id, bounds, &broken_kids, 1, &selected, &scroll, &tvs, null));
+    var ciclo: [1]ct.ZyntraTreeItem = undefined;
+    ciclo[0] = .{ .label = .{ .ptr = "loop", .len = 4 } };
+    ciclo[0].children = &ciclo;
+    ciclo[0].children_len = 1;
+    try eq(bad, zyntra_widget_tree_view(ctx_handle, id, bounds, &ciclo, 1, &selected, &scroll, &tvs, null));
+
+    // Árvore maior que o scratch da pilha (70 nós): caminho com alocação.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    var muitos: [70]ct.ZyntraTreeItem = undefined;
+    for (&muitos) |*n| n.* = .{ .label = .{ .ptr = "no", .len = 2 } };
+    var msel: usize = 0;
+    var mscroll: f32 = 0;
+    try eq(ok, zyntra_widget_tree_view(ctx_handle, id, bounds, &muitos, muitos.len, &msel, &mscroll, &tvs, &res));
+    try stdt.testing.expect(msel == 0 and res.selected == 0);
     try eq(ok, zyntra_context_end_frame(ctx_handle));
 }

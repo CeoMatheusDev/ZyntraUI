@@ -13,6 +13,7 @@
  * resultados (3/24/24/20).
  * M109: ZyntraMenuItem=40, ZyntraTableColumn=24, ZyntraTableRow=16,
  * estilos Menu=24/Table=48 e resultados Menu=24/Table=24.
+ * M110: ZyntraTreeItem=40, estilo TreeView=40 e resultado TreeView=32.
  */
 
 #include <stdbool.h>
@@ -484,6 +485,49 @@ ZyntraResult zyntra_widget_table(ZyntraContext *handle, ZyntraId id, ZyntraRect 
     const ZyntraTableColumn *columns, size_t columns_len, const ZyntraTableRow *rows,
     size_t rows_len, size_t *selected, float *scroll_offset, const ZyntraTableStyle *style,
     ZyntraTableResult *out_result);
+
+/* Árvore recursiva (M110): `children` aponta para a árvore DO CHAMADOR
+ * (mutável) porque `expanded` é o único estado que o widget altera e devolve
+ * escrito de volta na árvore; os rótulos são emprestados só na chamada. */
+
+typedef struct ZyntraTreeItem ZyntraTreeItem;
+
+struct ZyntraTreeItem {
+    ZyntraStr label;
+    ZyntraTreeItem *children;
+    size_t children_len;
+    bool expanded;
+};
+
+typedef struct ZyntraTreeViewStyle {
+    ZyntraColor bg;
+    ZyntraColor bg_selected;
+    ZyntraColor bg_hover;
+    ZyntraColor text;
+    ZyntraColor text_selected;
+    ZyntraColor border;
+    float border_width;
+    float item_height;
+    float indent;
+    float expander_size;
+} ZyntraTreeViewStyle;
+
+typedef struct ZyntraTreeViewResult {
+    size_t selected;
+    int64_t hovered_index;
+    float scroll_offset;
+    bool changed;
+    int64_t toggled_index;
+} ZyntraTreeViewResult;
+
+ZyntraResult zyntra_style_tree_view(int32_t theme_kind, ZyntraTreeViewStyle *out_style);
+
+/* `items` é a árvore do chamador (`expanded` volta atualizado); `selected` e
+ * `scroll_offset` pertencem ao chamador. Nós totais > 65536 ou profundidade
+ * > 128 (inclusive ciclos) ⇒ ZYNTRA_INVALID_ARGUMENT. */
+ZyntraResult zyntra_widget_tree_view(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    ZyntraTreeItem *items, size_t items_len, size_t *selected, float *scroll_offset,
+    const ZyntraTreeViewStyle *style, ZyntraTreeViewResult *out_result);
 
 #ifdef __cplusplus
 }

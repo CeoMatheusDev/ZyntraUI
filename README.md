@@ -334,9 +334,9 @@ widget surface is exposed as well: stable ids
 colors and per-widget styles (`zyntra_theme_colors`/`zyntra_style_*`), and
 `label`/`button`/`checkbox`/`switch`/`slider`/`progress`/`separator` plus
 the string-list widgets `radio`/`tab_bar`/`list_view`, the `panel`
-container and the flat-structure widgets `menu`/`table`, with their
-interaction results (click, toggle, selection, drag, collapse, menu choice)
-handed back to C. See
+container and the flat/recursive structures `menu`/`table`/`tree_view`,
+with their interaction results (click, toggle, selection, drag, collapse,
+menu choice, expander) handed back to C. See
 [`src/c-abi/zyntra.h`](src/c-abi/zyntra.h) and [`docs/C_ABI.md`](docs/C_ABI.md)
 for the exported interface and integration details.
 

@@ -124,6 +124,17 @@ pub const ZyntraTableRow = extern struct {
     cells_len: usize = 0,
 };
 
+/// Nó de árvore (espelha `tree_view.TreeItem`). `children` aponta para a
+/// árvore **do chamador** (mutável) porque `expanded` é o único estado que o
+/// widget altera e devolve escrito de volta na árvore; os rótulos são
+/// emprestados só durante a chamada.
+pub const ZyntraTreeItem = extern struct {
+    label: ZyntraStr = .{},
+    children: ?[*]ZyntraTreeItem = null,
+    children_len: usize = 0,
+    expanded: bool = false,
+};
+
 // Estilos: reexportados dos `extern struct` da API Zig — uma definição só,
 // com a trava de layout abaixo falhando o build se o backend mudar.
 pub const ZyntraButtonStyle = style_mod.ButtonStyle;
@@ -138,6 +149,7 @@ pub const ZyntraListViewStyle = style_mod.ListViewStyle;
 pub const ZyntraPanelStyle = style_mod.PanelStyle;
 pub const ZyntraMenuStyle = style_mod.MenuStyle;
 pub const ZyntraTableStyle = style_mod.TableStyle;
+pub const ZyntraTreeViewStyle = style_mod.TreeViewStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -219,6 +231,15 @@ pub const ZyntraTableResult = extern struct {
     changed: bool = false,
 };
 
+pub const ZyntraTreeViewResult = extern struct {
+    selected: usize = 0,
+    hovered_index: i64 = -1,
+    scroll_offset: f32 = 0,
+    changed: bool = false,
+    /// Nó cujo expansor foi clicado (-1 = nenhum).
+    toggled_index: i64 = -1,
+};
+
 // Trava de ABI: falhe o build se o layout mudar.
 comptime {
     if (@sizeOf(ZyntraResult) != @sizeOf(c_int)) @compileError("ZyntraResult ABI drift");
@@ -254,6 +275,9 @@ comptime {
     if (@sizeOf(ZyntraTableStyle) != 48 or @alignOf(ZyntraTableStyle) != 4) @compileError("ZyntraTableStyle ABI drift");
     if (@sizeOf(ZyntraMenuResult) != 24 or @alignOf(ZyntraMenuResult) != 8) @compileError("ZyntraMenuResult ABI drift");
     if (@sizeOf(ZyntraTableResult) != 24 or @alignOf(ZyntraTableResult) != 8) @compileError("ZyntraTableResult ABI drift");
+    if (@sizeOf(ZyntraTreeItem) != 40 or @alignOf(ZyntraTreeItem) != 8) @compileError("ZyntraTreeItem ABI drift");
+    if (@sizeOf(ZyntraTreeViewStyle) != 40 or @alignOf(ZyntraTreeViewStyle) != 4) @compileError("ZyntraTreeViewStyle ABI drift");
+    if (@sizeOf(ZyntraTreeViewResult) != 32 or @alignOf(ZyntraTreeViewResult) != 8) @compileError("ZyntraTreeViewResult ABI drift");
     if (@sizeOf(ZyntraVec2) != 8 or @alignOf(ZyntraVec2) != 4) @compileError("ZyntraVec2 ABI drift");
     if (@sizeOf(ZyntraSize) != 8 or @alignOf(ZyntraSize) != 4) @compileError("ZyntraSize ABI drift");
     if (@sizeOf(ZyntraRect) != 16 or @alignOf(ZyntraRect) != 4) @compileError("ZyntraRect ABI drift");
@@ -282,6 +306,9 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraMenuStyle));
     try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraTableStyle));
     try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraMenuResult));
+    try stdt.testing.expectEqual(@as(usize, 40), @sizeOf(ZyntraTreeItem));
+    try stdt.testing.expectEqual(@as(usize, 40), @sizeOf(ZyntraTreeViewStyle));
+    try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraTreeViewResult));
     try stdt.testing.expectEqual(@as(c_int, 0), @backingInt(ZyntraResult.ok));
     try stdt.testing.expectEqual(@as(i32, 0), @backingInt(ZyntraThemeKind.dark));
     try stdt.testing.expectEqual(@as(i32, 1), @backingInt(ZyntraThemeKind.light));

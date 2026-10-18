@@ -238,6 +238,43 @@ zyntra_widget_table(ctx, table_id, (ZyntraRect){8, 92, 280, 200}, cols, 2,
   itens de menu; 16 colunas, 64 linhas e 256 células na tabela); acima
   disso o alocador do contexto é usado e liberado no retorno.
 
+Quarto lote (M110): a árvore recursiva `tree_view`.
+
+```c
+ZyntraTreeViewStyle tvs;
+zyntra_style_tree_view(ZYNTRA_THEME_DARK, &tvs);
+
+/* A árvore é DO CHAMADOR e mutável: `expanded` é o estado que o widget
+ * altera e devolve escrito de volta nela. */
+ZyntraTreeItem neto[1] = {{{"widget.zig", 10}, NULL, 0, false}};
+ZyntraTreeItem filhos[2] = {
+    {{"ui", 2}, neto, 1, false},
+    {{"app.zig", 7}, NULL, 0, false},
+};
+ZyntraTreeItem raizes[2] = {
+    {{"src", 3}, filhos, 2, false},
+    {{"build.zig", 9}, NULL, 0, false},
+};
+size_t node = 0;
+float tree_scroll = 0.0f;
+ZyntraTreeViewResult tvr;
+zyntra_widget_tree_view(ctx, tree_id, (ZyntraRect){8, 8, 200, 256}, raizes, 2,
+    &node, &tree_scroll, &tvs, &tvr);   /* tvr.toggled_index = expansor clicado */
+```
+
+* Lote M110: `zyntra_widget_tree_view` com `ZyntraTreeViewStyle` via
+  `zyntra_style_tree_view` — nós com rótulo, filhos e `expanded`, seleção,
+  hover, rolagem e expansor clicável (`toggled_index`).
+* O clique no expansor alterna `expanded` **do nó exato** (sem ambiguidade
+  de profundidade) e o estado volta escrito na árvore do chamador; clique
+  fora do expansor seleciona o nó (`changed`/`selected`).
+* Defesas da conversão recursiva: `items_len == 0`, `children_len > 0` com
+  `children == NULL` ou rótulo nulo ⇒ `ZYNTRA_INVALID_ARGUMENT`; árvores
+  com mais de 65536 nós ou mais de 128 níveis (caso de ciclo) também são
+  recusadas, sem recursão infinita.
+* Nós pequenos usam scratch da pilha (64 nós + 64 ponteiros); acima disso o
+  alocador do contexto é usado e liberado no retorno.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -269,6 +306,8 @@ zyntra_widget_table(ctx, table_id, (ZyntraRect){8, 92, 280, 200}, cols, 2,
 * M109: também travados `ZyntraMenuItem=40`, `ZyntraTableColumn=24`,
   `ZyntraTableRow=16`, estilos (`Menu=24`, `Table=48`) e resultados
   (`Menu=24`, `Table=24`).
+* M110: também travados `ZyntraTreeItem=40`, estilo `TreeView=40` e
+  resultado `TreeView=32`.
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -289,5 +328,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..."
 ```
