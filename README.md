@@ -1,7 +1,9 @@
 <div align="center">
 
 # ZyntraUI
-Logotipo Z Futurista ZyntraUI.png
+    ZyntraUI
+
+[!/Logotipo Z Futurista ZyntraUI.png
 
 **Build interfaces with control. Render with freedom. Ship with Zig.**
 
