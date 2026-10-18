@@ -5,6 +5,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.28.0] - 2026-10-17
+
+MINOR estável, 100% compatível: fecha a prioridade **#7** do roadmap
+(dirty rect / arena por frame) com repintura parcial ponta a ponta —
+mecanismo no `Context`, entrada de repintura parcial no rasterizador de
+referência e controles que alimentam a região sozinhos — e abre a parte
+de **multi-janela** da prioridade **#6** (DnD/multi-janela, cujo
+arrastar-e-soltar saiu em 1.27.0) com o registro puro de janelas. Tudo
+aditivo: nenhuma assinatura existente mudou, e o caminho integral de
+render (`software.raster.render`) segue idêntico em pixels, semântica e
+estatísticas.
+
 ### Adicionado
 
 - `core/types` + `core/context` + `software/raster`: **dirty rect por
