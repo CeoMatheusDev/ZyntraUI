@@ -73,6 +73,7 @@ pub const timeline = struct {
 
 pub const window = struct {
     pub const registry = @import("window/registry.zig");
+    pub const input = @import("window/input.zig");
 };
 
 pub const widgets = struct {
@@ -269,6 +270,8 @@ pub const DragGhostResult = widgets.drag_ghost.DragGhostResult;
 pub const Window = window.registry.Window;
 pub const WindowRegistry = window.registry.Registry;
 pub const WindowError = window.registry.WindowError;
+pub const WindowRoute = window.input.Route;
+pub const WindowRouter = window.input.Router;
 
 pub const version_major = core.types.version_major;
 pub const version_minor = core.types.version_minor;
@@ -298,6 +301,7 @@ test {
     _ = @import("timeline/view.zig");
     _ = @import("inspector/view.zig");
     _ = @import("window/registry.zig");
+    _ = @import("window/input.zig");
     _ = @import("dnd/service.zig");
     _ = @import("text/metrics.zig");
     _ = @import("text/wrap.zig");

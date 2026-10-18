@@ -1712,4 +1712,94 @@ pub fn main() !void {
             mw_left,
         },
     );
+
+    // Roteamento multi-janela (M101): cada janela vincula o `Context` que
+    // a desenha/processa e o host entrega os eventos no espaço LOCAL da
+    // janela certa. A em (0,0,120,60) e B em (80,30,120,60) — B por cima
+    // — mais D em (160,0,40,40) SEM contexto (nunca recebe nada).
+    var wr_reg: zyntra_ui.WindowRegistry = .{};
+    var wr_router: zyntra_ui.WindowRouter = .{};
+    var wr_ctx_a = try zyntra_ui.Context.init(allocator, .{
+        .viewport = zyntra_ui.Rect.init(0, 0, 120, 60),
+    });
+    defer wr_ctx_a.deinit();
+    var wr_ctx_b = try zyntra_ui.Context.init(allocator, .{
+        .viewport = zyntra_ui.Rect.init(0, 0, 120, 60),
+    });
+    defer wr_ctx_b.deinit();
+    const wr_a_id = zyntra_ui.Id.fromString("examples/m101:a");
+    const wr_b_id = zyntra_ui.Id.fromString("examples/m101:b");
+    const wr_d_id = zyntra_ui.Id.fromString("examples/m101:d");
+    try wr_reg.add(wr_a_id, zyntra_ui.Rect.init(0, 0, 120, 60));
+    try wr_reg.add(wr_b_id, zyntra_ui.Rect.init(80, 30, 120, 60));
+    try wr_reg.add(wr_d_id, zyntra_ui.Rect.init(160, 0, 40, 40));
+    _ = wr_reg.bind(wr_a_id, &wr_ctx_a);
+    _ = wr_reg.bind(wr_b_id, &wr_ctx_b);
+
+    // Press na sobreposição: o host sobe/foca a janela sob o cursor
+    // (`focusAt`) e roteia o press para ela — B recebe já em coordenadas
+    // LOCAIS (20,10).
+    const wr_focus = zyntra_ui.window.input.focusAt(&wr_reg, .{ .x = 100, .y = 40 });
+    const wr_focus_b = wr_focus != null and wr_focus.? == wr_b_id;
+    const wr_press = try zyntra_ui.window.input.pushButton(
+        &wr_router,
+        &wr_reg,
+        .left,
+        true,
+        .{ .x = 100, .y = 40 },
+    );
+    const wr_cap_b = wr_router.isCapturing() and wr_router.press_window.? == wr_b_id;
+
+    // Arraste para fora de B (região só de A): a captura no nível de
+    // janela mantém tudo em B, com coordenadas locais negativas — é o que
+    // mantém um arraste de widget vivo ao sair dos bounds.
+    _ = try zyntra_ui.window.input.pushMouseMove(&wr_router, &wr_reg, .{ .x = 10, .y = 10 });
+    const wr_drag_local = wr_ctx_b.mouse_pos orelse zyntra_ui.Vec2.init(0, 0);
+    // Release fora de B: continua indo para a captura, que se encerra.
+    const wr_release = try zyntra_ui.window.input.pushButton(
+        &wr_router,
+        &wr_reg,
+        .left,
+        false,
+        .{ .x = 10, .y = 10 },
+    );
+
+    // Sem captura, roda e movimento seguem o CURSOR: sobre A, vão para A.
+    const wr_wheel_a = try zyntra_ui.window.input.pushWheel(&wr_reg, 0, 3, .{ .x = 20, .y = 20 });
+    const wr_move_a = try zyntra_ui.window.input.pushMouseMove(
+        &wr_router,
+        &wr_reg,
+        .{ .x = 20, .y = 20 },
+    );
+    const wr_a_space = wr_ctx_a.mouse_pos orelse zyntra_ui.Vec2.init(0, 0);
+    // Sobre D (topo, sem contexto) nada é entregue: a janela do topo manda.
+    const wr_top_no_ctx = !(try zyntra_ui.window.input.pushMouseMove(
+        &wr_router,
+        &wr_reg,
+        .{ .x = 170, .y = 20 },
+    ));
+
+    // Teclado vai para a janela ATIVA (B, focada no press).
+    const wr_key_b = try zyntra_ui.window.input.pushKey(&wr_reg, .enter, true, .{});
+
+    std.debug.print(
+        "m101 route focus_b={} press={} cap_b={} release={} drag_local={d:.1},{d:.1} a_space={d:.1},{d:.1} wheel_a={} move_a={} top_no_ctx={} key_b={} a_events={d} b_events={d} capture={}\n",
+        .{
+            wr_focus_b,
+            wr_press,
+            wr_cap_b,
+            wr_release,
+            wr_drag_local.x,
+            wr_drag_local.y,
+            wr_a_space.x,
+            wr_a_space.y,
+            wr_wheel_a,
+            wr_move_a,
+            wr_top_no_ctx,
+            wr_key_b,
+            wr_ctx_a.pendingEvents().len,
+            wr_ctx_b.pendingEvents().len,
+            wr_router.isCapturing(),
+        },
+    );
 }

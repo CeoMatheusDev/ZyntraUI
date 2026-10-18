@@ -2,9 +2,15 @@
 //!
 //! Modelo M100 (multi-janela): a lista de janelas de uma aplicação —
 //! identidade estável, geometria no espaço do desktop, ordem de
-//! empilhamento (z-order) e janela ativa — **puro**: sem `Context`, sem
-//! alocação e sem backend. O chamador é dono do registro
-//! (`var reg: WindowRegistry = .{}`), como em `dock/layout`.
+//! empilhamento (z-order) e janela ativa — sem alocação e sem backend. O
+//! chamador é dono do registro (`var reg: WindowRegistry = .{}`), como em
+//! `dock/layout`.
+//!
+//! Desde M101 cada janela pode vincular (OPCIONAL, `bind`) o `Context`
+//! que a desenha e processa: o vínculo é só um ponteiro EMPRESTADO — o
+//! registro não é dono, não aloca e não entrega eventos (quem entrega é
+//! `window/input`). Janela sem vínculo continua válida: identidade,
+//! geometria, ordem e hit-test funcionam sem contexto nenhum.
 //!
 //! Papel na arquitetura: uma janela do sistema operacional continua
 //! sendo responsabilidade do host; o registro organiza as *superfícies*
@@ -33,10 +39,12 @@
 const std = @import("std");
 const types = @import("../core/types.zig");
 const id_mod = @import("../core/id.zig");
+const context_mod = @import("../core/context.zig");
 
 pub const Vec2 = types.Vec2;
 pub const Rect = types.Rect;
 pub const Id = id_mod.Id;
+pub const Context = context_mod.Context;
 
 /// Erros do registro de janelas.
 pub const WindowError = error{
@@ -65,6 +73,11 @@ pub const Window = struct {
     bounds: Rect,
     /// Participa do hit-test (`windowAt`) e da ordem de desenho.
     visible: bool = true,
+    /// `Context` da janela (M101; emprestado, `null` = sem vínculo). O
+    /// registro NÃO é dono: o chamador mantém o contexto vivo e num
+    /// endereço estável enquanto o vínculo durar, e desvincula
+    /// (`unbind`) antes de destruí-lo. Ver `Registry.bind`.
+    context: ?*Context = null,
 
     pub fn isValid(self: Window) bool {
         return !self.id.isNull() and isBoundsValid(self.bounds);
@@ -232,10 +245,37 @@ pub const Registry = struct {
         return null;
     }
 
-    /// Esvazia o registro (o foco volta a ninguém).
+    /// Esvazia o registro (o foco volta a ninguém). Os vínculos com
+    /// `Context` são esquecidos — os contextos seguem sendo do chamador.
     pub fn clear(self: *Registry) void {
         self.len = 0;
         self.active = null;
+    }
+
+    /// Vincula `ctx` (EMPRESTADO) à janela `wid`; `false` se a janela não
+    /// existe. O registro só guarda o ponteiro: `ctx` deve continuar vivo
+    /// e num endereço estável enquanto o vínculo durar. `remove`/`clear`
+    /// esquecem o vínculo das janelas que saem. Vincular não altera
+    /// geometria, ordem nem foco.
+    pub fn bind(self: *Registry, wid: Id, ctx: *Context) bool {
+        const i = self.indexOf(wid) orelse return false;
+        self.windows[i].context = ctx;
+        return true;
+    }
+
+    /// Desfaz o vínculo da janela (ela continua registrada, apenas sem
+    /// contexto). `false` se a janela não existe.
+    pub fn unbind(self: *Registry, wid: Id) bool {
+        const i = self.indexOf(wid) orelse return false;
+        self.windows[i].context = null;
+        return true;
+    }
+
+    /// `Context` vinculado a `wid` (`null` = janela ausente ou sem
+    /// vínculo).
+    pub fn contextOf(self: *const Registry, wid: Id) ?*Context {
+        const w = self.get(wid) orelse return null;
+        return w.context;
     }
 
     /// Converte `p` (espaço do desktop) para o espaço local de `wid`.
@@ -493,4 +533,49 @@ test "window: limite de janelas e reuso após clear" {
     try testing.expect(!reg.isFull());
     try reg.add(Id.fromU64(1000), Rect.init(0, 0, 10, 10));
     try testing.expectEqual(Id.fromU64(1000), reg.windowAt(Vec2.init(5, 5)).?);
+}
+
+test "window: bind vincula Context emprestado e remove/clear esquecem" {
+    const allocator = testing.allocator;
+    var ctx_a = try Context.init(allocator, .{ .viewport = Rect.init(0, 0, 100, 80) });
+    defer ctx_a.deinit();
+    var ctx_b = try Context.init(allocator, .{ .viewport = Rect.init(0, 0, 100, 80) });
+    defer ctx_b.deinit();
+
+    var reg: Registry = .{};
+    const a = winId("win:bind:a");
+    const b = winId("win:bind:b");
+    // Janela ausente: nada a vincular.
+    try testing.expect(!reg.bind(a, &ctx_a));
+    try reg.add(a, Rect.init(0, 0, 100, 80));
+    try reg.add(b, Rect.init(0, 0, 100, 80));
+    try testing.expect(reg.contextOf(a) == null); // sem vínculo até `bind`
+    try testing.expect(reg.bind(a, &ctx_a));
+    try testing.expect(reg.bind(b, &ctx_b));
+    try testing.expect(reg.contextOf(a).? == &ctx_a);
+    try testing.expect(reg.contextOf(b).? == &ctx_b);
+    try testing.expect(reg.contextOf(winId("win:bind:missing")) == null);
+    try testing.expect(reg.contextOf(.null) == null);
+
+    // O vínculo anda com a janela (reordenação/movimento não o perdem) e
+    // não interfere em geometria, ordem ou hit-test.
+    try testing.expect(reg.raise(a));
+    try testing.expect(reg.contextOf(a).? == &ctx_a);
+    reg.setBounds(a, Rect.init(10, 10, 50, 50)) catch unreachable;
+    try testing.expect(reg.contextOf(a).? == &ctx_a);
+    try testing.expectEqual(a, reg.windowAt(Vec2.init(20, 20)).?);
+
+    // Desvincular não remove a janela.
+    try testing.expect(reg.unbind(a));
+    try testing.expect(reg.contextOf(a) == null);
+    try testing.expect(reg.indexOf(a) != null);
+    try testing.expect(!reg.unbind(winId("win:bind:missing")));
+
+    // Remover a janela esquece o vínculo; `clear` esquece todos.
+    try testing.expect(reg.bind(a, &ctx_a));
+    try testing.expect(reg.remove(a));
+    try testing.expect(reg.contextOf(a) == null);
+    try testing.expect(reg.contextOf(b).? == &ctx_b);
+    reg.clear();
+    try testing.expect(reg.contextOf(b) == null);
 }

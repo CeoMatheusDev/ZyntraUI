@@ -199,6 +199,38 @@ if (reg.toLocal(main_id, cursor)) |local| { /* ... */ }
 hiding a window leaves focus untouched — policy stays with your host. The
 registry does not create OS windows; it organizes the surfaces you present.
 
+#### Input routing
+
+Bind each surface's `Context` once (`reg.bind(id, &ctx)`) and route events with
+`window.input`. The positions you pass in are desktop-space; the events queued
+in the context carry window-local coordinates.
+
+```zig
+var router: zyntra_ui.WindowRouter = .{};
+
+// Press: raise + focus the surface under the cursor, then route it.
+_ = zyntra_ui.window.input.focusAt(&reg, cursor);
+if (try zyntra_ui.window.input.pushButton(&router, &reg, .left, true, cursor)) {
+    // the surface under the cursor now captures the drag
+}
+// Moves keep going to the capturing surface even outside its bounds (local
+// coordinates may be negative) — that is what keeps a widget drag alive.
+_ = try zyntra_ui.window.input.pushMouseMove(&router, &reg, cursor);
+// The release ends the capture (and without a capture it is dropped).
+_ = try zyntra_ui.window.input.pushButton(&router, &reg, .left, false, cursor);
+
+// The wheel follows the cursor; the keyboard goes to the active surface.
+_ = try zyntra_ui.window.input.pushWheel(&reg, 0, dy, cursor);
+_ = try zyntra_ui.window.input.pushKey(&reg, key, pressed, modifiers);
+```
+
+The topmost visible surface wins the hit-test, so a surface without a bound
+context receives nothing (events do not fall through to the ones below).
+Switching the active surface clears the outgoing surface's widget focus
+(`focusWindow`), so a text input does not stay "focused" without receiving
+keys. Repaint composition across overlapping windows (cached per-window
+buffers plus damage tracking) is still the host's job.
+
 ## Examples and validation
 
 Run these commands from the repository root:

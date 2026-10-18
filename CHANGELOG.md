@@ -5,6 +5,33 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `window/input` + `window/registry`: **roteamento de input multi-janela**
+  (M101, aditivo) — liga cada janela ao `Context` que a processa
+  (`Registry.bind`/`unbind`/`contextOf`, vínculo OPCIONAL e emprestado: o
+  registro só guarda o ponteiro, não aloca e não entrega nada; `remove` e
+  `clear` esquecem o vínculo das janelas que saem) e entrega os eventos no
+  espaço LOCAL da janela certa. `window/input` traz `Route` (janela +
+  contexto + posição local), `Router` (captura de press no nível de
+  janela, com `press_window`/`isCapturing`/`clearCapture`), `targetAt` e
+  `routeAt` (destino efetivo), os empurradores `pushMouseMove`,
+  `pushButton` e `pushWheel`, o teclado com `focusedContext`, `pushKey` e
+  `pushText`, além de `focusWindow`/`focusAt` (sobe + ativa + limpa o foco
+  de widget da janela que sai). Regras:
+  posições de entrada no espaço do desktop e eventos entregues em
+  coordenadas locais; sem press capturado o evento vai para a janela
+  VISÍVEL do topo com contexto (topo sem contexto descarta — não
+  atravessa para as de baixo); com captura vai para a janela que recebeu o
+  press MESMO fora dela (locais negativos: é o que mantém um arraste de
+  widget vivo ao sair dos bounds); a roda segue o cursor e o teclado vai
+  para a janela ATIVA; release sem captura é descartado e captura órfã
+  (janela removida no meio do arraste) descarta até o release/`clearCapture`.
+  Nada de `focus`/`resize` sintéticos. Demo `m101` no exemplo: press na
+  sobreposição focando e capturando B, arraste para fora com locais
+  negativos, release na captura, roda/movimento seguindo o cursor e
+  teclado na janela ativa.
+
 ## [1.28.0] - 2026-10-17
 
 MINOR estável, 100% compatível: fecha a prioridade **#7** do roadmap
