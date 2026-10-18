@@ -2,9 +2,6 @@
 
 # ZyntraUI
 
-
-/Logotipo Z Futurista ZyntraUI.png
-
 **Build interfaces with control. Render with freedom. Ship with Zig.**
 
 A lightweight, immediate-mode GUI toolkit written in Zig, built around explicit state ownership, deterministic draw commands, and a renderer-independent architecture.
@@ -21,7 +18,7 @@ A lightweight, immediate-mode GUI toolkit written in Zig, built around explicit 
 
 ## Overview
 
-**ZyntraUI** is a modular GUI toolkit for developers who want to own their application state and rendering pipeline. Its Zig-native core processes normalized input events and produces a backend-ne[...]
+**ZyntraUI** is a modular GUI toolkit for developers who want to own their application state and rendering pipeline. Its Zig-native core processes normalized input events and produces a backend-neutral sequence of draw commands for the host application's renderer.
 
 Rather than tying UI logic to a window system or GPU API, ZyntraUI keeps those concerns separate. You choose how to supply events, manage widget state, and render each frame.
 
