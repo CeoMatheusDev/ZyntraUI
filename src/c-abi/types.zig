@@ -83,6 +83,23 @@ pub const ZyntraOrientation = enum(c_int) {
 /// Métricas de texto (reexporta o `extern struct` da API Zig).
 pub const ZyntraTextMetrics = metrics_mod.TextMetrics;
 
+/// Fatia de texto emprestada (ptr + len, tamanho fixo): os bytes valem só
+/// durante a chamada que a recebe (os widgets copiam para a `DrawList`).
+/// `len == 0` aceita `ptr == NULL` (fatia vazia).
+pub const ZyntraStr = extern struct {
+    ptr: ?[*]const u8 = null,
+    len: usize = 0,
+};
+
+/// Opções do painel (espelha `panel.PanelOptions`).
+pub const ZyntraPanelOptions = extern struct {
+    title: ZyntraStr = .{},
+    /// Desenha o chevron e permite colapsar (mouse + teclado).
+    collapsible: bool = true,
+    /// Desenha o `×` e reporta `close_requested`.
+    closable: bool = false,
+};
+
 // Estilos: reexportados dos `extern struct` da API Zig — uma definição só,
 // com a trava de layout abaixo falhando o build se o backend mudar.
 pub const ZyntraButtonStyle = style_mod.ButtonStyle;
@@ -91,6 +108,10 @@ pub const ZyntraSwitchStyle = style_mod.SwitchStyle;
 pub const ZyntraSliderStyle = style_mod.SliderStyle;
 pub const ZyntraProgressStyle = style_mod.ProgressStyle;
 pub const ZyntraSeparatorStyle = style_mod.SeparatorStyle;
+pub const ZyntraRadioStyle = style_mod.RadioStyle;
+pub const ZyntraTabBarStyle = style_mod.TabBarStyle;
+pub const ZyntraListViewStyle = style_mod.ListViewStyle;
+pub const ZyntraPanelStyle = style_mod.PanelStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -125,6 +146,37 @@ pub const ZyntraSliderResult = extern struct {
     dragging: bool = false,
 };
 
+pub const ZyntraRadioResult = extern struct {
+    changed: bool = false,
+    hovered: bool = false,
+    focused: bool = false,
+};
+
+/// Índices opcionais usam `i64` com `-1` = nenhum (evita um `bool` extra por
+/// índice e casa com o `?usize` da API Zig).
+pub const ZyntraTabBarResult = extern struct {
+    changed: bool = false,
+    focused: bool = false,
+    hovered_index: i64 = -1,
+    active: usize = 0,
+};
+
+pub const ZyntraListViewResult = extern struct {
+    selected: usize = 0,
+    hovered_index: i64 = -1,
+    scroll_offset: f32 = 0,
+    changed: bool = false,
+};
+
+pub const ZyntraPanelResult = extern struct {
+    /// Área útil para o conteúdo (zerada quando colapsado).
+    content: ZyntraRect = .{},
+    collapsed: bool = false,
+    toggled: bool = false,
+    close_requested: bool = false,
+    hovered: bool = false,
+};
+
 // Trava de ABI: falhe o build se o layout mudar.
 comptime {
     if (@sizeOf(ZyntraResult) != @sizeOf(c_int)) @compileError("ZyntraResult ABI drift");
@@ -143,6 +195,16 @@ comptime {
     if (@sizeOf(ZyntraCheckboxResult) != 3 or @alignOf(ZyntraCheckboxResult) != 1) @compileError("ZyntraCheckboxResult ABI drift");
     if (@sizeOf(ZyntraSwitchResult) != 4 or @alignOf(ZyntraSwitchResult) != 1) @compileError("ZyntraSwitchResult ABI drift");
     if (@sizeOf(ZyntraSliderResult) != 8 or @alignOf(ZyntraSliderResult) != 4) @compileError("ZyntraSliderResult ABI drift");
+    if (@sizeOf(ZyntraStr) != 16 or @alignOf(ZyntraStr) != 8) @compileError("ZyntraStr ABI drift");
+    if (@sizeOf(ZyntraPanelOptions) != 24 or @alignOf(ZyntraPanelOptions) != 8) @compileError("ZyntraPanelOptions ABI drift");
+    if (@sizeOf(ZyntraRadioStyle) != 20 or @alignOf(ZyntraRadioStyle) != 4) @compileError("ZyntraRadioStyle ABI drift");
+    if (@sizeOf(ZyntraTabBarStyle) != 36 or @alignOf(ZyntraTabBarStyle) != 4) @compileError("ZyntraTabBarStyle ABI drift");
+    if (@sizeOf(ZyntraListViewStyle) != 36 or @alignOf(ZyntraListViewStyle) != 4) @compileError("ZyntraListViewStyle ABI drift");
+    if (@sizeOf(ZyntraPanelStyle) != 48 or @alignOf(ZyntraPanelStyle) != 4) @compileError("ZyntraPanelStyle ABI drift");
+    if (@sizeOf(ZyntraRadioResult) != 3 or @alignOf(ZyntraRadioResult) != 1) @compileError("ZyntraRadioResult ABI drift");
+    if (@sizeOf(ZyntraTabBarResult) != 24 or @alignOf(ZyntraTabBarResult) != 8) @compileError("ZyntraTabBarResult ABI drift");
+    if (@sizeOf(ZyntraListViewResult) != 24 or @alignOf(ZyntraListViewResult) != 8) @compileError("ZyntraListViewResult ABI drift");
+    if (@sizeOf(ZyntraPanelResult) != 20 or @alignOf(ZyntraPanelResult) != 4) @compileError("ZyntraPanelResult ABI drift");
     if (@sizeOf(ZyntraVec2) != 8 or @alignOf(ZyntraVec2) != 4) @compileError("ZyntraVec2 ABI drift");
     if (@sizeOf(ZyntraSize) != 8 or @alignOf(ZyntraSize) != 4) @compileError("ZyntraSize ABI drift");
     if (@sizeOf(ZyntraRect) != 16 or @alignOf(ZyntraRect) != 4) @compileError("ZyntraRect ABI drift");
@@ -160,6 +222,11 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraButtonStyle));
     try stdt.testing.expectEqual(@as(usize, 3), @sizeOf(ZyntraButtonResult));
     try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraLabelResult));
+    try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraStr));
+    try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraPanelOptions));
+    try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraRadioStyle));
+    try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraPanelStyle));
+    try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraTabBarResult));
     try stdt.testing.expectEqual(@as(c_int, 0), @backingInt(ZyntraResult.ok));
     try stdt.testing.expectEqual(@as(i32, 0), @backingInt(ZyntraThemeKind.dark));
     try stdt.testing.expectEqual(@as(i32, 1), @backingInt(ZyntraThemeKind.light));

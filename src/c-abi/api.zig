@@ -9,8 +9,9 @@
 //! - Todos os ponteiros de saída devem ser não-nulos; ponteiros nulos
 //!   retornam `invalid_argument` sem tocar memória.
 //! - Handles nulos retornam `invalid_argument` (destroy é null-safe).
-//! - Slices/strings Zig NUNCA cruzam a fronteira (M5 só trafega tipos
-//!   de tamanho fixo; strings virão com text-runs em M6).
+//! - Slices/strings Zig NUNCA cruzam a fronteira: listas de texto vão como
+//!   `ZyntraStr` (ptr + len, tamanho fixo) emprestados só na chamada, que os
+//!   widgets copiam para a `DrawList`.
 //! Threading: um handle, uma thread por vez (sem lock interno).
 //!
 //! Símbolos exportados com ABI C estável (`export ... callconv(.c)`).
@@ -30,6 +31,10 @@ const switch_mod = @import("../widgets/switch.zig");
 const slider_mod = @import("../widgets/slider.zig");
 const progress_mod = @import("../widgets/progress.zig");
 const separator_mod = @import("../widgets/separator.zig");
+const radio_mod = @import("../widgets/radio.zig");
+const tab_bar_mod = @import("../widgets/tab_bar.zig");
+const list_view_mod = @import("../widgets/list_view.zig");
+const panel_mod = @import("../widgets/panel.zig");
 const ct = @import("types.zig");
 
 /// Handle opaco. O layout real (`Context`) nunca é exposto.
@@ -834,6 +839,241 @@ pub export fn zyntra_widget_separator(
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Widgets com listas de strings e painel (M108)
+// ---------------------------------------------------------------------------
+
+/// Tamanho de fonte dos widgets que não recebem `size` do chamador (o mesmo
+/// da API Zig: abas e itens de lista usam `withSize(10)`).
+const widget_font_size: f32 = 10;
+
+/// Fatia de texto emprestada -> `[]const u8` (`len == 0` aceita `ptr` nulo).
+/// `null` = ponteiro nulo com `len > 0` (`invalid_argument`).
+fn strOf(s: ct.ZyntraStr) ?[]const u8 {
+    if (s.len == 0) return &.{};
+    const p = s.ptr orelse return null;
+    return p[0..s.len];
+}
+
+/// Lista de `ZyntraStr` convertida para as fatias Zig que os widgets
+/// esperam. O caminho comum não aloca (scratch na pilha do chamador); listas
+/// maiores usam o alocador do contexto e são liberadas no `deinit`.
+const StrList = struct {
+    items: []const []const u8 = &.{},
+    owned: ?[][]const u8 = null,
+
+    fn deinit(self: StrList, allocator: std.mem.Allocator) void {
+        if (self.owned) |buf| allocator.free(buf);
+    }
+};
+
+fn strListOf(
+    allocator: std.mem.Allocator,
+    src: ?[*]const ct.ZyntraStr,
+    count: usize,
+    scratch: [][]const u8,
+) error{ InvalidArgument, OutOfMemory }!StrList {
+    if (count == 0) return .{};
+    const in = src orelse return error.InvalidArgument;
+    var owned: ?[][]const u8 = null;
+    const dst: [][]const u8 = if (count <= scratch.len) scratch[0..count] else blk: {
+        const buf = try allocator.alloc([]const u8, count);
+        owned = buf;
+        break :blk buf;
+    };
+    errdefer if (owned) |buf| allocator.free(buf);
+    for (dst, 0..) |*slot, i| {
+        slot.* = strOf(in[i]) orelse return error.InvalidArgument;
+    }
+    return .{ .items = dst, .owned = owned };
+}
+
+/// Índice opcional da API Zig -> `i64` do C (`-1` = nenhum).
+fn fromIndex(idx: ?usize) i64 {
+    if (idx) |i| return @intCast(i);
+    return -1;
+}
+
+/// Estilo de radio do tema embutido.
+pub export fn zyntra_style_radio(kind: i32, out_style: ?*ct.ZyntraRadioStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.radioStyle();
+    return .ok;
+}
+
+/// Estilo de barra de abas do tema embutido.
+pub export fn zyntra_style_tab_bar(kind: i32, out_style: ?*ct.ZyntraTabBarStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.tabBarStyle();
+    return .ok;
+}
+
+/// Estilo de lista do tema embutido.
+pub export fn zyntra_style_list_view(kind: i32, out_style: ?*ct.ZyntraListViewStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.listViewStyle();
+    return .ok;
+}
+
+/// Estilo de painel do tema embutido.
+pub export fn zyntra_style_panel(kind: i32, out_style: ?*ct.ZyntraPanelStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.panelStyle();
+    return .ok;
+}
+
+/// Grupo de opções exclusivas: `options` é uma lista de `ZyntraStr`
+/// (emprestada só na chamada) e `selected` pertence ao chamador (o widget lê
+/// e altera no clique/setas). `size` é a fonte do rótulo.
+pub export fn zyntra_widget_radio(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    options: ?[*]const ct.ZyntraStr,
+    options_len: usize,
+    selected: ?*usize,
+    size: f32,
+    style: ?*const ct.ZyntraRadioStyle,
+    out_result: ?*ct.ZyntraRadioResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const sel = selected orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    const ctx = toCtx(h);
+    var scratch: [64][]const u8 = undefined;
+    const list = strListOf(ctx.allocator, options, options_len, &scratch) catch |err| return mapWidgetErr(err);
+    defer list.deinit(ctx.allocator);
+    const res = radio_mod.radio(
+        ctx,
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        list.items,
+        sel,
+        metrics_mod.FontMetrics.withSize(size),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{ .changed = res.changed, .hovered = res.hovered, .focused = res.focused };
+    return .ok;
+}
+
+/// Barra de abas: `tabs` é a lista de rótulos (lista de `ZyntraStr`) e
+/// `active` pertence ao chamador (o widget lê e altera no clique/setas).
+pub export fn zyntra_widget_tab_bar(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    tabs: ?[*]const ct.ZyntraStr,
+    tabs_len: usize,
+    active: ?*usize,
+    style: ?*const ct.ZyntraTabBarStyle,
+    out_result: ?*ct.ZyntraTabBarResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const act = active orelse return .invalid_argument;
+    const ctx = toCtx(h);
+    var scratch: [64][]const u8 = undefined;
+    const list = strListOf(ctx.allocator, tabs, tabs_len, &scratch) catch |err| return mapWidgetErr(err);
+    defer list.deinit(ctx.allocator);
+    const res = tab_bar_mod.beginTabBar(
+        ctx,
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        list.items,
+        act,
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .changed = res.changed,
+        .focused = res.focused,
+        .hovered_index = fromIndex(res.hovered_index),
+        .active = res.active,
+    };
+    return .ok;
+}
+
+/// Lista de itens: `items` é a lista de rótulos (lista de `ZyntraStr`);
+/// `selected` e `scroll_offset` pertencem ao chamador (o widget lê e altera
+/// no clique, roda e teclado).
+pub export fn zyntra_widget_list_view(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    items: ?[*]const ct.ZyntraStr,
+    items_len: usize,
+    selected: ?*usize,
+    scroll_offset: ?*f32,
+    style: ?*const ct.ZyntraListViewStyle,
+    out_result: ?*ct.ZyntraListViewResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const sel = selected orelse return .invalid_argument;
+    const scroll = scroll_offset orelse return .invalid_argument;
+    const ctx = toCtx(h);
+    var scratch: [64][]const u8 = undefined;
+    const list = strListOf(ctx.allocator, items, items_len, &scratch) catch |err| return mapWidgetErr(err);
+    defer list.deinit(ctx.allocator);
+    const res = list_view_mod.beginListView(
+        ctx,
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        list.items,
+        sel,
+        scroll,
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .selected = res.selected,
+        .changed = res.changed,
+        .hovered_index = fromIndex(res.hovered_index),
+        .scroll_offset = res.scroll_offset,
+    };
+    return .ok;
+}
+
+/// Painel com cabeçalho: `collapsed` pertence ao chamador (o widget alterna
+/// no chevron/tecla). `options.title` é emprestado só na chamada; `size` é a
+/// fonte do título.
+pub export fn zyntra_widget_panel(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    collapsed: ?*bool,
+    options: ct.ZyntraPanelOptions,
+    size: f32,
+    style: ?*const ct.ZyntraPanelStyle,
+    out_result: ?*ct.ZyntraPanelResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const coll = collapsed orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    const title = strOf(options.title) orelse return .invalid_argument;
+    const res = panel_mod.panel(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        coll,
+        .{ .title = title, .collapsible = options.collapsible, .closable = options.closable },
+        metrics_mod.FontMetrics.withSize(size),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .content = .{ .x = res.content.x, .y = res.content.y, .w = res.content.w, .h = res.content.h },
+        .collapsed = res.collapsed,
+        .toggled = res.toggled,
+        .close_requested = res.close_requested,
+        .hovered = res.hovered,
+    };
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -1266,5 +1506,149 @@ test "C-ABI widgets: ids, estilos do tema e primeiro lote desenhado" {
     try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, false, .{ .x = 24, .y = 12 }));
     try eq(ok, zyntra_widget_button(ctx_handle, id, bounds, &bs, &btn_res));
     try stdt.testing.expect(btn_res.clicked);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+}
+
+test "C-ABI listas: abas, lista, radio e painel" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+
+    // Estilos do tema (tamanhos travados em types.zig).
+    var rs: ct.ZyntraRadioStyle = undefined;
+    var tbs: ct.ZyntraTabBarStyle = undefined;
+    var lvs: ct.ZyntraListViewStyle = undefined;
+    var pans: ct.ZyntraPanelStyle = undefined;
+    try eq(ok, zyntra_style_radio(0, &rs));
+    try eq(ok, zyntra_style_tab_bar(0, &tbs));
+    try eq(ok, zyntra_style_list_view(0, &lvs));
+    try eq(ok, zyntra_style_panel(0, &pans));
+    try eq(bad, zyntra_style_radio(5, &rs));
+    try eq(bad, zyntra_style_panel(0, null));
+    lvs.item_height = 20; // linhas previsíveis para os pixels abaixo
+
+    var ctx_handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 160, .h = 160 }, &ctx_handle));
+    defer zyntra_context_destroy(ctx_handle);
+    var fb_handle: ?*ZyntraFramebuffer = null;
+    try eq(ok, zyntra_framebuffer_create(160, 160, &fb_handle));
+    defer zyntra_framebuffer_destroy(fb_handle);
+
+    const id = zyntra_id_from_string("c:lists", 7);
+    const tabs = [_]ct.ZyntraStr{ .{ .ptr = "A", .len = 1 }, .{ .ptr = "BB", .len = 2 } };
+    const items = [_]ct.ZyntraStr{
+        .{ .ptr = "a", .len = 1 },
+        .{ .ptr = "b", .len = 1 },
+        .{ .ptr = "c", .len = 1 },
+    };
+    const opts = [_]ct.ZyntraStr{
+        .{ .ptr = "x", .len = 1 },
+        .{ .ptr = "y", .len = 1 },
+        .{ .ptr = "z", .len = 1 },
+    };
+    const panel_title: ct.ZyntraPanelOptions = .{ .title = .{ .ptr = "P", .len = 1 } };
+    const tab_bounds: ct.ZyntraRect = .{ .x = 0, .y = 0, .w = 160, .h = 24 };
+    const list_bounds: ct.ZyntraRect = .{ .x = 0, .y = 28, .w = 80, .h = 60 };
+    const radio_bounds: ct.ZyntraRect = .{ .x = 84, .y = 28, .w = 76, .h = 60 };
+    const panel_bounds: ct.ZyntraRect = .{ .x = 0, .y = 92, .w = 160, .h = 60 };
+    var tbres: ct.ZyntraTabBarResult = .{};
+    var lvres: ct.ZyntraListViewResult = .{};
+    var rares: ct.ZyntraRadioResult = .{};
+    var panres: ct.ZyntraPanelResult = .{};
+    var active: usize = 0;
+    var selected: usize = 0;
+    var radio_sel: usize = 0;
+    var scroll: f32 = 0;
+    var collapsed = false;
+    var px: ct.ZyntraColor = .{};
+
+    // Frame frio: um de cada, rasterizado (sem mouse sobre nenhum).
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 0, .y = 159 }));
+    try eq(ok, zyntra_draw_clear(ctx_handle, .{ .r = 24, .g = 24, .b = 28, .a = 255 }));
+    try eq(ok, zyntra_widget_tab_bar(ctx_handle, id, tab_bounds, &tabs, tabs.len, &active, &tbs, &tbres));
+    try stdt.testing.expect(!tbres.changed and tbres.active == 0 and tbres.hovered_index == -1);
+    try eq(ok, zyntra_widget_list_view(ctx_handle, id, list_bounds, &items, items.len, &selected, &scroll, &lvs, &lvres));
+    try stdt.testing.expect(lvres.selected == 0 and lvres.hovered_index == -1 and lvres.scroll_offset == 0);
+    try eq(ok, zyntra_widget_radio(ctx_handle, id, radio_bounds, &opts, opts.len, &radio_sel, 10, &rs, &rares));
+    try stdt.testing.expect(!rares.changed and radio_sel == 0);
+    try eq(ok, zyntra_widget_panel(ctx_handle, id, panel_bounds, &collapsed, panel_title, 10, &pans, &panres));
+    try stdt.testing.expect(!panres.collapsed and !panres.toggled and panres.content.w > 0);
+
+    // Inválidos: listas nulas, ptr nulo com len > 0, estados nulos, size.
+    try eq(bad, zyntra_widget_tab_bar(ctx_handle, id, tab_bounds, null, 2, &active, &tbs, null));
+    try eq(bad, zyntra_widget_list_view(ctx_handle, id, list_bounds, null, 1, &selected, &scroll, &lvs, null));
+    const broken = [_]ct.ZyntraStr{.{ .ptr = null, .len = 3 }};
+    try eq(bad, zyntra_widget_radio(ctx_handle, id, radio_bounds, &broken, 1, &radio_sel, 10, &rs, null));
+    try eq(bad, zyntra_widget_radio(ctx_handle, id, radio_bounds, &opts, opts.len, null, 10, &rs, null));
+    try eq(bad, zyntra_widget_radio(ctx_handle, id, radio_bounds, &opts, opts.len, &radio_sel, 0, &rs, null));
+    try eq(bad, zyntra_widget_list_view(ctx_handle, id, list_bounds, &items, items.len, &selected, null, &lvs, null));
+    try eq(bad, zyntra_widget_tab_bar(ctx_handle, id, tab_bounds, &tabs, tabs.len, &active, null, null));
+    try eq(bad, zyntra_widget_panel(ctx_handle, id, panel_bounds, null, panel_title, 10, &pans, null));
+    try eq(bad, zyntra_widget_panel(ctx_handle, id, panel_bounds, &collapsed, .{}, 0, &pans, null));
+    try eq(bad, zyntra_widget_panel(null, id, panel_bounds, &collapsed, panel_title, 10, &pans, null));
+
+    // Pixels: aba ativa/inativa, linha selecionada/normal, ponto do radio e
+    // cabeçalho/corpo do painel.
+    try eq(ok, zyntra_framebuffer_render(fb_handle, ctx_handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 15, 12, &px));
+    try eq(tbs.bg_active.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 48, 12, &px));
+    try eq(tbs.bg.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 38, &px));
+    try eq(lvs.bg_selected.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 58, &px));
+    try eq(lvs.bg.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 95, 37, &px));
+    try eq(rs.dot.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 95, 56, &px));
+    try eq(rs.box.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 96, &px));
+    try eq(pans.header_bg.r, px.r);
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 130, &px));
+    try eq(pans.bg.r, px.r);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Clique na aba 1 (x = 30..66 com advance 6 e padding_x 12).
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 48, .y = 12 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 48, .y = 12 }));
+    try eq(ok, zyntra_widget_tab_bar(ctx_handle, id, tab_bounds, &tabs, tabs.len, &active, &tbs, &tbres));
+    try stdt.testing.expect(tbres.changed and tbres.active == 1 and active == 1);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Clique na linha 2 da lista.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 20, .y = 78 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 20, .y = 78 }));
+    try eq(ok, zyntra_widget_list_view(ctx_handle, id, list_bounds, &items, items.len, &selected, &scroll, &lvs, &lvres));
+    try stdt.testing.expect(lvres.changed and lvres.selected == 2 and selected == 2);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Press na opção 1 do radio (seleção é one-shot no press).
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 95, .y = 56 }));
+    try eq(ok, zyntra_widget_radio(ctx_handle, id, radio_bounds, &opts, opts.len, &radio_sel, 10, &rs, &rares));
+    try stdt.testing.expect(rares.changed and radio_sel == 1);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Painel: press + release no chevron (canto superior direito) colapsa.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 143, .y = 103 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 143, .y = 103 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, false, .{ .x = 143, .y = 103 }));
+    try eq(ok, zyntra_widget_panel(ctx_handle, id, panel_bounds, &collapsed, panel_title, 10, &pans, &panres));
+    try stdt.testing.expect(collapsed and panres.toggled and panres.content.w == 0);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Lista maior que o scratch da pilha: caminho com alocação do contexto.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    var big: [70]ct.ZyntraStr = undefined;
+    for (&big) |*s| s.* = .{ .ptr = "op", .len = 2 };
+    var big_sel: usize = 69;
+    var big_res: ct.ZyntraRadioResult = .{};
+    try eq(ok, zyntra_widget_radio(ctx_handle, id, radio_bounds, &big, big.len, &big_sel, 10, &rs, &big_res));
+    try stdt.testing.expect(big_sel == 69 and !big_res.changed);
     try eq(ok, zyntra_context_end_frame(ctx_handle));
 }

@@ -5,6 +5,22 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `c-abi`: **segundo lote de widgets na fronteira C** (M108, aditivo) —
+  listas de rótulos trafegam como vetor de `ZyntraStr` (`ptr` + `len`,
+  emprestado só na chamada) e índices opcionais voltam como `int64_t` com
+  `-1` = nenhum. Quatro widgets: `zyntra_widget_radio` (grupo exclusivo),
+  `zyntra_widget_tab_bar` (abas), `zyntra_widget_list_view` (lista com
+  seleção, hover e rolagem) e `zyntra_widget_panel` (cabeçalho, colapso
+  pelo chevron e `close_requested`), com estilos do tema via
+  `zyntra_style_radio`/`_tab_bar`/`_list_view`/`_panel` (reexportando os
+  `extern struct` da API Zig, layout travado por `_Static_assert`/
+  `@compileError`). `selected`/`active`/`scroll_offset`/`collapsed` são do
+  chamador (o widget lê e altera). O consumidor C `tests/c/test_c_abi.c`
+  ganhou os frames 10–14 (abas, lista, radio e painel frios + clique na
+  aba, na linha, na opção e no chevron) com checagem de pixels.
+
 ## [1.31.0] - 2026-10-18
 
 MINOR estável, 100% compatível: o item #1 do roadmap (superfície C) ganha

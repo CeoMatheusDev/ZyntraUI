@@ -9,6 +9,8 @@
  * M107: tamanhos travados também para ZyntraId=8, ZyntraThemeColors=20,
  * ZyntraTextMetrics=16, estilos (24/24/28/32/16/12) e resultados
  * (20/3/3/4/8).
+ * M108: ZyntraStr=16, ZyntraPanelOptions=24, estilos (20/36/36/48) e
+ * resultados (3/24/24/20).
  */
 
 #include <stdbool.h>
@@ -289,6 +291,119 @@ ZyntraResult zyntra_widget_progress(ZyntraContext *handle, ZyntraRect bounds, fl
     const ZyntraProgressStyle *style);
 ZyntraResult zyntra_widget_separator(ZyntraContext *handle, ZyntraRect bounds,
     int32_t orientation, const ZyntraSeparatorStyle *style);
+
+/* Listas de rótulos e painel (M108). Listas trafegam como `ZyntraStr`
+ * (ptr + len, emprestados só durante a chamada — os widgets copiam o texto
+ * para a DrawList); índices opcionais vêm como `int64_t` com -1 = nenhum. */
+
+typedef struct ZyntraStr {
+    const char *ptr;
+    size_t len;
+} ZyntraStr;
+
+typedef struct ZyntraPanelOptions {
+    ZyntraStr title;
+    bool collapsible;
+    bool closable;
+} ZyntraPanelOptions;
+
+typedef struct ZyntraRadioStyle {
+    ZyntraColor box;
+    ZyntraColor dot;
+    ZyntraColor text;
+    float border_width;
+    float radio_r;
+} ZyntraRadioStyle;
+
+typedef struct ZyntraTabBarStyle {
+    ZyntraColor bg;
+    ZyntraColor bg_active;
+    ZyntraColor bg_hover;
+    ZyntraColor text;
+    ZyntraColor text_active;
+    ZyntraColor border;
+    float border_width;
+    float padding_x;
+    float padding_y;
+} ZyntraTabBarStyle;
+
+typedef struct ZyntraListViewStyle {
+    ZyntraColor bg;
+    ZyntraColor bg_selected;
+    ZyntraColor bg_hover;
+    ZyntraColor text;
+    ZyntraColor text_selected;
+    ZyntraColor border;
+    float border_width;
+    float item_height;
+    float padding_x;
+} ZyntraListViewStyle;
+
+typedef struct ZyntraPanelStyle {
+    ZyntraColor bg;
+    ZyntraColor header_bg;
+    ZyntraColor border;
+    float border_width;
+    ZyntraColor title;
+    ZyntraColor control;
+    ZyntraColor control_hover;
+    ZyntraColor separator;
+    float header_pad;
+    float padding_x;
+    float padding_y;
+    float control_size;
+} ZyntraPanelStyle;
+
+typedef struct ZyntraRadioResult {
+    bool changed;
+    bool hovered;
+    bool focused;
+} ZyntraRadioResult;
+
+typedef struct ZyntraTabBarResult {
+    bool changed;
+    bool focused;
+    int64_t hovered_index;
+    size_t active;
+} ZyntraTabBarResult;
+
+typedef struct ZyntraListViewResult {
+    size_t selected;
+    int64_t hovered_index;
+    float scroll_offset;
+    bool changed;
+} ZyntraListViewResult;
+
+typedef struct ZyntraPanelResult {
+    ZyntraRect content;
+    bool collapsed;
+    bool toggled;
+    bool close_requested;
+    bool hovered;
+} ZyntraPanelResult;
+
+ZyntraResult zyntra_style_radio(int32_t theme_kind, ZyntraRadioStyle *out_style);
+ZyntraResult zyntra_style_tab_bar(int32_t theme_kind, ZyntraTabBarStyle *out_style);
+ZyntraResult zyntra_style_list_view(int32_t theme_kind, ZyntraListViewStyle *out_style);
+ZyntraResult zyntra_style_panel(int32_t theme_kind, ZyntraPanelStyle *out_style);
+
+/* `options`/`tabs`/`items` são vetores de `ZyntraStr` (len > 0 com ptr NULL
+ * ⇒ ZYNTRA_INVALID_ARGUMENT; len 0 é string vazia válida). `selected`/
+ * `active`/`scroll_offset`/`collapsed` pertencem ao chamador: o widget lê e
+ * altera. `size` é a fonte do texto (radio/painel); abas e itens de lista
+ * usam a fonte padrão dos widgets (10). */
+ZyntraResult zyntra_widget_radio(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    const ZyntraStr *options, size_t options_len, size_t *selected, float size,
+    const ZyntraRadioStyle *style, ZyntraRadioResult *out_result);
+ZyntraResult zyntra_widget_tab_bar(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    const ZyntraStr *tabs, size_t tabs_len, size_t *active, const ZyntraTabBarStyle *style,
+    ZyntraTabBarResult *out_result);
+ZyntraResult zyntra_widget_list_view(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    const ZyntraStr *items, size_t items_len, size_t *selected, float *scroll_offset,
+    const ZyntraListViewStyle *style, ZyntraListViewResult *out_result);
+ZyntraResult zyntra_widget_panel(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    bool *collapsed, ZyntraPanelOptions options, float size, const ZyntraPanelStyle *style,
+    ZyntraPanelResult *out_result);
 
 #ifdef __cplusplus
 }

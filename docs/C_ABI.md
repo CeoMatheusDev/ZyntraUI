@@ -149,6 +149,53 @@ zyntra_context_end_frame(ctx);
   `ZYNTRA_INVALID_TEXT`.
 * `utf8` é emprestado só durante a chamada (a `DrawList` copia).
 
+Segundo lote (M108): widgets com listas de rótulos e painel. Listas
+trafegam como vetor de `ZyntraStr` (`ptr` + `len`), emprestado só durante a
+chamada; índices opcionais voltam como `int64_t` com `-1` = nenhum.
+
+```c
+ZyntraTabBarStyle tbs;
+zyntra_style_tab_bar(ZYNTRA_THEME_DARK, &tbs);
+ZyntraListViewStyle lvs;
+zyntra_style_list_view(ZYNTRA_THEME_DARK, &lvs);
+ZyntraRadioStyle rs;
+zyntra_style_radio(ZYNTRA_THEME_DARK, &rs);
+ZyntraPanelStyle pans;
+zyntra_style_panel(ZYNTRA_THEME_DARK, &pans);
+lvs.item_height = 24.0f;   /* estilo é reutilizável: ajuste antes de desenhar */
+
+const ZyntraStr tabs[2] = {{"Arquivo", 7}, {"Editar", 6}};
+size_t active = 0;
+ZyntraTabBarResult tbres;
+
+/* rótulos emprestados só na chamada; `selected`/`active`/`scroll_offset`/
+ * `collapsed` pertencem ao chamador (o widget lê e altera) */
+zyntra_widget_tab_bar(ctx, tab_id, (ZyntraRect){0, 0, 320, 28}, tabs, 2,
+    &active, &tbs, &tbres);
+zyntra_widget_radio(ctx, radio_id, (ZyntraRect){0, 32, 160, 72},
+    options, option_count, &selected, 14.0f, &rs, &rres);
+zyntra_widget_list_view(ctx, list_id, (ZyntraRect){0, 108, 160, 200},
+    items, item_count, &row, &scroll, &lvs, &lres);
+zyntra_widget_panel(ctx, panel_id, (ZyntraRect){168, 32, 160, 276},
+    &collapsed, (ZyntraPanelOptions){{"Inspetor", 8}, true, false}, 14.0f,
+    &pans, &pres);   /* pres.content = área útil do corpo */
+```
+
+* Lote M108: `zyntra_widget_radio`, `_tab_bar`, `_list_view`, `_panel`
+  (estilos `ZyntraRadioStyle`/`ZyntraTabBarStyle`/`ZyntraListViewStyle`/
+  `ZyntraPanelStyle` via `zyntra_style_*`).
+* `ZyntraStr` com `len > 0` e `ptr == NULL` ⇒ `ZYNTRA_INVALID_ARGUMENT`;
+  `len == 0` é string vazia válida (aceita `ptr` NULL). Vetor com `len == 0`
+  (ou NULL) é lista vazia, que os widgets rejeitam conforme a API Zig
+  (`radio`/`tab_bar`/`list_view` exigem ao menos um item).
+* `size` (radio/painel) é a fonte do texto; abas e itens de lista usam a
+  fonte padrão dos widgets (10) — use `zyntra_text_measure` para prever as
+  larguras das abas.
+* `panel`: `options.title` é emprestado só na chamada, `collapsible`
+  desenha o chevron (colapsa com clique ou tecla) e `closable` desenha o
+  `×` e sinaliza `close_requested`; `content` volta zerado quando
+  colapsado.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -173,6 +220,10 @@ zyntra_context_end_frame(ctx);
   `ZyntraTextMetrics=16`, estilos (`Button=24`, `Checkbox=24`, `Switch=28`,
   `Slider=32`, `Progress=16`, `Separator=12`) e resultados
   (`Label=20`, `Button=3`, `Checkbox=3`, `Switch=4`, `Slider=8`).
+* M108: também travados `ZyntraStr=16` (2 × `size_t`),
+  `ZyntraPanelOptions=24`, estilos (`Radio=20`, `TabBar=36`, `ListView=36`,
+  `Panel=48`) e resultados (`Radio=3`, `TabBar=24`, `ListView=24`,
+  `Panel=20`).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -193,5 +244,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..."
 ```

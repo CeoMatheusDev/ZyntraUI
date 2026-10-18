@@ -429,6 +429,180 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 10-14: listas de rótulos e painel (M108) — abas, grupo de
+     * radio, lista e painel desenhados pelo rasterizador de referência, com
+     * clique real (aba/linha/opção/chevron) e checagem de pixel. */
+    ZyntraFramebuffer *lfb = NULL;
+    size_t l_active = 0, l_sel = 0, l_radio = 0, l_draws = 0;
+    int l_tab_px = 0, l_list_px = 0, l_radio_px = 0, l_panel_px = 0;
+    int l_collapsed = 0, l_toggled = 0;
+    {
+        _Static_assert(sizeof(ZyntraStr) == 2 * sizeof(size_t), "ZyntraStr ABI");
+        _Static_assert(sizeof(ZyntraPanelOptions) == 24, "ZyntraPanelOptions ABI");
+        _Static_assert(sizeof(ZyntraRadioStyle) == 20, "ZyntraRadioStyle ABI");
+        _Static_assert(sizeof(ZyntraTabBarStyle) == 36, "ZyntraTabBarStyle ABI");
+        _Static_assert(sizeof(ZyntraListViewStyle) == 36, "ZyntraListViewStyle ABI");
+        _Static_assert(sizeof(ZyntraPanelStyle) == 48, "ZyntraPanelStyle ABI");
+        _Static_assert(sizeof(ZyntraRadioResult) == 3, "ZyntraRadioResult ABI");
+        _Static_assert(sizeof(ZyntraTabBarResult) == 24, "ZyntraTabBarResult ABI");
+        _Static_assert(sizeof(ZyntraListViewResult) == 24, "ZyntraListViewResult ABI");
+        _Static_assert(sizeof(ZyntraPanelResult) == 20, "ZyntraPanelResult ABI");
+
+        ZyntraRadioStyle rs;
+        ZyntraTabBarStyle tbs;
+        ZyntraListViewStyle lvs;
+        ZyntraPanelStyle pans;
+        CHECK(zyntra_style_radio(ZYNTRA_THEME_DARK, &rs));
+        CHECK(zyntra_style_tab_bar(ZYNTRA_THEME_DARK, &tbs));
+        CHECK(zyntra_style_list_view(ZYNTRA_THEME_DARK, &lvs));
+        CHECK(zyntra_style_panel(ZYNTRA_THEME_DARK, &pans));
+        assert(zyntra_style_radio(9, &rs) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_list_view(ZYNTRA_THEME_DARK, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        lvs.item_height = 20.0f; /* linhas previsíveis para os pixels */
+
+        const ZyntraStr tabs[2] = {{"A", 1}, {"BB", 2}};
+        const ZyntraStr items[3] = {{"um", 2}, {"dois", 4}, {"tres", 4}};
+        const ZyntraStr opts[3] = {{"r0", 2}, {"r1", 2}, {"r2", 2}};
+        const ZyntraId lid = zyntra_id_from_string("c:lists", 7);
+        assert(lid != 0);
+
+        ZyntraRect tab_bounds = {4, 4, 232, 24};
+        ZyntraRect radio_bounds = {4, 34, 120, 60};
+        ZyntraRect list_bounds = {4, 112, 120, 80};
+        ZyntraRect panel_bounds = {140, 34, 96, 150};
+        ZyntraPanelOptions popts = {{"P", 1}, true, false};
+        ZyntraTabBarResult tbr;
+        ZyntraListViewResult lvr;
+        ZyntraRadioResult rar;
+        ZyntraPanelResult panr;
+        ZyntraColor lpx = {0, 0, 0, 0};
+        ZyntraColor lbg = {24, 24, 28, 255};
+        size_t active = 0, selected = 0, radio_sel = 0;
+        float scroll = 0.0f;
+        bool collapsed = false;
+
+        CHECK(zyntra_framebuffer_create(240, 200, &lfb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 240, 200}));
+
+        /* Frame 10: tudo frio, rasterizado; linha 0 marcada/selecionada. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){236, 196}));
+        CHECK(zyntra_draw_clear(ctx, lbg));
+        CHECK(zyntra_widget_tab_bar(ctx, lid, tab_bounds, tabs, 2, &active, &tbs, &tbr));
+        assert(!tbr.changed && tbr.active == 0 && tbr.hovered_index == -1);
+        CHECK(zyntra_widget_radio(ctx, lid, radio_bounds, opts, 3, &radio_sel, 16.0f, &rs, &rar));
+        assert(!rar.changed && !rar.hovered && radio_sel == 0);
+        CHECK(zyntra_widget_list_view(ctx, lid, list_bounds, items, 3, &selected, &scroll, &lvs, &lvr));
+        assert(lvr.selected == 0 && lvr.hovered_index == -1 && lvr.scroll_offset == 0.0f);
+        CHECK(zyntra_widget_panel(ctx, lid, panel_bounds, &collapsed, popts, 16.0f, &pans, &panr));
+        assert(!panr.collapsed && !panr.toggled && !panr.close_requested && panr.content.w > 0.0f);
+
+        /* Inválidos: lista nula com len, ptr nulo com len, estado nulo. */
+        assert(zyntra_widget_tab_bar(ctx, lid, tab_bounds, NULL, 2, &active, &tbs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_list_view(ctx, lid, list_bounds, NULL, 1, &selected, &scroll, &lvs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        {
+            const ZyntraStr broken[1] = {{NULL, 3}};
+            assert(zyntra_widget_radio(ctx, lid, radio_bounds, broken, 1, &radio_sel, 16.0f, &rs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        }
+        assert(zyntra_widget_radio(ctx, lid, radio_bounds, opts, 3, NULL, 16.0f, &rs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_radio(ctx, lid, radio_bounds, opts, 3, &radio_sel, 0.0f, &rs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_list_view(ctx, lid, list_bounds, items, 3, &selected, NULL, &lvs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_tab_bar(ctx, lid, tab_bounds, tabs, 2, &active, NULL, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_panel(ctx, lid, panel_bounds, NULL, popts, 16.0f, &pans, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_panel(ctx, lid, panel_bounds, &collapsed, popts, 0.0f, &pans, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_radio(NULL, lid, radio_bounds, opts, 3, &radio_sel, 16.0f, &rs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+        CHECK(zyntra_draw_count(ctx, &l_draws));
+        assert(l_draws >= 20);
+        CHECK(zyntra_framebuffer_render(lfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(lfb, 19, 16, &lpx)); /* aba ativa */
+        l_tab_px = (lpx.r == tbs.bg_active.r && lpx.g == tbs.bg_active.g);
+        assert(l_tab_px);
+        CHECK(zyntra_framebuffer_pixel(lfb, 52, 16, &lpx));
+        assert(lpx.r == tbs.bg.r);
+        CHECK(zyntra_framebuffer_pixel(lfb, 15, 46, &lpx)); /* radio marcado */
+        l_radio_px = (lpx.r == rs.dot.r && lpx.g == rs.dot.g);
+        assert(l_radio_px);
+        CHECK(zyntra_framebuffer_pixel(lfb, 15, 71, &lpx));
+        assert(lpx.r == rs.box.r);
+        CHECK(zyntra_framebuffer_pixel(lfb, 20, 122, &lpx)); /* linha selecionada */
+        l_list_px = (lpx.r == lvs.bg_selected.r && lpx.g == lvs.bg_selected.g);
+        assert(l_list_px);
+        CHECK(zyntra_framebuffer_pixel(lfb, 20, 142, &lpx));
+        assert(lpx.r == lvs.bg.r);
+        CHECK(zyntra_framebuffer_pixel(lfb, 145, 40, &lpx)); /* cabeçalho */
+        l_panel_px = (lpx.r == pans.header_bg.r);
+        assert(l_panel_px);
+        CHECK(zyntra_framebuffer_pixel(lfb, 150, 120, &lpx)); /* corpo */
+        assert(lpx.r == pans.bg.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 11: clique na aba 1 (x 34..70) troca a aba ativa. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, lbg));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){52, 16}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){52, 16}));
+        CHECK(zyntra_widget_tab_bar(ctx, lid, tab_bounds, tabs, 2, &active, &tbs, &tbr));
+        assert(tbr.changed && tbr.active == 1 && active == 1);
+        l_active = active;
+        CHECK(zyntra_framebuffer_render(lfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(lfb, 52, 16, &lpx));
+        assert(lpx.r == tbs.bg_active.r); /* era inativa, agora ativa */
+        CHECK(zyntra_framebuffer_pixel(lfb, 19, 16, &lpx));
+        assert(lpx.r == tbs.bg.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 12: clique na linha 2 da lista (y 152..172). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, lbg));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){20, 162}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){20, 162}));
+        CHECK(zyntra_widget_list_view(ctx, lid, list_bounds, items, 3, &selected, &scroll, &lvs, &lvr));
+        assert(lvr.changed && lvr.selected == 2 && selected == 2);
+        l_sel = selected;
+        CHECK(zyntra_framebuffer_render(lfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(lfb, 20, 162, &lpx));
+        assert(lpx.r == lvs.bg_selected.r);
+        CHECK(zyntra_framebuffer_pixel(lfb, 20, 122, &lpx));
+        assert(lpx.r == lvs.bg.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 13: press na opção 1 do radio (linha y 59..84). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, lbg));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){15, 71}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){15, 71}));
+        CHECK(zyntra_widget_radio(ctx, lid, radio_bounds, opts, 3, &radio_sel, 16.0f, &rs, &rar));
+        assert(rar.changed && radio_sel == 1);
+        l_radio = radio_sel;
+        CHECK(zyntra_framebuffer_render(lfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(lfb, 15, 71, &lpx));
+        assert(lpx.r == rs.dot.r); /* o ponto migrou para a linha 1 */
+        CHECK(zyntra_framebuffer_pixel(lfb, 15, 46, &lpx));
+        assert(lpx.r == rs.box.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 14: clique no chevron (canto superior direito) colapsa. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, lbg));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){219, 48}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){219, 48}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){219, 48}));
+        CHECK(zyntra_widget_panel(ctx, lid, panel_bounds, &collapsed, popts, 16.0f, &pans, &panr));
+        assert(panr.toggled && collapsed && panr.content.w == 0.0f);
+        l_collapsed = collapsed;
+        l_toggled = panr.toggled;
+        CHECK(zyntra_framebuffer_render(lfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(lfb, 145, 40, &lpx));
+        assert(lpx.r == pans.header_bg.r); /* cabeçalho fica */
+        CHECK(zyntra_framebuffer_pixel(lfb, 150, 120, &lpx));
+        assert(lpx.r == lbg.r); /* corpo sumiu: só o claro do frame */
+        CHECK(zyntra_context_end_frame(ctx));
+
+        zyntra_framebuffer_destroy(lfb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -452,6 +626,10 @@ int main(void) {
         " fill=%d sep=%d prog=%d id=%llu child=%llu\n",
         w_clicked, w_hovered, w_toggled, w_checked, w_chk_px, (double)w_slider_value,
         w_slide_px, w_sep_px, w_prog_px, w_id, w_child);
+    printf("C-ABI lists tab=%zu list=%zu radio=%zu collapsed=%d toggled=%d"
+        " px_tab=%d px_list=%d px_radio=%d px_panel=%d\n",
+        l_active, l_sel, l_radio, l_collapsed, l_toggled,
+        l_tab_px, l_list_px, l_radio_px, l_panel_px);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }
