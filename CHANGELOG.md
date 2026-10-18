@@ -5,6 +5,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.31.0] - 2026-10-18
+
+MINOR estável, 100% compatível: o item #1 do roadmap (superfície C) ganha
+a primeira camada de **widgets** na fronteira C (M107) — ids estáveis, tema
+embutido (cores e estilos por widget) e sete controles com a interação
+reportada de volta ao C, sem segunda implementação (cada wrapper chama o
+widget da API Zig). Nada que já existia mudou de assinatura ou layout.
+
 ### Adicionado
 
 - `c-abi`: **primeira superfície de widgets na fronteira C** (M107, aditivo)
