@@ -7,6 +7,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `c-abi`: **campos de texto na fronteira C** (M112, aditivo) —
+  `zyntra_widget_text_input` (linha única), `zyntra_widget_text_input_selected`
+  (faixa via `anchor` + `cursor`) e `zyntra_widget_text_area` (multilinha com
+  `scroll_y`), com `ZyntraTextInputStyle` via `zyntra_style_text_input`.
+  O buffer (capacidade + `len`/`cursor`/`anchor`) e `scroll_y` pertencem ao
+  chamador e persistem entre frames — a lib não aloca —, `buffer_len == 0`
+  aceita `buffer == NULL`, e digitar além da capacidade sinaliza `overflowed`
+  sem tocar no buffer. `ENTER` marca `submitted` sem soltar o foco e `ESCAPE`
+  solta; `undone`/`redone` ficam falsos (undo/redo exigem histórico comptime).
+  O consumidor C ganhou os frames 30–39 (frio, digitação com foco, caret no
+  meio, capacidade excedida, `ENTER`/`ESCAPE`, seleção com `Shift` e área
+  multilinha) com checagem de pixels e dos bytes no buffer.
 - `c-abi`: **foco e teclado na fronteira C** (M111, aditivo) —
   `zyntra_context_push_key` (tecla + modificadores), `zyntra_context_push_text`
   (um codepoint por chamada), `zyntra_context_focus`/`zyntra_context_has_focus`

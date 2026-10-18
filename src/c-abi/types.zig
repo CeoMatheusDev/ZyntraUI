@@ -200,6 +200,8 @@ pub const ZyntraPanelStyle = style_mod.PanelStyle;
 pub const ZyntraMenuStyle = style_mod.MenuStyle;
 pub const ZyntraTableStyle = style_mod.TableStyle;
 pub const ZyntraTreeViewStyle = style_mod.TreeViewStyle;
+/// Mesmo estilo para o campo de texto e a área de texto (como na API Zig).
+pub const ZyntraTextInputStyle = style_mod.TextInputStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -290,6 +292,32 @@ pub const ZyntraTreeViewResult = extern struct {
     toggled_index: i64 = -1,
 };
 
+/// Resultado do campo de texto. `undone`/`redone` são sempre `false` nas
+/// variantes expostas aqui: undo/redo exigem o histórico comptime das
+/// variantes Zig `textInputHistory`/`textInputClipboard`.
+pub const ZyntraTextInputResult = extern struct {
+    focused: bool = false,
+    changed: bool = false,
+    submitted: bool = false,
+    overflowed: bool = false,
+    selected: bool = false,
+    undone: bool = false,
+    redone: bool = false,
+    len: usize = 0,
+};
+
+/// Resultado da área de texto multilinha (mesma ressalva de undo/redo;
+/// sem `submitted`, que é do campo de linha única).
+pub const ZyntraTextAreaResult = extern struct {
+    focused: bool = false,
+    changed: bool = false,
+    overflowed: bool = false,
+    selected: bool = false,
+    undone: bool = false,
+    redone: bool = false,
+    len: usize = 0,
+};
+
 // Trava de ABI: falhe o build se o layout mudar.
 comptime {
     if (@sizeOf(ZyntraResult) != @sizeOf(c_int)) @compileError("ZyntraResult ABI drift");
@@ -328,6 +356,9 @@ comptime {
     if (@sizeOf(ZyntraTreeItem) != 40 or @alignOf(ZyntraTreeItem) != 8) @compileError("ZyntraTreeItem ABI drift");
     if (@sizeOf(ZyntraTreeViewStyle) != 40 or @alignOf(ZyntraTreeViewStyle) != 4) @compileError("ZyntraTreeViewStyle ABI drift");
     if (@sizeOf(ZyntraTreeViewResult) != 32 or @alignOf(ZyntraTreeViewResult) != 8) @compileError("ZyntraTreeViewResult ABI drift");
+    if (@sizeOf(ZyntraTextInputStyle) != 32 or @alignOf(ZyntraTextInputStyle) != 4) @compileError("ZyntraTextInputStyle ABI drift");
+    if (@sizeOf(ZyntraTextInputResult) != 16 or @alignOf(ZyntraTextInputResult) != 8) @compileError("ZyntraTextInputResult ABI drift");
+    if (@sizeOf(ZyntraTextAreaResult) != 16 or @alignOf(ZyntraTextAreaResult) != 8) @compileError("ZyntraTextAreaResult ABI drift");
     if (@sizeOf(ZyntraVec2) != 8 or @alignOf(ZyntraVec2) != 4) @compileError("ZyntraVec2 ABI drift");
     if (@sizeOf(ZyntraSize) != 8 or @alignOf(ZyntraSize) != 4) @compileError("ZyntraSize ABI drift");
     if (@sizeOf(ZyntraRect) != 16 or @alignOf(ZyntraRect) != 4) @compileError("ZyntraRect ABI drift");
@@ -359,6 +390,9 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 40), @sizeOf(ZyntraTreeItem));
     try stdt.testing.expectEqual(@as(usize, 40), @sizeOf(ZyntraTreeViewStyle));
     try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraTreeViewResult));
+    try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraTextInputStyle));
+    try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraTextInputResult));
+    try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraTextAreaResult));
     try stdt.testing.expectEqual(@as(c_int, 0), @backingInt(ZyntraResult.ok));
     try stdt.testing.expectEqual(@as(i32, 0), @backingInt(ZyntraThemeKind.dark));
     try stdt.testing.expectEqual(@as(i32, 1), @backingInt(ZyntraThemeKind.light));

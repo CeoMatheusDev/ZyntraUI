@@ -1008,6 +1008,198 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 30-36: campos de texto (M112) — digitação, caret, seleção,
+     * overflow e área de texto multilinha. */
+    ZyntraFramebuffer *xfb = NULL;
+    size_t x_ti_len = 0, x_ti_cursor = 0, x_ta_len = 0;
+    int x_sel = 0, x_over = 0, x_sub = 0, x_focus_escape = 1, x_ta_ok = 0;
+    int x_px_bg = 0, x_px_focus = 0;
+    {
+        _Static_assert(sizeof(ZyntraTextInputStyle) == 32, "ZyntraTextInputStyle ABI");
+        _Static_assert(sizeof(ZyntraTextInputResult) == 16, "ZyntraTextInputResult ABI");
+        _Static_assert(sizeof(ZyntraTextAreaResult) == 16, "ZyntraTextAreaResult ABI");
+
+        ZyntraTextInputStyle tis;
+        CHECK(zyntra_style_text_input(ZYNTRA_THEME_DARK, &tis));
+        assert(zyntra_style_text_input(4, &tis) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_text_input(ZYNTRA_THEME_DARK, NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+        const ZyntraId tid1 = zyntra_id_from_string("c:ti", 4);
+        const ZyntraId tid2 = zyntra_id_from_string("c:ta", 4);
+        assert(tid1 != 0 && tid2 != 0 && tid1 != tid2);
+        ZyntraRect ti_bounds = {8, 8, 160, 24};
+        ZyntraRect ta_bounds = {8, 44, 200, 96};
+        char ti_buf[8];
+        size_t ti_len = 0, ti_cursor = 0, ti_anchor = 0;
+        char ta_buf[32];
+        size_t ta_len = 0, ta_cursor = 0, ta_anchor = 0;
+        float ta_scroll = 0.0f;
+        ZyntraTextInputResult tir;
+        ZyntraTextAreaResult tar;
+        ZyntraColor xpx = {0, 0, 0, 0};
+        ZyntraColor xbg = {24, 24, 28, 255};
+        bool x_focused = false;
+
+        CHECK(zyntra_framebuffer_create(240, 200, &xfb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 240, 200}));
+
+        /* Frame 30: sem foco o texto digitado é ignorado (fundo normal). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){236, 196}));
+        CHECK(zyntra_draw_clear(ctx, xbg));
+        CHECK(zyntra_context_push_text(ctx, 'a'));
+        CHECK(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf), &ti_len,
+            &ti_cursor, 10.0f, &tis, &tir));
+        assert(!tir.focused && !tir.changed && ti_len == 0);
+        CHECK(zyntra_framebuffer_render(xfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(xfb, 150, 20, &xpx));
+        x_px_bg = (xpx.r == tis.bg.r && xpx.b == tis.bg.b);
+        assert(x_px_bg);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 31: com foco, o texto entra no buffer do chamador. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, xbg));
+        CHECK(zyntra_context_focus(ctx, tid1));
+        CHECK(zyntra_context_push_text(ctx, 'a'));
+        CHECK(zyntra_context_push_text(ctx, 'b'));
+        CHECK(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf), &ti_len,
+            &ti_cursor, 10.0f, &tis, &tir));
+        assert(tir.focused && tir.changed && tir.len == 2 && ti_len == 2 && ti_cursor == 2);
+        assert(memcmp(ti_buf, "ab", 2) == 0);
+        CHECK(zyntra_framebuffer_render(xfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(xfb, 150, 20, &xpx));
+        x_px_focus = (xpx.r == tis.bg_focus.r && xpx.b == tis.bg_focus.b);
+        assert(x_px_focus);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 32: seta move o caret e a digitação insere no meio. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_LEFT, true, 0));
+        CHECK(zyntra_context_push_text(ctx, 'X'));
+        CHECK(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf), &ti_len,
+            &ti_cursor, 10.0f, &tis, &tir));
+        assert(tir.changed && ti_len == 3 && ti_cursor == 2);
+        assert(memcmp(ti_buf, "aXb", 3) == 0);
+        x_ti_len = ti_len;
+        x_ti_cursor = ti_cursor;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 33: capacidade 3 (menor que o array) limita a digitação. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_text(ctx, 'c'));
+        CHECK(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, 3, &ti_len,
+            &ti_cursor, 10.0f, &tis, &tir));
+        assert(tir.overflowed && ti_len == 3);
+        x_over = tir.overflowed;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 34: Enter submete mantendo o foco. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_ENTER, true, 0));
+        CHECK(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, 3, &ti_len,
+            &ti_cursor, 10.0f, &tis, &tir));
+        assert(tir.submitted && tir.focused);
+        x_sub = tir.submitted;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 35: Escape solta o foco (caixa volta ao fundo normal). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, xbg));
+        CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_ESCAPE, true, 0));
+        CHECK(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, 3, &ti_len,
+            &ti_cursor, 10.0f, &tis, &tir));
+        assert(!tir.focused);
+        CHECK(zyntra_context_has_focus(ctx, tid1, &x_focused));
+        x_focus_escape = x_focused;
+        assert(!x_focus_escape);
+        CHECK(zyntra_framebuffer_render(xfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(xfb, 150, 20, &xpx));
+        assert(xpx.r == tis.bg.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frames 36-38: variante com seleção (Shift estende; digitar troca). */
+        ti_len = 0;
+        ti_cursor = 0;
+        ti_anchor = 0;
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_focus(ctx, tid1));
+        CHECK(zyntra_context_push_text(ctx, 'A'));
+        CHECK(zyntra_context_push_text(ctx, 'B'));
+        CHECK(zyntra_widget_text_input_selected(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf),
+            &ti_len, &ti_cursor, &ti_anchor, 10.0f, &tis, &tir));
+        assert(!tir.selected && ti_len == 2 && ti_cursor == 2 && ti_anchor == 2);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_LEFT, true, 0));
+        CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_LEFT, true, ZYNTRA_MOD_SHIFT));
+        CHECK(zyntra_widget_text_input_selected(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf),
+            &ti_len, &ti_cursor, &ti_anchor, 10.0f, &tis, &tir));
+        assert(tir.selected && ti_cursor == 0 && ti_anchor == 1);
+        x_sel = tir.selected;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_text(ctx, 'Z'));
+        CHECK(zyntra_widget_text_input_selected(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf),
+            &ti_len, &ti_cursor, &ti_anchor, 10.0f, &tis, &tir));
+        assert(tir.changed && !tir.selected && ti_len == 2 && ti_cursor == 1);
+        assert(memcmp(ti_buf, "ZB", 2) == 0);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 39: área de texto (newline digitado cria a segunda linha). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, xbg));
+        CHECK(zyntra_context_focus(ctx, tid2));
+        CHECK(zyntra_context_push_text(ctx, 'a'));
+        CHECK(zyntra_context_push_text(ctx, 'b'));
+        CHECK(zyntra_context_push_text(ctx, '\n'));
+        CHECK(zyntra_context_push_text(ctx, 'c'));
+        CHECK(zyntra_context_push_text(ctx, 'd'));
+        CHECK(zyntra_widget_text_area(ctx, tid2, ta_bounds, ta_buf, sizeof(ta_buf), &ta_len,
+            &ta_cursor, &ta_anchor, &ta_scroll, 10.0f, &tis, &tar));
+        assert(tar.focused && tar.changed && tar.len == 5 && ta_len == 5 && ta_cursor == 5);
+        x_ta_len = ta_len;
+        x_ta_ok = (memcmp(ta_buf, "ab\ncd", 5) == 0 && ta_buf[2] == '\n');
+        assert(x_ta_ok);
+        CHECK(zyntra_framebuffer_render(xfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(xfb, 192, 100, &xpx));
+        assert(xpx.r == tis.bg_focus.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Inválidos: estados nulos, buffer nulo com capacidade declarada,
+         * caret/anchor fora da faixa e capacidade excedida. */
+        {
+            size_t cur_ruim = ti_len + 1, len_ruim = sizeof(ti_buf) + 1, anc_ruim = ti_len + 1;
+            assert(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf), &ti_len,
+                &ti_cursor, 0.0f, &tis, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf), &ti_len,
+                NULL, 10.0f, &tis, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_text_input(ctx, tid1, ti_bounds, NULL, 4, &ti_len, &ti_cursor,
+                10.0f, &tis, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf), &ti_len,
+                &ti_cursor, 10.0f, NULL, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_text_input(NULL, tid1, ti_bounds, ti_buf, sizeof(ti_buf), &ti_len,
+                &ti_cursor, 10.0f, &tis, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf), &ti_len,
+                &cur_ruim, 10.0f, &tis, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_text_input(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf), &len_ruim,
+                &ti_cursor, 10.0f, &tis, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_text_input_selected(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf),
+                &ti_len, &ti_cursor, &anc_ruim, 10.0f, &tis, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_text_input_selected(ctx, tid1, ti_bounds, ti_buf, sizeof(ti_buf),
+                &ti_len, &ti_cursor, NULL, 10.0f, &tis, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_text_area(ctx, tid2, ta_bounds, ta_buf, sizeof(ta_buf), &ta_len,
+                &ta_cursor, &ta_anchor, NULL, 10.0f, &tis, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_text_area(ctx, tid2, ta_bounds, ta_buf, sizeof(ta_buf), &ta_len,
+                &ta_cursor, NULL, &ta_scroll, 10.0f, &tis, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        }
+
+        zyntra_framebuffer_destroy(xfb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -1047,6 +1239,10 @@ int main(void) {
         " pending=%zu px_hover=%d px_bg=%d px_sel=%d px_deselect=%d\n",
         ev_chosen, ev_active, ev_dismissed, ev_focus, ev_focus_escape, ev_sel, ev_changed,
         ev_pending, ev_px_hover, ev_px_bg, ev_px_sel, ev_px_deselect);
+    printf("C-ABI text ti=%zu cur=%zu sel=%d over=%d sub=%d focus_escape=%d"
+        " px_bg=%d px_focus=%d ta=%zu ta_ok=%d\n",
+        x_ti_len, x_ti_cursor, x_sel, x_over, x_sub, x_focus_escape,
+        x_px_bg, x_px_focus, x_ta_len, x_ta_ok);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

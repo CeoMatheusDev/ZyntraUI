@@ -15,6 +15,7 @@
  * estilos Menu=24/Table=48 e resultados Menu=24/Table=24.
  * M110: ZyntraTreeItem=40, estilo TreeView=40 e resultado TreeView=32.
  * M111: ZyntraKey (enum c_int, 0..20) e ZYNTRA_MOD_* (bit 0=shift..3=super).
+ * M112: estilos TextInput=32 e resultados TextInput=16/TextArea=16.
  */
 
 #include <stdbool.h>
@@ -572,6 +573,60 @@ ZyntraResult zyntra_style_tree_view(int32_t theme_kind, ZyntraTreeViewStyle *out
 ZyntraResult zyntra_widget_tree_view(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
     ZyntraTreeItem *items, size_t items_len, size_t *selected, float *scroll_offset,
     const ZyntraTreeViewStyle *style, ZyntraTreeViewResult *out_result);
+
+/* Campos de texto (M112): `text_input` (linha única, simples e com seleção)
+ * e `textarea` (multilinha). `buffer` (capacidade `buffer_len`) e
+ * `len`/`cursor`/`anchor`/`scroll_y` pertencem ao CHAMADOR; o conteúdo é
+ * UTF-8 e esses offsets são de byte, sempre em fronteira de codepoint.
+ * `buffer_len == 0` aceita `buffer == NULL` (campo sem capacidade).
+ * `size` é a fonte em px. `undone`/`redone` ficam sempre falsos nestas
+ * variantes (undo/redo exigem histórico, que é comptime na API Zig). */
+
+typedef struct ZyntraTextInputStyle {
+    ZyntraColor bg;
+    ZyntraColor bg_focus;
+    ZyntraColor border;
+    ZyntraColor border_focus;
+    ZyntraColor text;
+    ZyntraColor caret;
+    ZyntraColor selection;
+    float border_width;
+} ZyntraTextInputStyle;
+
+typedef struct ZyntraTextInputResult {
+    bool focused;
+    bool changed;
+    bool submitted;
+    bool overflowed;
+    bool selected;
+    bool undone;
+    bool redone;
+    size_t len;
+} ZyntraTextInputResult;
+
+typedef struct ZyntraTextAreaResult {
+    bool focused;
+    bool changed;
+    bool overflowed;
+    bool selected;
+    bool undone;
+    bool redone;
+    size_t len;
+} ZyntraTextAreaResult;
+
+ZyntraResult zyntra_style_text_input(int32_t theme_kind, ZyntraTextInputStyle *out_style);
+
+ZyntraResult zyntra_widget_text_input(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    char *buffer, size_t buffer_len, size_t *len, size_t *cursor, float size,
+    const ZyntraTextInputStyle *style, ZyntraTextInputResult *out_result);
+ZyntraResult zyntra_widget_text_input_selected(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, char *buffer, size_t buffer_len, size_t *len, size_t *cursor,
+    size_t *anchor, float size, const ZyntraTextInputStyle *style,
+    ZyntraTextInputResult *out_result);
+ZyntraResult zyntra_widget_text_area(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
+    char *buffer, size_t buffer_len, size_t *len, size_t *cursor, size_t *anchor,
+    float *scroll_y, float size, const ZyntraTextInputStyle *style,
+    ZyntraTextAreaResult *out_result);
 
 #ifdef __cplusplus
 }

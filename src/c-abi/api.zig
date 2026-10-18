@@ -38,6 +38,8 @@ const panel_mod = @import("../widgets/panel.zig");
 const menu_mod = @import("../widgets/menu.zig");
 const table_mod = @import("../widgets/table.zig");
 const tree_mod = @import("../widgets/tree_view.zig");
+const text_input_mod = @import("../widgets/text_input.zig");
+const textarea_mod = @import("../widgets/textarea.zig");
 const ct = @import("types.zig");
 
 /// Handle opaco. O layout real (`Context`) nunca é exposto.
@@ -1153,6 +1155,15 @@ fn treeArgsOf(
     };
 }
 
+/// Buffer de bytes pertencente ao chamador: `len == 0` aceita `ptr == NULL`
+/// (campo sem capacidade, só leitura do vazio) e devolve uma fatia vazia.
+fn byteBufOf(ptr: ?[*]u8, len: usize) error{InvalidArgument}![]u8 {
+    var vazio: [0]u8 = .{};
+    if (len == 0) return vazio[0..];
+    const p = ptr orelse return error.InvalidArgument;
+    return p[0..len];
+}
+
 /// Índice opcional da API Zig -> `i64` do C (`-1` = nenhum).
 fn fromIndex(idx: ?usize) i64 {
     if (idx) |i| return @intCast(i);
@@ -1212,6 +1223,14 @@ pub export fn zyntra_style_tree_view(kind: i32, out_style: ?*ct.ZyntraTreeViewSt
     const out = out_style orelse return .invalid_argument;
     const t = themeOf(kind) orelse return .invalid_argument;
     out.* = t.treeViewStyle();
+    return .ok;
+}
+
+/// Estilo de campo/área de texto do tema embutido.
+pub export fn zyntra_style_text_input(kind: i32, out_style: ?*ct.ZyntraTextInputStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.textInputStyle();
     return .ok;
 }
 
@@ -1503,6 +1522,148 @@ pub export fn zyntra_widget_tree_view(
         .scroll_offset = res.scroll_offset,
         .changed = res.changed,
         .toggled_index = fromIndex(res.toggled_index),
+    };
+    return .ok;
+}
+
+// ---------------------------------------------------------------------------
+// Campos de texto: text_input (simples e com seleção) e textarea (M112)
+// ---------------------------------------------------------------------------
+
+/// Campo de texto de linha única: `buffer` (capacidade `buffer_len`) é do
+/// chamador junto de `len`/`cursor` (bytes UTF-8 em fronteira de codepoint);
+/// `size` é a fonte usada na medição e no desenho.
+pub export fn zyntra_widget_text_input(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    buffer: ?[*]u8,
+    buffer_len: usize,
+    len: ?*usize,
+    cursor: ?*usize,
+    size: f32,
+    style: ?*const ct.ZyntraTextInputStyle,
+    out_result: ?*ct.ZyntraTextInputResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const n = len orelse return .invalid_argument;
+    const cur = cursor orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    const buf = byteBufOf(buffer, buffer_len) catch return .invalid_argument;
+    const res = text_input_mod.textInput(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        buf,
+        n,
+        cur,
+        metrics_mod.FontMetrics.withSize(size),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .focused = res.focused,
+        .changed = res.changed,
+        .submitted = res.submitted,
+        .overflowed = res.overflowed,
+        .selected = res.selected,
+        .undone = res.undone,
+        .redone = res.redone,
+        .len = res.len,
+    };
+    return .ok;
+}
+
+/// Campo de texto com seleção: `anchor` (offset de byte) e `cursor` marcam a
+/// faixa `[min,max)`; ambos pertencem ao chamador e persistem entre frames.
+pub export fn zyntra_widget_text_input_selected(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    buffer: ?[*]u8,
+    buffer_len: usize,
+    len: ?*usize,
+    cursor: ?*usize,
+    anchor: ?*usize,
+    size: f32,
+    style: ?*const ct.ZyntraTextInputStyle,
+    out_result: ?*ct.ZyntraTextInputResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const n = len orelse return .invalid_argument;
+    const cur = cursor orelse return .invalid_argument;
+    const anc = anchor orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    const buf = byteBufOf(buffer, buffer_len) catch return .invalid_argument;
+    const res = text_input_mod.textInputSelected(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        buf,
+        n,
+        cur,
+        anc,
+        metrics_mod.FontMetrics.withSize(size),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .focused = res.focused,
+        .changed = res.changed,
+        .submitted = res.submitted,
+        .overflowed = res.overflowed,
+        .selected = res.selected,
+        .undone = res.undone,
+        .redone = res.redone,
+        .len = res.len,
+    };
+    return .ok;
+}
+
+/// Área de texto multilinha: além de `buffer`/`len`/`cursor`/`anchor`,
+/// `scroll_y` (px) pertence ao chamador e é ajustado pelo widget.
+pub export fn zyntra_widget_text_area(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    buffer: ?[*]u8,
+    buffer_len: usize,
+    len: ?*usize,
+    cursor: ?*usize,
+    anchor: ?*usize,
+    scroll_y: ?*f32,
+    size: f32,
+    style: ?*const ct.ZyntraTextInputStyle,
+    out_result: ?*ct.ZyntraTextAreaResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const n = len orelse return .invalid_argument;
+    const cur = cursor orelse return .invalid_argument;
+    const anc = anchor orelse return .invalid_argument;
+    const scroll = scroll_y orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    const buf = byteBufOf(buffer, buffer_len) catch return .invalid_argument;
+    const res = textarea_mod.textArea(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        buf,
+        n,
+        cur,
+        anc,
+        scroll,
+        metrics_mod.FontMetrics.withSize(size),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .focused = res.focused,
+        .changed = res.changed,
+        .overflowed = res.overflowed,
+        .selected = res.selected,
+        .undone = res.undone,
+        .redone = res.redone,
+        .len = res.len,
     };
     return .ok;
 }
@@ -2489,4 +2650,181 @@ test "C-ABI teclado: foco, teclas e texto" {
     try eq(ok, zyntra_framebuffer_pixel(fb_handle, 20, 158, &px));
     try eq(ts.bg.r, px.r);
     try eq(ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI campos de texto: digitação, caret e seleção" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+
+    var tis: ct.ZyntraTextInputStyle = undefined;
+    try eq(ok, zyntra_style_text_input(0, &tis));
+    try eq(bad, zyntra_style_text_input(7, &tis));
+    try eq(bad, zyntra_style_text_input(0, null));
+
+    var handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 240, .h = 200 }, &handle));
+    defer zyntra_context_destroy(handle);
+    var fb_handle: ?*ZyntraFramebuffer = null;
+    try eq(ok, zyntra_framebuffer_create(240, 200, &fb_handle));
+    defer zyntra_framebuffer_destroy(fb_handle);
+    try eq(ok, zyntra_context_set_viewport(handle, .{ .x = 0, .y = 0, .w = 240, .h = 200 }));
+
+    const ti_id = zyntra_id_from_string("c:ti", 4);
+    const ta_id = zyntra_id_from_string("c:ta", 4);
+    const ti_bounds: ct.ZyntraRect = .{ .x = 8, .y = 8, .w = 160, .h = 24 };
+    const ta_bounds: ct.ZyntraRect = .{ .x = 8, .y = 44, .w = 200, .h = 96 };
+    const clear = ct.ZyntraColor{ .r = 24, .g = 24, .b = 28, .a = 255 };
+    var ti_buf: [8]u8 = undefined;
+    var ti_len: usize = 0;
+    var ti_cursor: usize = 0;
+    var ti_anchor: usize = 0;
+    var ta_buf: [32]u8 = undefined;
+    var ta_len: usize = 0;
+    var ta_cursor: usize = 0;
+    var ta_anchor: usize = 0;
+    var ta_scroll: f32 = 0;
+    var res: ct.ZyntraTextInputResult = .{};
+    var ares: ct.ZyntraTextAreaResult = .{};
+    var px: ct.ZyntraColor = .{};
+
+    // Frame frio: sem foco o texto digitado é ignorado e a caixa usa `bg`.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 236, .y = 196 }));
+    try eq(ok, zyntra_draw_clear(handle, clear));
+    try eq(ok, zyntra_context_push_text(handle, 'a'));
+    try eq(ok, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, 10, &tis, &res));
+    try stdt.testing.expect(!res.focused and !res.changed and ti_len == 0);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 150, 20, &px));
+    try eq(tis.bg.r, px.r);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Com foco, o texto entra no buffer do chamador (len/cursor e bytes).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_draw_clear(handle, clear));
+    try eq(ok, zyntra_context_focus(handle, ti_id));
+    try eq(ok, zyntra_context_push_text(handle, 'a'));
+    try eq(ok, zyntra_context_push_text(handle, 'b'));
+    try eq(ok, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, 10, &tis, &res));
+    try stdt.testing.expect(res.focused and res.changed and res.len == 2 and ti_len == 2 and ti_cursor == 2);
+    try stdt.testing.expectEqualStrings("ab", ti_buf[0..ti_len]);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 150, 20, &px));
+    try eq(tis.bg_focus.r, px.r);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Seta para a esquerda move o caret e a digitação insere no meio.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.left), true, 0));
+    try eq(ok, zyntra_context_push_text(handle, 'X'));
+    try eq(ok, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, 10, &tis, &res));
+    try stdt.testing.expect(res.changed and ti_len == 3 and ti_cursor == 2);
+    try stdt.testing.expectEqualStrings("aXb", ti_buf[0..ti_len]);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Backspace apaga o codepoint antes do caret.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.backspace), true, 0));
+    try eq(ok, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, 10, &tis, &res));
+    try stdt.testing.expect(res.changed and ti_len == 2 and ti_cursor == 1);
+    try stdt.testing.expectEqualStrings("ab", ti_buf[0..ti_len]);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Capacidade do chamador limita a digitação: o excedente vira
+    // `overflowed` sem tocar o buffer.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_text(handle, 'c'));
+    try eq(ok, zyntra_context_push_text(handle, 'd'));
+    try eq(ok, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, 3, &ti_len, &ti_cursor, 10, &tis, &res));
+    try stdt.testing.expect(res.overflowed and ti_len == 3);
+    try stdt.testing.expectEqualStrings("acb", ti_buf[0..ti_len]); // inserido no caret (1)
+    // Buffer sem capacidade: aceito com ponteiro nulo (len/cursor zerados).
+    var vazio_len: usize = 0;
+    var vazio_cursor: usize = 0;
+    try eq(ok, zyntra_widget_text_input(handle, ti_id, ti_bounds, null, 0, &vazio_len, &vazio_cursor, 10, &tis, null));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Enter submete mantendo o foco; Escape solta o foco (caixa volta a `bg`).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_draw_clear(handle, clear));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.enter), true, 0));
+    try eq(ok, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, 3, &ti_len, &ti_cursor, 10, &tis, &res));
+    try stdt.testing.expect(res.submitted and res.focused);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_draw_clear(handle, clear));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.escape), true, 0));
+    try eq(ok, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, 3, &ti_len, &ti_cursor, 10, &tis, &res));
+    try stdt.testing.expect(!res.focused);
+    var focused: bool = true;
+    try eq(ok, zyntra_context_has_focus(handle, ti_id, &focused));
+    try stdt.testing.expect(!focused);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 150, 20, &px));
+    try eq(tis.bg.r, px.r);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Variante com seleção: Shift estende a faixa e digitar a substitui.
+    ti_len = 0;
+    ti_cursor = 0;
+    ti_anchor = 0;
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_focus(handle, ti_id));
+    try eq(ok, zyntra_context_push_text(handle, 'A'));
+    try eq(ok, zyntra_context_push_text(handle, 'B'));
+    try eq(ok, zyntra_widget_text_input_selected(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, &ti_anchor, 10, &tis, &res));
+    try stdt.testing.expect(!res.selected and ti_len == 2 and ti_cursor == 2 and ti_anchor == 2);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.left), true, 0));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.left), true, ct.key_modifiers_mask & 0x01));
+    try eq(ok, zyntra_widget_text_input_selected(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, &ti_anchor, 10, &tis, &res));
+    try stdt.testing.expect(res.selected and ti_cursor == 0 and ti_anchor == 1);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_text(handle, 'Z'));
+    try eq(ok, zyntra_widget_text_input_selected(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, &ti_anchor, 10, &tis, &res));
+    try stdt.testing.expect(res.changed and !res.selected and ti_len == 2 and ti_cursor == 1);
+    try stdt.testing.expectEqualStrings("ZB", ti_buf[0..ti_len]);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Área de texto: várias linhas (newline digitado) e fundo de foco.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_draw_clear(handle, clear));
+    try eq(ok, zyntra_context_focus(handle, ta_id));
+    try eq(ok, zyntra_context_push_text(handle, 'a'));
+    try eq(ok, zyntra_context_push_text(handle, 'b'));
+    try eq(ok, zyntra_context_push_text(handle, '\n'));
+    try eq(ok, zyntra_context_push_text(handle, 'c'));
+    try eq(ok, zyntra_context_push_text(handle, 'd'));
+    try eq(ok, zyntra_widget_text_area(handle, ta_id, ta_bounds, &ta_buf, ta_buf.len, &ta_len, &ta_cursor, &ta_anchor, &ta_scroll, 10, &tis, &ares));
+    try stdt.testing.expect(ares.focused and ares.changed and ares.len == 5 and ta_len == 5 and ta_cursor == 5);
+    try stdt.testing.expectEqualStrings("ab\ncd", ta_buf[0..ta_len]);
+    try eq(ok, zyntra_framebuffer_render(fb_handle, handle, null));
+    try eq(ok, zyntra_framebuffer_pixel(fb_handle, 192, 100, &px));
+    try eq(tis.bg_focus.r, px.r);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Inválidos: estados nulos, buffer nulo com capacidade, cursor/anchor
+    // fora da faixa declarada e `size` não-positivo.
+    try eq(bad, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, 0, &tis, null));
+    try eq(bad, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, null, 10, &tis, null));
+    try eq(bad, zyntra_widget_text_input(handle, ti_id, ti_bounds, null, 4, &ti_len, &ti_cursor, 10, &tis, null));
+    try eq(bad, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, 10, null, null));
+    try eq(bad, zyntra_widget_text_input(null, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, 10, &tis, null));
+    var cursor_ruim: usize = ti_len + 1;
+    try eq(bad, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &cursor_ruim, 10, &tis, null));
+    var len_ruim: usize = ti_buf.len + 1;
+    try eq(bad, zyntra_widget_text_input(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &len_ruim, &ti_cursor, 10, &tis, null));
+    var anchor_ruim: usize = ti_len + 1;
+    try eq(bad, zyntra_widget_text_input_selected(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, &anchor_ruim, 10, &tis, null));
+    try eq(bad, zyntra_widget_text_input_selected(handle, ti_id, ti_bounds, &ti_buf, ti_buf.len, &ti_len, &ti_cursor, null, 10, &tis, null));
+    try eq(bad, zyntra_widget_text_area(handle, ta_id, ta_bounds, &ta_buf, ta_buf.len, &ta_len, &ta_cursor, &ta_anchor, null, 10, &tis, null));
+    try eq(bad, zyntra_widget_text_area(handle, ta_id, ta_bounds, &ta_buf, ta_buf.len, &ta_len, &ta_cursor, &ta_anchor, &ta_scroll, 10, null, null));
+    try eq(bad, zyntra_widget_text_area(handle, ta_id, ta_bounds, &ta_buf, ta_buf.len, &ta_len, null, &ta_anchor, &ta_scroll, 10, &tis, null));
 }

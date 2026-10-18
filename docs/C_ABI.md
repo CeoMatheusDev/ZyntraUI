@@ -304,6 +304,44 @@ zyntra_widget_tree_view(ctx, tree_id, (ZyntraRect){8, 8, 200, 256}, raizes, 2,
 * Nós pequenos usam scratch da pilha (64 nós + 64 ponteiros); acima disso o
   alocador do contexto é usado e liberado no retorno.
 
+Quinto lote (M112): os campos de texto `text_input`, `text_input_selected` e
+`textarea`.
+
+```c
+ZyntraTextInputStyle tis;
+zyntra_style_text_input(ZYNTRA_THEME_DARK, &tis);
+
+/* O buffer é do CHAMADOR (capacidade + bytes usados + caret + âncora). */
+char buf[128];
+size_t len = 0, cursor = 0, anchor = 0;
+ZyntraTextInputResult tir;
+zyntra_context_focus(ctx, field_id);
+zyntra_context_push_text(ctx, 'o');
+zyntra_context_push_key(ctx, ZYNTRA_KEY_LEFT, true, ZYNTRA_MOD_SHIFT);
+zyntra_widget_text_input_selected(ctx, field_id, (ZyntraRect){8, 8, 240, 28},
+    buf, sizeof(buf), &len, &cursor, &anchor, 14.0f, &tis, &tir);
+
+float scroll_y = 0.0f;
+ZyntraTextAreaResult tar;
+zyntra_widget_text_area(ctx, area_id, (ZyntraRect){8, 44, 320, 200},
+    buf, sizeof(buf), &len, &cursor, &anchor, &scroll_y, 14.0f, &tis, &tar);
+```
+
+* Lote M112: `zyntra_widget_text_input` (linha única, sem seleção),
+  `zyntra_widget_text_input_selected` (com `anchor` para a faixa de seleção)
+  e `zyntra_widget_text_area` (multilinha com `scroll_y`), todos com
+  `ZyntraTextInputStyle` via `zyntra_style_text_input` — o mesmo estilo para
+  campo e área, como na API Zig.
+* Nada aloca na lib: `buffer`/`len`/`cursor`/`anchor`/`scroll_y` pertencem ao
+  chamador e persistem entre frames; o widget escreve direto no buffer.
+* `buffer_len == 0` aceita `buffer == NULL`; temas de capacidade, `len` acima
+  da capacidade declarada e `cursor`/`anchor` acima de `len` são
+  `ZYNTRA_INVALID_ARGUMENT` (mesmas invariantes da API Zig), e digitar além
+  da capacidade sinaliza `overflowed` sem tocar o buffer.
+* `submitted` vem do `ENTER` (sem soltar o foco); `ESCAPE` solta o foco.
+  `undone`/`redone` ficam sempre falsos: undo/redo exigem o histórico
+  comptime das variantes Zig (`textInputHistory`/`textInputClipboard`).
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -337,6 +375,8 @@ zyntra_widget_tree_view(ctx, tree_id, (ZyntraRect){8, 8, 200, 256}, raizes, 2,
   (`Menu=24`, `Table=24`).
 * M111: também travados `ZyntraKey` (enum `c_int`, 0..20, mesmos valores de
   `event.Key`) e as máscaras `ZYNTRA_MOD_*` (bits 0..3 de `Modifiers`).
+* M112: também travados `ZyntraTextInputStyle=32` e os resultados
+  `ZyntraTextInputResult=16`/`ZyntraTextAreaResult=16`.
 * M110: também travados `ZyntraTreeItem=40`, estilo `TreeView=40` e
   resultado `TreeView=32`.
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
@@ -359,5 +399,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..."
 ```

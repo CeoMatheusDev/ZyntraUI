@@ -339,7 +339,8 @@ with their interaction results (click, toggle, selection, drag, collapse,
 menu choice, expander) handed back to C. Keyboard input and focus are part
 of the same surface (`zyntra_context_push_key`/`_push_text`/`_focus` plus the
 `ZyntraKey` mirror), so C consumers drive the same keys the Zig widgets
-handle. See
+handle, and the text fields (`text_input`, `text_input_selected`, `textarea`)
+edit caller-owned buffers with no allocation inside the library. See
 [`src/c-abi/zyntra.h`](src/c-abi/zyntra.h) and [`docs/C_ABI.md`](docs/C_ABI.md)
 for the exported interface and integration details.
 
