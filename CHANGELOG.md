@@ -5,8 +5,25 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.34.0] - 2026-10-18
+
+MINOR estável, 100% compatível: a fronteira C ganha **entrada de teclado,
+foco e campos de texto** (M111/M112). Nada que já existia mudou de
+assinatura ou layout.
+
 ### Adicionado
 
+- `c-abi`: **foco e teclado na fronteira C** (M111, aditivo) —
+  `zyntra_context_push_key` (tecla + modificadores), `zyntra_context_push_text`
+  (um codepoint por chamada), `zyntra_context_focus`/`zyntra_context_has_focus`
+  e o enum `ZyntraKey` (espelho fechado de `event.Key`, mesmos valores, com
+  trava de compilação) mais as máscaras `ZYNTRA_MOD_SHIFT/CTRL/ALT/SUPER`
+  (travadas contra os bits de `Modifiers`). Teclas fora do enum, bits de
+  modificador reservados e codepoints fora de `0..0x10FFFF`/substitutos são
+  recusados; o teclado age sobre o widget focado e `TAB` percorre os
+  focáveis. O consumidor C ganhou os frames 24–29 (foco no menu, seta
+  pulando separador/item desabilitado, `ENTER`, `ESCAPE` soltando o foco e
+  seta movendo a seleção da tabela) com checagem de pixels.
 - `c-abi`: **campos de texto na fronteira C** (M112, aditivo) —
   `zyntra_widget_text_input` (linha única), `zyntra_widget_text_input_selected`
   (faixa via `anchor` + `cursor`) e `zyntra_widget_text_area` (multilinha com
@@ -19,17 +36,6 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   O consumidor C ganhou os frames 30–39 (frio, digitação com foco, caret no
   meio, capacidade excedida, `ENTER`/`ESCAPE`, seleção com `Shift` e área
   multilinha) com checagem de pixels e dos bytes no buffer.
-- `c-abi`: **foco e teclado na fronteira C** (M111, aditivo) —
-  `zyntra_context_push_key` (tecla + modificadores), `zyntra_context_push_text`
-  (um codepoint por chamada), `zyntra_context_focus`/`zyntra_context_has_focus`
-  e o enum `ZyntraKey` (espelho fechado de `event.Key`, mesmos valores, com
-  trava de compilação) mais as máscaras `ZYNTRA_MOD_SHIFT/CTRL/ALT/SUPER`
-  (travadas contra os bits de `Modifiers`). Teclas fora do enum, bits de
-  modificador reservados e codepoints fora de `0..0x10FFFF`/substitutos são
-  recusados; o teclado age sobre o widget focado e `TAB` percorre os
-  focáveis. O consumidor C ganhou os frames 24–29 (foco no menu, seta
-  pulando separador/item desabilitado, `ENTER`, `ESCAPE` soltando o foco e
-  seta movendo a seleção da tabela) com checagem de pixels.
 
 ## [1.33.0] - 2026-10-18
 
