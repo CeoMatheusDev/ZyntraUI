@@ -5,20 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.33.0] - 2026-10-18
+
+MINOR estável, 100% compatível: o item #1 do roadmap (superfície C) avança
+com os widgets de **estruturas** — menu, tabela e árvore (M109/M110) —,
+fechando o conjunto de controles que exigem vetores e recursão para cruzar a
+fronteira C. Nada que já existia mudou de assinatura ou layout.
+
 ### Adicionado
 
-- `c-abi`: **`zyntra_widget_tree_view`** (M110, aditivo) — a árvore
-  recursiva na fronteira C: `ZyntraTreeItem` (rótulo, filhos, `expanded`)
-  com estilo do tema via `zyntra_style_tree_view`. A árvore é do chamador e
-  **mutável**: o clique no expansor alterna `expanded` do nó exato e o
-  estado volta escrito na árvore; clique fora do expansor seleciona
-  (`changed`/`selected`) e `toggled_index` reporta o expansor clicado. A
-  conversão é recursiva com defesas (nós > 65536 ou profundidade > 128 —
-  inclusive ciclos — ⇒ `ZYNTRA_INVALID_ARGUMENT`), sem alocação para
-  árvores pequenas (scratch da pilha) e com o alocador do contexto acima
-  disso. O consumidor C ganhou os frames 20–23 (árvore fria, expansor da
-  raiz, expansor aninhado e seleção) com checagem de pixels e do estado
-  devolvido na árvore.
 - `c-abi`: **terceiro lote de widgets na fronteira C** (M109, aditivo) —
   estruturas planas: `zyntra_widget_menu` (rótulos e atalhos emprestados só
   na chamada, itens desabilitados, separadores, coluna de tique via
@@ -31,6 +26,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `_Static_assert`/`@compileError`. O consumidor C ganhou os frames 15–19
   (menu e tabela frios, hover, escolha one-shot, dispensa e clique na
   linha) com checagem de pixels.
+- `c-abi`: **`zyntra_widget_tree_view`** (M110, aditivo) — a árvore
+  recursiva na fronteira C: `ZyntraTreeItem` (rótulo, filhos, `expanded`)
+  com estilo do tema via `zyntra_style_tree_view`. A árvore é do chamador e
+  **mutável**: o clique no expansor alterna `expanded` do nó exato e o
+  estado volta escrito na árvore; clique fora do expansor seleciona
+  (`changed`/`selected`) e `toggled_index` reporta o expansor clicado. A
+  conversão é recursiva com defesas (nós > 65536 ou profundidade > 128 —
+  inclusive ciclos — ⇒ `ZYNTRA_INVALID_ARGUMENT`), sem alocação para
+  árvores pequenas (scratch da pilha) e com o alocador do contexto acima
+  disso. O consumidor C ganhou os frames 20–23 (árvore fria, expansor da
+  raiz, expansor aninhado e seleção) com checagem de pixels e do estado
+  devolvido na árvore.
 
 ## [1.32.0] - 2026-10-18
 
