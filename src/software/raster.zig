@@ -854,6 +854,14 @@ pub const SoftwareFramebuffer = struct {
     }
 };
 
+/// Aplica o alfa global (`factor` em 0..1) a uma cor.
+fn withAlpha(c: types.Color, factor: f32) types.Color {
+    if (factor >= 1.0) return c;
+    if (factor <= 0.0) return .{ .r = c.r, .g = c.g, .b = c.b, .a = 0 };
+    const a = @as(f32, @floatFromInt(c.a)) * factor;
+    return .{ .r = c.r, .g = c.g, .b = c.b, .a = @intFromFloat(@round(a)) };
+}
+
 fn imagePixel(pixels: [*]const u8, stride: u32, x: u32, y: u32) [4]u8 {
     const i = @as(usize, y) * @as(usize, stride) + @as(usize, x) * image_mod.bytes_per_pixel;
     return pixels[i..][0..4].*;
@@ -922,6 +930,8 @@ fn renderInternal(
 ) !SoftwareStats {
     var out = SoftwareStats{ .submitted = @intCast(cmds.len) };
     var clip: ?types.Rect = null;
+    // Alfa global: vale para os comandos SEGUINTES (comando `.alpha`).
+    var alpha: f32 = 1.0;
     const vp = types.Rect{
         .x = @max(0, viewport.x),
         .y = @max(0, viewport.y),
@@ -948,6 +958,10 @@ fn renderInternal(
                 clip = if (c.null_rect) null else c.rect;
                 out.drawn += 1;
             },
+            .alpha => |c| {
+                alpha = std.math.clamp(c.factor, 0.0, 1.0);
+                out.drawn += 1;
+            },
             .text => {
                 out.skipped_text += 1;
             },
@@ -957,18 +971,18 @@ fn renderInternal(
                     continue;
                 }
                 switch (cmd) {
-                    .rect_filled => |c| fb.fillRect(intersectClip(c.rect, clip, area), null, c.color),
-                    .rect_outline => |c| fb.strokeRect(c.rect, c.thickness, mergeClip(clip, area), c.color),
-                    .line => |c| fb.strokeLine(c.p0, c.p1, c.thickness, mergeClip(clip, area), c.color),
-                    .circle_filled => |c| fb.fillCircle(c.center, c.radius, mergeClip(clip, area), c.color),
-                    .circle_outline => |c| fb.strokeCircle(c.center, c.radius, c.thickness, mergeClip(clip, area), c.color),
-                    .circle_dashed => |c| fb.strokeCircleDashed(c.center, c.radius, c.thickness, c.dash_len, c.gap_len, mergeClip(clip, area), c.color),
-                    .rect_rounded => |c| fb.fillRoundRect(c.rect, c.radius, mergeClip(clip, area), c.color),
-                    .rect_gradient => |c| fb.fillGradient(c.rect, c.p0, c.p1, c.color0, c.color1, mergeClip(clip, area)),
-                    .rect_gradient_radial => |c| fb.fillGradientRadial(c.rect, c.radius, c.color0, c.color1, mergeClip(clip, area)),
-                    .rect_gradient_conic => |c| fb.fillGradientConic(c.rect, c.center, c.start_angle, c.sweep, c.color0, c.color1, mergeClip(clip, area)),
-                    .line_dashed => |c| fb.strokeLineDashed(c.p0, c.p1, c.thickness, c.dash_len, c.gap_len, mergeClip(clip, area), c.color),
-                    .rect_shadow => |c| fb.fillShadow(c.rect, c.radius, c.offset, c.blur, mergeClip(clip, area), c.color),
+                    .rect_filled => |c| fb.fillRect(intersectClip(c.rect, clip, area), null, withAlpha(c.color, alpha)),
+                    .rect_outline => |c| fb.strokeRect(c.rect, c.thickness, mergeClip(clip, area), withAlpha(c.color, alpha)),
+                    .line => |c| fb.strokeLine(c.p0, c.p1, c.thickness, mergeClip(clip, area), withAlpha(c.color, alpha)),
+                    .circle_filled => |c| fb.fillCircle(c.center, c.radius, mergeClip(clip, area), withAlpha(c.color, alpha)),
+                    .circle_outline => |c| fb.strokeCircle(c.center, c.radius, c.thickness, mergeClip(clip, area), withAlpha(c.color, alpha)),
+                    .circle_dashed => |c| fb.strokeCircleDashed(c.center, c.radius, c.thickness, c.dash_len, c.gap_len, mergeClip(clip, area), withAlpha(c.color, alpha)),
+                    .rect_rounded => |c| fb.fillRoundRect(c.rect, c.radius, mergeClip(clip, area), withAlpha(c.color, alpha)),
+                    .rect_gradient => |c| fb.fillGradient(c.rect, c.p0, c.p1, withAlpha(c.color0, alpha), withAlpha(c.color1, alpha), mergeClip(clip, area)),
+                    .rect_gradient_radial => |c| fb.fillGradientRadial(c.rect, c.radius, withAlpha(c.color0, alpha), withAlpha(c.color1, alpha), mergeClip(clip, area)),
+                    .rect_gradient_conic => |c| fb.fillGradientConic(c.rect, c.center, c.start_angle, c.sweep, withAlpha(c.color0, alpha), withAlpha(c.color1, alpha), mergeClip(clip, area)),
+                    .line_dashed => |c| fb.strokeLineDashed(c.p0, c.p1, c.thickness, c.dash_len, c.gap_len, mergeClip(clip, area), withAlpha(c.color, alpha)),
+                    .rect_shadow => |c| fb.fillShadow(c.rect, c.radius, c.offset, c.blur, mergeClip(clip, area), withAlpha(c.color, alpha)),
                     .blur => |c| fb.blurRegion(c.rect, c.radius, mergeClip(clip, area)),
                     .image => |c| fb.blitImage(
                         c.rect,
@@ -977,7 +991,7 @@ fn renderInternal(
                         c.width,
                         c.height,
                         c.stride,
-                        c.tint,
+                        withAlpha(c.tint, alpha),
                         mergeClip(clip, area),
                     ),
                     else => unreachable,
@@ -2075,4 +2089,50 @@ test "raster linha tracejada: alternância e no-op" {
         types.Color.rgb(255, 255, 255),
     );
     try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb3.get(1, 0));
+}
+
+test "alfa global atenua os comandos seguintes (M140)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 4, 4);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    // Retângulo opaco com alfa 0.5 sobre fundo preto ⇒ cinza 128.
+    try dl.pushAlpha(gpa, 0.5);
+    try dl.rectFilled(gpa, types.Rect.init(0, 0, 2, 2), types.Color.rgb(255, 255, 255));
+    // Depois do alfa 1.0, o retângulo sai opaco.
+    try dl.pushAlpha(gpa, 1.0);
+    try dl.rectFilled(gpa, types.Rect.init(2, 0, 2, 2), types.Color.rgb(255, 255, 255));
+
+    const stats = try render(&fb, dl.items(), types.Rect.init(0, 0, 4, 4));
+    try stdt.testing.expectEqual(@as(u32, 4), stats.drawn); // 2 alfa + 2 retângulos
+    try stdt.testing.expectEqual([4]u8{ 128, 128, 128, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb.get(2, 0));
+    // Fora dos retângulos nada foi desenhado.
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 3));
+
+    // Alfa 0 não desenha nada; alfa > 1 é tratado como 1.
+    {
+        var fb2 = try SoftwareFramebuffer.init(gpa, 2, 2);
+        defer fb2.deinit(gpa);
+        fb2.clear(types.Color.rgb(0, 0, 0));
+        var dl2 = commands.DrawList.initEmpty();
+        defer dl2.deinit(gpa);
+        try dl2.pushAlpha(gpa, 0.0);
+        try dl2.rectFilled(gpa, types.Rect.init(0, 0, 2, 2), types.Color.rgb(255, 255, 255));
+        try dl2.pushAlpha(gpa, 4.0);
+        try dl2.rectFilled(gpa, types.Rect.init(0, 0, 2, 2), types.Color.rgb(255, 255, 255));
+        _ = try render(&fb2, dl2.items(), types.Rect.init(0, 0, 2, 2));
+        try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb2.get(0, 0));
+    }
+
+    // Alfa inválido é recusado no push.
+    var dl3 = commands.DrawList.initEmpty();
+    defer dl3.deinit(gpa);
+    try stdt.testing.expectError(error.InvalidCommand, dl3.pushAlpha(gpa, -0.5));
+    try stdt.testing.expectError(error.InvalidCommand, dl3.pushAlpha(gpa, std.math.nan(f32)));
+    try stdt.testing.expectEqual(@as(usize, 0), dl3.len());
 }

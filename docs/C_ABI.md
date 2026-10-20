@@ -886,6 +886,21 @@ zyntra_widget_text_input_ime(ctx, id, bounds, buffer, sizeof(buffer), &len,
   nulos ou inconsistentes, pré-edit maior que o buffer, cursor fora do
   buffer; UTF-8 malformado ⇒ `ZYNTRA_INVALID_TEXT`.
 
+### Alfa global (fade) nos draw commands
+
+```c
+zyntra_draw_alpha(ctx, 0.5f);              /* a partir daqui: atenuado */
+zyntra_draw_rect_filled(ctx, rect, color);
+zyntra_draw_alpha(ctx, 1.0f);              /* volta ao normal */
+```
+
+* `zyntra_draw_alpha` multiplica o alfa das cores desenhadas **depois**
+  dele, até o próximo alfa ou o fim do frame. Fator 0 não desenha nada;
+  valores acima de 1 contam como 1. É o gancho de animações (fade) sobre
+  os widgets.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle nulo ou fator não-finito/
+  negativo.
+
 ### Décimo sétimo lote (M139): atlas de glifos (fonte real)
 
 ```c

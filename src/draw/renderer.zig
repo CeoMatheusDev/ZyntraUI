@@ -34,6 +34,8 @@ fn intersects(a: types.Rect, b: types.Rect) bool {
 pub fn commandBounds(cmd: commands.DrawCommand) ?types.Rect {
     switch (cmd) {
         .clear => return null,
+        // Alfa global: não tem geometria (vale para os comandos seguintes).
+        .alpha => return null,
         .rect_filled => |c| return c.rect,
         .rect_outline => |c| return c.rect,
         .line => |c| {

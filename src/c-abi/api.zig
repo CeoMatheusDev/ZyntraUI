@@ -116,6 +116,16 @@ fn cStr(s: []const u8) ct.ZyntraStr {
     return .{ .ptr = if (s.len == 0) null else s.ptr, .len = s.len };
 }
 
+/// Define o alfa global dos comandos SEGUINTES (0..1): o que for
+/// desenhado depois sai atenuado (fade). Vale até o próximo alfa ou o
+/// fim do frame. Valores acima de 1 são tratados como 1.
+pub export fn zyntra_draw_alpha(handle: ?*ZyntraContext, factor: f32) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    if (!std.math.isFinite(factor) or factor < 0) return .invalid_argument;
+    const ctx = toCtx(h);
+    return pushDraw(ctx.draw.pushAlpha(ctx.allocator, factor));
+}
+
 /// Desenha uma imagem RGBA8 (pixels emprestados do chamador) em `rect`.
 /// `stride` é a distância em bytes entre linhas; `tint` modula RGBA.
 /// Os pixels precisam viver até o backend consumir o frame.
@@ -7615,4 +7625,48 @@ test "C-ABI M139: atlas de glifos (fonte real) na fronteira C" {
     try stdt.testing.expectEqual(bad, zyntra_font_atlas_measure(null, "A", 1, &width));
     try stdt.testing.expectEqual(bad, zyntra_font_atlas_draw_run(handle, null, "A", 1, .{}, .{}));
     try stdt.testing.expectEqual(bad, zyntra_widget_label_atlas(handle, 0, .{}, "A", 1, .{}, atlas));
+}
+
+test "C-ABI M140: alfa global (fade) nos draw commands" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(ok, zyntra_context_create(.{
+        .x = 0,
+        .y = 0,
+        .w = 8,
+        .h = 8,
+    }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_draw_alpha(handle, 0.5));
+    try stdt.testing.expectEqual(ok, zyntra_draw_rect_filled(handle, .{ .x = 0, .y = 0, .w = 2, .h = 2 }, .{ .r = 255, .g = 255, .b = 255, .a = 255 }));
+    try stdt.testing.expectEqual(ok, zyntra_draw_alpha(handle, 1.0));
+    try stdt.testing.expectEqual(ok, zyntra_draw_rect_filled(handle, .{ .x = 2, .y = 0, .w = 2, .h = 2 }, .{ .r = 255, .g = 255, .b = 255, .a = 255 }));
+    var n_draw: usize = 0;
+    try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expectEqual(@as(usize, 4), n_draw); // 2 alfa + 2 retângulos
+    // Alfa inválido é recusado.
+    try stdt.testing.expectEqual(bad, zyntra_draw_alpha(handle, -0.5));
+    try stdt.testing.expectEqual(bad, zyntra_draw_alpha(handle, std.math.nan(f32)));
+    try stdt.testing.expectEqual(bad, zyntra_draw_alpha(null, 0.5));
+    try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expectEqual(@as(usize, 4), n_draw);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // No rasterizador: o retângulo atenuado sai cinza 128.
+    var fb: ?*ZyntraFramebuffer = null;
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_create(4, 4, &fb));
+    defer zyntra_framebuffer_destroy(fb);
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_draw_clear(handle, .{ .r = 0, .g = 0, .b = 0, .a = 255 }));
+    try stdt.testing.expectEqual(ok, zyntra_draw_alpha(handle, 0.5));
+    try stdt.testing.expectEqual(ok, zyntra_draw_rect_filled(handle, .{ .x = 0, .y = 0, .w = 2, .h = 2 }, .{ .r = 255, .g = 255, .b = 255, .a = 255 }));
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_render(fb, handle, null));
+    var px: ct.ZyntraColor = .{};
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_pixel(fb, 0, 0, &px));
+    try stdt.testing.expectEqual(@as(u8, 128), px.r);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
 }

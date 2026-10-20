@@ -259,6 +259,16 @@ pub const Context = struct {
         self.focus_owner = null;
     }
 
+    /// Define o alfa global dos comandos seguintes (0..1). É o gancho
+    /// de animações (fade) sobre widgets: o que for desenhado depois
+    /// sai atenuado até o próximo `pushAlpha` (ou o fim do frame).
+    pub fn pushAlpha(self: *Self, factor: f32) ContextError!void {
+        self.draw.pushAlpha(self.allocator, factor) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.InvalidCommand => return error.InvalidCommand,
+        };
+    }
+
     /// Marca `rect` como sujo para este frame. Chamadas sucessivas
     /// acumulam por união (a região cresce para cobrir todas as áreas
     /// modificadas); marcar um rect vazio é no-op. O rect vale para o

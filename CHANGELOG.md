@@ -5,6 +5,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `draw`: **alfa global nos draw commands** (M140, aditivo) — o novo
+  comando `.alpha` multiplica o alfa das cores desenhadas DEPOIS dele
+  (até o próximo alfa ou o fim do frame). É o gancho das animações sobre
+  widgets: `Context.pushAlpha` e `zyntra_draw_alpha` aplicam o fator, e o
+  rasterizador de referência atenua cores, gradientes e o tint das
+  imagens. Fator 0 não desenha; valores acima de 1 contam como 1.
+- `examples`: **fade com tween** (M141) — o exemplo mínimo dirige o alfa
+  global com um `Tween` do módulo `anim` e confere o pixel atenuado no
+  framebuffer.
+
 ## [1.37.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a UI ganha **fonte real** — um atlas de

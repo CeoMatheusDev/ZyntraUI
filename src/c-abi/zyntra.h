@@ -169,6 +169,9 @@ ZyntraResult zyntra_draw_image_region(ZyntraContext *handle, ZyntraRect rect,
     uint32_t src_x, uint32_t src_y, uint32_t src_w, uint32_t src_h,
     ZyntraColor tint);
 
+/* Alfa global dos comandos seguintes (0..1) — fade/animação. */
+ZyntraResult zyntra_draw_alpha(ZyntraContext *handle, float factor);
+
 ZyntraResult zyntra_draw_line_dashed(ZyntraContext *handle, ZyntraVec2 p0, ZyntraVec2 p1,
     ZyntraColor color, float thickness, float dash_len, float gap_len);
 ZyntraResult zyntra_draw_circle_filled(ZyntraContext *handle, ZyntraVec2 center, float radius,

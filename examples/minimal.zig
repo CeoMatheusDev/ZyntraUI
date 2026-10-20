@@ -2488,4 +2488,29 @@ pub fn main() !void {
         std.debug.assert(blits == 1);
         std.debug.assert(rects_dev == 1);
     }
+
+    // ---- M141: fade com tween + alfa global (M140) ----------------------
+    // O módulo `anim` (easing/tween) dirige o alfa global dos comandos:
+    // o retângulo aparece aos poucos.
+    {
+        const fade = try zyntra_ui.Tween.init(0, 1, 0.5, .linear);
+        const alpha = fade.valueAt(0.25); // 0.5 no meio da animação
+
+        var fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 4, 4);
+        defer fb.deinit(allocator);
+        fb.clear(zyntra_ui.Color.rgb(0, 0, 0));
+
+        ctx.beginFrame();
+        try ctx.pushAlpha(alpha);
+        try ctx.draw.rectFilled(allocator, zyntra_ui.Rect.init(0, 0, 4, 4), zyntra_ui.Color.rgb(255, 255, 255));
+        _ = try zyntra_ui.software.raster.render(&fb, ctx.drawCommands(), zyntra_ui.Rect.init(0, 0, 4, 4));
+        ctx.endFrame();
+
+        const px = fb.get(0, 0);
+        std.debug.print(
+            "m141 fade t={d} done={} px={d}\n",
+            .{ alpha, fade.doneAt(0.5), px[0] },
+        );
+        std.debug.assert(px[0] == 128);
+    }
 }

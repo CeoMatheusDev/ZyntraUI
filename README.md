@@ -321,6 +321,20 @@ try zyntra_ui.widgets.text_input.textInputIme(
 );
 ```
 
+### Fades and other opacity
+
+`pushAlpha` sets a global opacity for the commands that follow it (until
+the next alpha or the end of the frame) — the hook for animations over
+widgets. Pair it with the `anim` module (easing/tween) to fade anything
+in or out:
+
+```zig
+const fade = try zyntra_ui.Tween.init(0, 1, 0.5, .quad_out);
+try ctx.pushAlpha(fade.valueAt(elapsed)); // 0..1
+try button_mod.button(&ctx, id, rect, style); // drawn faded
+try ctx.pushAlpha(1.0); // back to normal
+```
+
 ### Multi-window registry
 
 `WindowRegistry` is a pure, allocation-free model of the UI surfaces an

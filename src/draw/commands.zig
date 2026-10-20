@@ -71,6 +71,13 @@ pub const DrawCommand = union(enum) {
         start: u32,
         len: u32,
     },
+    /// Alfa global para os comandos SEGUINTES (até o próximo `.alpha`).
+    /// `factor` em 0..1 multiplica o alfa das cores desenhadas depois
+    /// dele — é o gancho de animações (fade in/out) sobre widgets. Vale
+    /// até o fim do frame (ou até o próximo comando de alfa).
+    alpha: extern struct {
+        factor: f32 = 1.0,
+    },
     /// Blit de uma imagem RGBA8 para `rect` (escala livre).
     /// `src` é a região inteira de origem (sprites/atlas); `pixels`
     /// aponta para o buffer do chamador, que precisa permanecer válido
@@ -208,6 +215,9 @@ pub const DrawCommand = union(enum) {
                     finite(c.size) and c.size > 0 and
                     finite(c.width) and c.width >= 0;
             },
+            .alpha => |c| {
+                return finite(c.factor) and c.factor >= 0;
+            },
             .image => |c| {
                 if (!finite(c.rect.x) or !finite(c.rect.y) or
                     !finite(c.rect.w) or !finite(c.rect.h) or
@@ -308,6 +318,7 @@ pub const DrawCommand = union(enum) {
             .rect_shadow => |*c| moveRect(&c.rect, dx, dy),
             .blur => |*c| moveRect(&c.rect, dx, dy),
             .image => |*c| moveRect(&c.rect, dx, dy),
+            .alpha => {},
             .line => |*c| {
                 moveVec(&c.p0, dx, dy);
                 moveVec(&c.p1, dx, dy);
@@ -396,6 +407,7 @@ pub const DrawCommand = union(enum) {
                 c.radius *= factor;
             },
             .image => |*c| scaleRect(&c.rect, factor),
+            .alpha => {},
         }
         return out;
     }
@@ -702,6 +714,12 @@ pub const DrawList = struct {
             .start = @intCast(start),
             .len = @intCast(text.len),
         } });
+    }
+
+    /// Define o alfa global dos comandos seguintes (0..1; valores acima
+    /// de 1 são tratados como 1 pelo backend). Ver `DrawCommand.alpha`.
+    pub fn pushAlpha(self: *Self, gpa: std.mem.Allocator, factor: f32) !void {
+        try self.push(gpa, .{ .alpha = .{ .factor = factor } });
     }
 
     /// Enfileira a imagem inteira em `rect` (blit escalável).
