@@ -17,8 +17,13 @@ const types = @import("../core/types.zig");
 const commands = @import("../draw/commands.zig");
 const image_mod = @import("../draw/image.zig");
 const renderer = @import("../draw/renderer.zig");
+const path_fill = @import("path_fill.zig");
+const path_mod = @import("../draw/path.zig");
 
 pub const max_dimension: u32 = 8192;
+
+/// Cruzamentos por scanline no buffer de caminhos do framebuffer.
+pub const path_crossings: usize = 1024;
 
 /// Métricas do rasterizador (M153): contadores por caminho e pixels
 /// escritos. Vivem no framebuffer (zeradas a cada render) — não mudam
@@ -49,6 +54,10 @@ pub const SoftwareFramebuffer = struct {
     /// que precisam de uma cópia (ex.: `blur`). `init` sempre o
     /// dimensiona; uma construção manual deve fornecê-lo para usar blur.
     scratch: []u8 = &.{},
+    /// Buffer dos caminhos: cobertura de uma linha (f32) + cobertura
+    /// auxiliar (f32) + cruzamentos das scanlines. `init` sempre o
+    /// dimensiona; sem ele, os caminhos não são rasterizados.
+    path_scratch: []u8 = &.{},
     /// Métricas do último render (M153).
     metrics: RasterMetrics = .{},
 
@@ -62,14 +71,19 @@ pub const SoftwareFramebuffer = struct {
         const pixels = try gpa.alloc(u8, @intCast(n));
         errdefer gpa.free(pixels);
         const scratch = try gpa.alloc(u8, @intCast(n));
-        return .{ .w = w, .h = h, .pixels = pixels, .scratch = scratch };
+        errdefer gpa.free(scratch);
+        const path_bytes = @as(usize, w) * 8 + path_crossings * @sizeOf(path_fill.Crossing);
+        const path_scratch = try gpa.alloc(u8, path_bytes);
+        return .{ .w = w, .h = h, .pixels = pixels, .scratch = scratch, .path_scratch = path_scratch };
     }
 
     pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
         gpa.free(self.pixels);
         if (self.scratch.len != 0) gpa.free(self.scratch);
+        if (self.path_scratch.len != 0) gpa.free(self.path_scratch);
         self.pixels = &.{};
         self.scratch = &.{};
+        self.path_scratch = &.{};
         self.w = 0;
         self.h = 0;
     }
@@ -947,6 +961,39 @@ fn overlaps(a: types.Rect, b: types.Rect) bool {
     return a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h;
 }
 
+/// Pinta um pixel do caminho (cobertura fracionária), respeitando o
+/// clip e os limites do framebuffer.
+const PathPlot = struct {
+    fb: *SoftwareFramebuffer,
+    color: types.Color,
+    clip: ?types.Rect,
+
+    pub fn plot(self: *@This(), x: i32, y: i32, cov: f32) void {
+        if (x < 0 or y < 0) return;
+        const ux = @as(u32, @intCast(x));
+        const uy = @as(u32, @intCast(y));
+        if (ux >= self.fb.w or uy >= self.fb.h) return;
+        if (self.clip) |cp| {
+            if (!cp.contains(.{ .x = @floatFromInt(x), .y = @floatFromInt(y) })) return;
+        }
+        self.fb.setAlpha(ux, uy, self.color, cov);
+    }
+};
+
+/// Buffers de rasterização de caminho (do `path_scratch` do framebuffer).
+/// Retorna null quando o framebuffer não tem o buffer (construção
+/// manual): o caminho simplesmente não é desenhado.
+fn pathScratch(fb: *SoftwareFramebuffer) ?path_fill.Scratch {
+    const cov_bytes = @as(usize, fb.w) * @sizeOf(f32);
+    const cross_bytes = path_crossings * @sizeOf(path_fill.Crossing);
+    if (fb.path_scratch.len < cov_bytes * 2 + cross_bytes) return null;
+    const base = @as([*]u8, @ptrCast(fb.path_scratch.ptr));
+    const cov = @as([*]f32, @ptrCast(@alignCast(base)))[0..fb.w];
+    const aux = @as([*]f32, @ptrCast(@alignCast(base + cov_bytes)))[0..fb.w];
+    const cross = @as([*]path_fill.Crossing, @ptrCast(@alignCast(base + cov_bytes * 2)))[0..path_crossings];
+    return .{ .cov = cov, .aux = aux, .crossings = cross };
+}
+
 /// Executa comandos no framebuffer (1px = 1px lógico). Texto é pulado
 /// E contado (sem fonte, sem glifos). Comandos inválidos retornam erro
 /// sem efeito parcial garantido além do já desenhado. `clear` limpa o
@@ -1077,6 +1124,34 @@ fn renderInternal(
                     .line_dashed => |c| fb.strokeLineDashed(c.p0, c.p1, c.thickness, c.dash_len, c.gap_len, mergeClip(clip, area), withAlpha(c.color, alpha)),
                     .rect_shadow => |c| fb.fillShadow(c.rect, c.radius, c.offset, c.blur, mergeClip(clip, area), withAlpha(c.color, alpha)),
                     .blur => |c| fb.blurRegion(c.rect, c.radius, mergeClip(clip, area)),
+                    .path => |c| {
+                        const pts = if (c.points) |ptr| ptr[0..c.point_count] else &.{};
+                        const conts = if (c.contours) |ptr| ptr[0..c.contour_count] else &.{};
+                        const flat = path_mod.Flat{ .points = pts, .contours = conts };
+                        if (flat.points.len == 0) break;
+                        var scratch = pathScratch(fb) orelse break;
+                        var plot = PathPlot{
+                            .fb = fb,
+                            .color = withAlpha(c.color, alpha),
+                            .clip = mergeClip(clip, area),
+                        };
+                        const draw_area = intersectClip(flat.bounds(), clip, area);
+                        if (draw_area.isEmpty()) break;
+                        if (c.thickness > 0) {
+                            path_fill.stroke(
+                                PathPlot,
+                                flat,
+                                c.thickness,
+                                c.join,
+                                c.cap,
+                                draw_area,
+                                &scratch,
+                                &plot,
+                            );
+                        } else {
+                            path_fill.fill(PathPlot, flat, c.rule, draw_area, &scratch, &plot);
+                        }
+                    },
                     .image => |c| fb.blitImage(
                         c.rect,
                         c.src,
@@ -2327,4 +2402,74 @@ test "run de glifos desenha os glifos do atlas (M146)" {
     try stdt.testing.expectEqual([4]u8{ 0, 0, 255, 255 }, fb.get(1, 2));
     // Onde não há glifo, o fundo permanece.
     try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(5, 1));
+}
+
+test "software: caminho preenchido e traçado no framebuffer (M159)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const path_mod2 = @import("../draw/path.zig");
+
+    var fb = try SoftwareFramebuffer.init(gpa, 32, 32);
+    defer fb.deinit(gpa);
+    fb.clear(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
+
+    // Triângulo: moveTo/lineTo/close.
+    var segs: [8]path_mod2.Segment = undefined;
+    var b = path_mod2.Builder.init(&segs);
+    try b.moveTo(.{ .x = 4, .y = 4 });
+    try b.lineTo(.{ .x = 28, .y = 4 });
+    try b.lineTo(.{ .x = 16, .y = 28 });
+    try b.close();
+    var points: [64]types.Vec2 = undefined;
+    var contours: [4]path_mod2.ContourRange = undefined;
+    const flat = try path_mod2.flatten(b.segments(), 0.25, &points, &contours);
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    try dl.path(gpa, flat, types.Color.rgb(255, 0, 0), 0, .nonzero, .round, .butt);
+    try dl.path(gpa, flat, types.Color.rgb(0, 255, 0), 2, .nonzero, .round, .butt);
+
+    const stats = try render(&fb, dl.items(), types.Rect.init(0, 0, 32, 32));
+    try stdt.testing.expectEqual(@as(u32, 2), stats.drawn);
+
+    // O interior do triângulo tem o preenchimento vermelho.
+    const inside = fb.get(16, 18);
+    try stdt.testing.expect(inside[0] > 200);
+    try stdt.testing.expect(inside[1] == 0);
+
+    // A borda (traço verde) aparece em cima do preenchimento.
+    const edge = fb.get(16, 4);
+    try stdt.testing.expect(edge[1] > 100);
+
+    // Fora do triângulo, nada.
+    const outside = fb.get(1, 30);
+    try stdt.testing.expectEqual(@as(u8, 0), outside[0]);
+    try stdt.testing.expectEqual(@as(u8, 0), outside[1]);
+}
+
+test "software: caminho com clip respeita o recorte (M159)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const path_mod2 = @import("../draw/path.zig");
+
+    var fb = try SoftwareFramebuffer.init(gpa, 32, 32);
+    defer fb.deinit(gpa);
+    fb.clear(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
+
+    var segs: [8]path_mod2.Segment = undefined;
+    var b = path_mod2.Builder.init(&segs);
+    try b.rect(.{ .x = 0, .y = 0, .w = 32, .h = 32 });
+    var points: [64]types.Vec2 = undefined;
+    var contours: [4]path_mod2.ContourRange = undefined;
+    const flat = try path_mod2.flatten(b.segments(), 0.25, &points, &contours);
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    try dl.push(gpa, .{ .clip = .{ .rect = types.Rect.init(0, 0, 16, 32), .null_rect = false } });
+    try dl.path(gpa, flat, types.Color.rgb(255, 255, 255), 0, .nonzero, .round, .butt);
+
+    _ = try render(&fb, dl.items(), types.Rect.init(0, 0, 32, 32));
+    // Dentro do clip: branco. Fora: preto.
+    try stdt.testing.expectEqual(@as(u8, 255), fb.get(8, 16)[0]);
+    try stdt.testing.expectEqual(@as(u8, 0), fb.get(24, 16)[0]);
 }

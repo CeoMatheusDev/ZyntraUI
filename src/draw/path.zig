@@ -57,6 +57,35 @@ pub const Quad = extern struct {
     p: types.Vec2 = .{},
 };
 
+/// Regra de preenchimento de um caminho.
+pub const FillRule = enum(u8) {
+    /// Dentro quando o winding acumulado ≠ 0 (contornos no sentido
+    /// oposto viram buracos).
+    nonzero = 0,
+    /// Dentro quando o número de cruzamentos é ímpar.
+    evenodd = 1,
+};
+
+/// Junta das curvas no traço.
+pub const StrokeJoin = enum(u8) {
+    /// Bissetriz estendida (limite 4: cai no bisel se passar).
+    miter = 0,
+    /// Arco no vértice.
+    round = 1,
+    /// Corte reto no vértice.
+    bevel = 2,
+};
+
+/// Ponta do traço (contornos abertos).
+pub const StrokeCap = enum(u8) {
+    /// Corta na perpendicular do segmento.
+    butt = 0,
+    /// Arco (meia-circunferência).
+    round = 1,
+    /// Retângulo (meia largura além do ponto).
+    square = 2,
+};
+
 /// Segmento de um caminho (antes do achatamento).
 pub const Segment = union(enum) {
     /// Começa um novo contorno em `p`.

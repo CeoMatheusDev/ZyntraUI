@@ -109,6 +109,7 @@ pub fn commandBounds(cmd: commands.DrawCommand) ?types.Rect {
             return .{ .x = x, .y = y, .w = x2 - x, .h = y2 - y };
         },
         .blur => |c| return c.rect,
+        .path => |c| return c.bounds,
     }
 }
 

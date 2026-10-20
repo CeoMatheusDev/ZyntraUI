@@ -14,6 +14,7 @@ const std = @import("std");
 const types = @import("../core/types.zig");
 const metrics_mod = @import("../text/metrics.zig");
 const image_mod = @import("image.zig");
+const path_mod = @import("path.zig");
 
 /// Glifo de um run: região na imagem do atlas + deslocamento no run
 /// (pixels lógicos). Ver `DrawCommand.glyph_run`.
@@ -102,6 +103,31 @@ pub const DrawCommand = union(enum) {
         refs: ?[*]const GlyphRef,
         count: u32,
     },
+    /// Caminho vetorial achatado (polilinhas): preenchimento
+    /// (`thickness == 0`) ou traço (`thickness > 0`).
+    /// `points` e `contours` apontam para blocos ESTÁVEIS copiados pela
+    /// `DrawList` (o ponteiro do comando não muda enquanto o frame
+    /// vive). A geometria é ABSOLUTA (pixels lógicos) — transladar ou
+    /// escalar um caminho exige as cópias de `DrawList.translateInto`/
+    /// `scaledInto` (que reescrevem os pontos).
+    path: extern struct {
+        points: ?[*]const types.Vec2 = null,
+        contours: ?[*]const path_mod.ContourRange = null,
+        point_count: u32 = 0,
+        contour_count: u32 = 0,
+        color: types.Color = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+        /// 0 = preenchimento; > 0 = traço com esta espessura (px).
+        thickness: f32 = 0,
+        /// Regra do preenchimento (ignorada no traço).
+        rule: path_mod.FillRule = .nonzero,
+        /// Junta do traço.
+        join: path_mod.StrokeJoin = .round,
+        /// Ponta do traço.
+        cap: path_mod.StrokeCap = .butt,
+        /// Bounds do caminho (culling).
+        bounds: types.Rect = .{},
+    },
+
     /// Alfa global para os comandos SEGUINTES (até o próximo `.alpha`).
     /// `factor` em 0..1 multiplica o alfa das cores desenhadas depois
     /// dele — é o gancho de animações (fade in/out) sobre widgets. Vale
@@ -249,6 +275,12 @@ pub const DrawCommand = union(enum) {
             .alpha => |c| {
                 return finite(c.factor) and c.factor >= 0;
             },
+            .path => |c| {
+                return finite(c.thickness) and c.thickness >= 0 and
+                    finite(c.bounds.x) and finite(c.bounds.y) and
+                    finite(c.bounds.w) and finite(c.bounds.h) and
+                    c.bounds.w >= 0 and c.bounds.h >= 0;
+            },
             .glyph_run => |c| {
                 if (!finite(c.pos.x) or !finite(c.pos.y)) return false;
                 if (c.pixels == null) return false;
@@ -377,6 +409,9 @@ pub const DrawCommand = union(enum) {
             .circle_outline => |*c| moveVec(&c.center, dx, dy),
             .circle_dashed => |*c| moveVec(&c.center, dx, dy),
             .text => |*c| moveVec(&c.pos, dx, dy),
+            // O caminho é absoluto e vive num bloco compartilhado:
+            // transladá-lo exige a CÓPIA (DrawList.translateInto).
+            .path => {},
         }
         return out;
     }
@@ -466,6 +501,9 @@ pub const DrawCommand = union(enum) {
                 c.scale = c.scale / factor;
             },
             .alpha => {},
+            // O caminho é absoluto e vive num bloco compartilhado:
+            // escalá-lo exige a CÓPIA (DrawList.scaledInto).
+            .path => {},
         }
         return out;
     }
@@ -493,6 +531,12 @@ fn scaleVec(p: *types.Vec2, factor: f32) void {
     p.y *= factor;
 }
 
+/// Bloco estável de um caminho (pontos + contornos).
+const PathBlock = struct {
+    points: []types.Vec2,
+    contours: []path_mod.ContourRange,
+};
+
 /// Lista de desenho do frame (bump por frame + retenção de capacidade).
 /// `text_bytes` é a arena dos textos de comandos `.text`; comandos
 /// guardam offsets, nunca slices (seguro contra realocação).
@@ -509,6 +553,13 @@ pub const DrawList = struct {
     /// Glifos usados no bloco atual (o bloco é reaproveitado no frame
     /// seguinte: sem alocação por frame).
     glyph_block_len: usize = 0,
+    /// Blocos de caminhos (ver `DrawCommand.path`). O ponteiro do
+    /// comando precisa ser estável ⇒ os blocos nunca são movidos.
+    path_blocks: std.ArrayList(PathBlock) = .empty,
+    /// Pontos usados no bloco de caminho atual.
+    path_block_points: usize = 0,
+    /// Contornos usados no bloco de caminho atual.
+    path_block_contours: usize = 0,
 
     const Self = @This();
 
@@ -522,6 +573,13 @@ pub const DrawList = struct {
         for (self.glyph_blocks.items) |block| gpa.free(block);
         self.glyph_blocks.deinit(gpa);
         self.glyph_block_len = 0;
+        for (self.path_blocks.items) |block| {
+            gpa.free(block.points);
+            gpa.free(block.contours);
+        }
+        self.path_blocks.deinit(gpa);
+        self.path_block_points = 0;
+        self.path_block_contours = 0;
     }
 
     pub fn clearRetainingCapacity(self: *Self) void {
@@ -531,6 +589,8 @@ pub const DrawList = struct {
         // Os blocos são REUSADOS no frame seguinte (mesmo endereço ⇒ os
         // comandos do frame anterior, já descartados, não importam).
         self.glyph_block_len = 0;
+        self.path_block_points = 0;
+        self.path_block_contours = 0;
     }
 
     pub fn len(self: *const Self) usize {
@@ -602,6 +662,10 @@ pub const DrawList = struct {
                 try self.copyGlyphRun(gpa, out, cmd, dx, dy, 1.0);
                 continue;
             }
+            if (cmd == .path) {
+                try self.copyPath(gpa, out, cmd, dx, dy, 1.0);
+                continue;
+            }
             if (cmd != .text) {
                 try out.push(gpa, cmd.translated(dx, dy));
                 continue;
@@ -633,6 +697,10 @@ pub const DrawList = struct {
         for (self.list.items) |cmd| {
             if (cmd == .glyph_run) {
                 try self.copyGlyphRun(gpa, out, cmd, 0, 0, factor);
+                continue;
+            }
+            if (cmd == .path) {
+                try self.copyPath(gpa, out, cmd, 0, 0, factor);
                 continue;
             }
             if (cmd != .text) {
@@ -695,6 +763,129 @@ pub const DrawList = struct {
         var copy = if (factor == 1.0) cmd.translated(dx, dy) else cmd.scaled(factor);
         copy.glyph_run.refs = block.ptr + base;
         copy.glyph_run.count = @intCast(refs.len);
+        try out.push(gpa, copy);
+    }
+
+    /// Enfileira um caminho vetorial (preenchimento ou traço).
+    ///
+    /// `flat` é o caminho ACHATADO (ver `draw.path.flatten`): os pontos
+    /// e os contornos são COPIADOS para um bloco estável da lista (o
+    /// ponteiro do comando não muda enquanto o frame vive). `thickness`
+    /// 0 = preenchimento, > 0 = traço com essa espessura.
+    pub fn path(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        flat: path_mod.Flat,
+        color: types.Color,
+        thickness: f32,
+        rule: path_mod.FillRule,
+        join: path_mod.StrokeJoin,
+        cap: path_mod.StrokeCap,
+    ) !void {
+        if (!std.math.isFinite(thickness) or thickness < 0) return error.InvalidCommand;
+        for (flat.points) |p| {
+            if (!std.math.isFinite(p.x) or !std.math.isFinite(p.y)) return error.InvalidCommand;
+        }
+        const ptrs = try self.allocPath(gpa, flat.points, flat.contours, 0, 0, 1.0);
+        try self.push(gpa, .{ .path = .{
+            .points = ptrs.points,
+            .contours = ptrs.contours,
+            .point_count = @intCast(flat.points.len),
+            .contour_count = @intCast(flat.contours.len),
+            .color = color,
+            .thickness = thickness,
+            .rule = rule,
+            .join = join,
+            .cap = cap,
+            .bounds = flat.bounds(),
+        } });
+    }
+
+    /// Pontos e contornos de um comando de caminho (vazio se não for).
+    pub fn pathOf(self: *const Self, cmd: DrawCommand) path_mod.Flat {
+        _ = self;
+        const p = switch (cmd) {
+            .path => |c| c,
+            else => return .{},
+        };
+        const points = if (p.points) |ptr| ptr[0..p.point_count] else &.{};
+        const contours = if (p.contours) |ptr| ptr[0..p.contour_count] else &.{};
+        return .{ .points = points, .contours = contours };
+    }
+
+    /// Reserva espaço num bloco estável e devolve os ponteiros.
+    /// Os pontos são transformados (`p * factor + (dx, dy)`) na cópia.
+    fn allocPath(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        points: []const types.Vec2,
+        contours: []const path_mod.ContourRange,
+        dx: f32,
+        dy: f32,
+        factor: f32,
+    ) !struct { points: ?[*]const types.Vec2, contours: ?[*]const path_mod.ContourRange } {
+        if (points.len == 0) return .{ .points = null, .contours = null };
+        const last = if (self.path_blocks.items.len == 0)
+            null
+        else
+            self.path_blocks.items[self.path_blocks.items.len - 1];
+        if (last == null or
+            self.path_block_points + points.len > last.?.points.len or
+            self.path_block_contours + contours.len > last.?.contours.len)
+        {
+            const cap_points = @max(256, points.len);
+            const cap_contours = @max(32, contours.len);
+            const new_points = try gpa.alloc(types.Vec2, cap_points);
+            errdefer gpa.free(new_points);
+            const new_contours = try gpa.alloc(path_mod.ContourRange, cap_contours);
+            errdefer gpa.free(new_contours);
+            try self.path_blocks.append(gpa, .{ .points = new_points, .contours = new_contours });
+            self.path_block_points = 0;
+            self.path_block_contours = 0;
+            self.growths += 1;
+        }
+        const blk = self.path_blocks.items[self.path_blocks.items.len - 1];
+        const base = self.path_block_points;
+        for (points, 0..) |p, i| {
+            blk.points[base + i] = .{
+                .x = p.x * factor + dx,
+                .y = p.y * factor + dy,
+            };
+        }
+        @memcpy(blk.contours[self.path_block_contours..][0..contours.len], contours);
+        const p_ptr = blk.points.ptr + base;
+        const c_ptr = blk.contours.ptr + self.path_block_contours;
+        self.path_block_points += points.len;
+        self.path_block_contours += contours.len;
+        return .{ .points = p_ptr, .contours = c_ptr };
+    }
+
+    /// Copia um caminho para outra lista, aplicando translação/escala
+    /// aos PONTOS (a geometria do caminho é absoluta).
+    fn copyPath(
+        self: *const Self,
+        gpa: std.mem.Allocator,
+        out: *Self,
+        cmd: DrawCommand,
+        dx: f32,
+        dy: f32,
+        factor: f32,
+    ) !void {
+        _ = self;
+        const src = cmd.path;
+        const points = if (src.points) |ptr| ptr[0..src.point_count] else &.{};
+        const contours = if (src.contours) |ptr| ptr[0..src.contour_count] else &.{};
+        const ptrs = try out.allocPath(gpa, points, contours, dx, dy, factor);
+        var copy = cmd;
+        copy.path.points = ptrs.points;
+        copy.path.contours = ptrs.contours;
+        copy.path.bounds = .{
+            .x = src.bounds.x * factor + dx,
+            .y = src.bounds.y * factor + dy,
+            .w = src.bounds.w * factor,
+            .h = src.bounds.h * factor,
+        };
+        copy.path.thickness = src.thickness * factor;
         try out.push(gpa, copy);
     }
 
@@ -1885,4 +2076,70 @@ test "DrawList scaledInto: run com mais de 256 glifos (M142)" {
     try stdt.testing.expectEqual(@as(usize, 400), got.len);
     try stdt.testing.expectEqual(@as(f32, 2.0), got[1].dx); // escalado
     try stdt.testing.expectEqual(@as(u32, 399 % 8), got[399].src_x);
+}
+
+test "DrawList path: enfileira, copia e translada o caminho (M159)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    var segs: [8]path_mod.Segment = undefined;
+    var b = path_mod.Builder.init(&segs);
+    try b.rect(.{ .x = 0, .y = 0, .w = 10, .h = 20 });
+    var points: [32]types.Vec2 = undefined;
+    var contours: [4]path_mod.ContourRange = undefined;
+    const flat = try path_mod.flatten(b.segments(), 0.25, &points, &contours);
+
+    try dl.path(gpa, flat, types.Color.rgb(10, 20, 30), 0, .nonzero, .round, .butt);
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    const cmd = dl.items()[0];
+    try stdt.testing.expect(cmd == .path);
+    try stdt.testing.expectEqual(@as(u32, 4), cmd.path.point_count);
+    try stdt.testing.expectEqual(@as(u32, 1), cmd.path.contour_count);
+    try stdt.testing.expectEqual(types.Color.rgb(10, 20, 30), cmd.path.color);
+    try stdt.testing.expectEqual(@as(f32, 0), cmd.path.thickness);
+    try stdt.testing.expect(cmd.path.points != null);
+
+    // Os pontos do comando são os do bloco estável (cópia).
+    const got = dl.pathOf(cmd);
+    try stdt.testing.expectEqual(@as(usize, 4), got.points.len);
+    try stdt.testing.expectEqual(@as(usize, 1), got.contours.len);
+    try stdt.testing.expectEqual(@as(f32, 10), got.bounds().w);
+    try stdt.testing.expectEqual(@as(f32, 20), got.bounds().h);
+
+    // A translação copia os pontos (geometria absoluta).
+    var out = DrawList.initEmpty();
+    defer out.deinit(gpa);
+    try dl.translateInto(gpa, &out, 100, 50);
+    try stdt.testing.expectEqual(@as(usize, 1), out.len());
+    const moved = out.pathOf(out.items()[0]);
+    try stdt.testing.expectEqual(@as(f32, 100), moved.points[0].x);
+    try stdt.testing.expectEqual(@as(f32, 50), moved.points[0].y);
+    try stdt.testing.expectEqual(@as(f32, 10), moved.bounds().w);
+    try stdt.testing.expectEqual(@as(f32, 100), moved.bounds().x);
+
+    // A escala multiplica os pontos.
+    var scaled = DrawList.initEmpty();
+    defer scaled.deinit(gpa);
+    try dl.scaledInto(gpa, &scaled, 2.0);
+    const s2 = scaled.pathOf(scaled.items()[0]);
+    try stdt.testing.expectEqual(@as(f32, 20), s2.points[1].x);
+    try stdt.testing.expectEqual(@as(f32, 40), s2.bounds().h);
+}
+
+test "DrawList path: rejeita geometria inválida (M159)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    var points: [8]types.Vec2 = undefined;
+    var contours: [4]path_mod.ContourRange = undefined;
+    const bad = path_mod.Flat{
+        .points = &[_]types.Vec2{.{ .x = std.math.nan(f32), .y = 0 }},
+        .contours = &[_]path_mod.ContourRange{.{ .start = 0, .len = 1, .closed = true }},
+    };
+    try stdt.testing.expectError(error.InvalidCommand, dl.path(gpa, bad, types.Color.rgb(0, 0, 0), 0, .nonzero, .round, .butt));
+    try stdt.testing.expectError(error.InvalidCommand, dl.path(gpa, .{ .points = points[0..0], .contours = contours[0..0] }, types.Color.rgb(0, 0, 0), -1, .nonzero, .round, .butt));
 }
