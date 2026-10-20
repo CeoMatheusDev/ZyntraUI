@@ -19,6 +19,9 @@
 
 const std = @import("std");
 const metrics = @import("metrics.zig");
+const layout_mod = @import("layout.zig");
+const atlas_mod = @import("atlas.zig");
+const image_mod = @import("../draw/image.zig");
 
 /// Faixa de bytes [start, start+len) dentro do texto original.
 pub const LineRange = extern struct {
@@ -30,9 +33,50 @@ fn isSpace(cp: u21) bool {
     return cp == ' ' or cp == '\t' or cp == '\r';
 }
 
+/// Medidor das métricas de fallback (avanço uniforme).
+const MetricsMeasurer = struct {
+    m: metrics.FontMetrics,
+    fn word(self: @This(), text: []const u8) !f32 {
+        var n: u32 = 0;
+        var i: usize = 0;
+        while (i < text.len) {
+            const d = try metrics.decodeOne(text[i..]);
+            i += d.len;
+            n += 1;
+        }
+        return @as(f32, @floatFromInt(n)) * self.m.advance;
+    }
+    fn space(self: @This()) f32 {
+        return self.m.advance;
+    }
+    fn cp(self: @This(), codepoint: u21) f32 {
+        _ = codepoint;
+        return self.m.advance;
+    }
+};
+
+/// Medidor de um atlas de glifos (larguras reais da fonte).
+const LayoutMeasurer = struct {
+    l: *const layout_mod.Layout,
+    fn word(self: @This(), text: []const u8) !f32 {
+        return self.l.advance(text);
+    }
+    fn space(self: @This()) f32 {
+        return self.l.advanceOf(' ');
+    }
+    fn cp(self: @This(), codepoint: u21) f32 {
+        return self.l.advanceOf(codepoint);
+    }
+};
+
 /// Núcleo compartilhado: `out == null` só conta.
-fn layout(text: []const u8, m: metrics.FontMetrics, max_width: f32, out: ?[]LineRange) !usize {
-    if (!m.isValid()) return error.InvalidMetrics;
+fn layoutGeneric(
+    comptime M: type,
+    text: []const u8,
+    measurer: M,
+    max_width: f32,
+    out: ?[]LineRange,
+) !usize {
     if (!std.math.isFinite(max_width) or max_width <= 0) return error.InvalidArgument;
     // Offsets u32 abaixo: texto além de 4 GiB não é endereçável aqui.
     if (text.len > std.math.maxInt(u32)) return error.OutOfMemory;
@@ -88,16 +132,14 @@ fn layout(text: []const u8, m: metrics.FontMetrics, max_width: f32, out: ?[]Line
             i += d.len;
             continue;
         }
-        // Palavra: [i, wend), conta glifos.
+        // Palavra: [i, wend).
         var wend = i;
-        var glyphs: u32 = 0;
         while (wend < text.len) {
             const dd = try metrics.decodeOne(text[wend..]);
             if (dd.codepoint == '\n' or isSpace(dd.codepoint)) break;
             wend += dd.len;
-            glyphs += 1;
         }
-        const ww = @as(f32, @floatFromInt(glyphs)) * m.advance;
+        const ww = try M.word(measurer, text[i..wend]);
         if (line_start == null) {
             if (ww <= max_width) {
                 line_start = i;
@@ -111,8 +153,9 @@ fn layout(text: []const u8, m: metrics.FontMetrics, max_width: f32, out: ?[]Line
                     var q = p;
                     while (q < wend) {
                         const dd = try metrics.decodeOne(text[q..]);
-                        if (pw > 0 and pw + m.advance > max_width) break;
-                        pw += m.advance;
+                        const w = M.cp(measurer, dd.codepoint);
+                        if (pw > 0 and pw + w > max_width) break;
+                        pw += w;
                         q += dd.len;
                     }
                     try emit(out, &nlines, p, q - p);
@@ -124,7 +167,7 @@ fn layout(text: []const u8, m: metrics.FontMetrics, max_width: f32, out: ?[]Line
             continue;
         }
         // Linha com conteúdo.
-        const need = (if (spaced) m.advance else 0) + ww;
+        const need = (if (spaced) M.space(measurer) else 0) + ww;
         if (line_w + need <= max_width) {
             line_end = wend;
             line_w += need;
@@ -143,8 +186,9 @@ fn layout(text: []const u8, m: metrics.FontMetrics, max_width: f32, out: ?[]Line
                     var q = p;
                     while (q < wend) {
                         const dd = try metrics.decodeOne(text[q..]);
-                        if (pw > 0 and pw + m.advance > max_width) break;
-                        pw += m.advance;
+                        const w = M.cp(measurer, dd.codepoint);
+                        if (pw > 0 and pw + w > max_width) break;
+                        pw += w;
                         q += dd.len;
                     }
                     try emit(out, &nlines, p, q - p);
@@ -163,6 +207,12 @@ fn layout(text: []const u8, m: metrics.FontMetrics, max_width: f32, out: ?[]Line
     return nlines;
 }
 
+/// Núcleo com as métricas de fallback (comportamento histórico).
+fn layout(text: []const u8, m: metrics.FontMetrics, max_width: f32, out: ?[]LineRange) !usize {
+    if (!m.isValid()) return error.InvalidMetrics;
+    return layoutGeneric(MetricsMeasurer, text, MetricsMeasurer{ .m = m }, max_width, out);
+}
+
 /// Escreve até `out.len` faixas; retorna a quantidade escrita.
 pub fn wrapLines(text: []const u8, m: metrics.FontMetrics, max_width: f32, out: []LineRange) !usize {
     // Conta primeiro? Não — escreve direto; NoSpaceLeft se curto.
@@ -173,6 +223,28 @@ pub fn wrapLines(text: []const u8, m: metrics.FontMetrics, max_width: f32, out: 
 /// Conta as linhas sem escrever.
 pub fn countLines(text: []const u8, m: metrics.FontMetrics, max_width: f32) !usize {
     return layout(text, m, max_width, null);
+}
+
+/// Quebra de linha com fonte real (atlas de glifos): as larguras vêm
+/// dos AVANÇOS dos glifos, então a quebra respeita a fonte
+/// proporcional. Mesmas regras do `wrapLines` (palavras, espaços
+/// colapsados na medida, palavra longa fatiada por codepoint).
+pub fn wrapLinesLayout(
+    text: []const u8,
+    l: *const layout_mod.Layout,
+    max_width: f32,
+    out: []LineRange,
+) !usize {
+    return layoutGeneric(LayoutMeasurer, text, LayoutMeasurer{ .l = l }, max_width, out);
+}
+
+/// Conta as linhas de uma quebra com fonte real (sem escrever).
+pub fn countLinesLayout(
+    text: []const u8,
+    l: *const layout_mod.Layout,
+    max_width: f32,
+) !usize {
+    return layoutGeneric(LayoutMeasurer, text, LayoutMeasurer{ .l = l }, max_width, null);
 }
 
 test "wrap básico, newline e vazio" {
@@ -315,4 +387,49 @@ fn fuzzWrap(_: void, smith: *std.testing.Smith) !void {
     const tm = try metrics.measure(text, m);
     try std.testing.expect(tm.width <= @as(f32, @floatFromInt(tm.glyphs)) * m.advance + 0.001);
     try std.testing.expectEqual(@as(f32, @floatFromInt(tm.lines)) * m.lineHeight(), tm.height);
+}
+
+test "wrap com fonte real (atlas) respeita os avanços dos glifos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var b = atlas_mod.Builder.init(64, 64, 1);
+    defer b.deinit(gpa);
+    _ = try b.addGlyph(gpa, 'A', 4, 8, .{ .advance = 5, .bearing_y = -8, .height = 8 });
+    _ = try b.addGlyph(gpa, 'B', 4, 8, .{ .advance = 3, .bearing_y = -8, .height = 8 });
+    _ = try b.addGlyph(gpa, ' ', 1, 1, .{ .advance = 2 });
+    var bytes: [64 * 64 * 4]u8 = undefined;
+    for (&bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = try image_mod.Image.init(64, 64, &bytes);
+    var atlas = try b.finish(gpa, img);
+    defer atlas.deinit(gpa);
+
+    const l = try layout_mod.Layout.fromAtlas(&atlas);
+    var out: [8]LineRange = undefined;
+
+    // "AB" = 8 px, "AB" = 8 px, espaço = 2 px ⇒ largura 11 não comporta
+    // as duas palavras na mesma linha.
+    const n = try wrapLinesLayout("AB AB", &l, 11, &out);
+    try stdt.testing.expectEqual(@as(usize, 2), n);
+    try stdt.testing.expectEqual(@as(usize, 0), out[0].start);
+    try stdt.testing.expectEqual(@as(usize, 2), out[0].len);
+    try stdt.testing.expectEqual(@as(usize, 3), out[1].start);
+    try stdt.testing.expectEqual(@as(usize, 2), out[1].len);
+
+    // Largura 18 comporta as duas palavras.
+    const n2 = try wrapLinesLayout("AB AB", &l, 18, &out);
+    try stdt.testing.expectEqual(@as(usize, 1), n2);
+    try stdt.testing.expectEqual(@as(usize, 5), out[0].len);
+
+    // Contagem sem escrita bate com a escrita.
+    try stdt.testing.expectEqual(@as(usize, 2), try countLinesLayout("AB AB", &l, 11));
+
+    // Palavra maior que a linha é fatiada por codepoint.
+    const n3 = try wrapLinesLayout("AB", &l, 4, &out);
+    try stdt.testing.expectEqual(@as(usize, 2), n3);
+    try stdt.testing.expectEqual(@as(usize, 1), out[0].len);
+    try stdt.testing.expectEqual(@as(usize, 1), out[1].len);
+
+    // Contratos.
+    try stdt.testing.expectError(error.InvalidArgument, wrapLinesLayout("A", &l, 0, &out));
+    try stdt.testing.expectError(error.InvalidUtf8, wrapLinesLayout("\xff", &l, 10, &out));
 }

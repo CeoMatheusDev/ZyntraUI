@@ -31,6 +31,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `text.layout.Layout` ganhou `offsetAtX` (x → offset) e `visibleOffset`
   (rolagem horizontal) para a edição.
 
+- `text`: **quebra de linha com fonte real** (M136, aditivo) — o núcleo do
+  `text/wrap` passou a ser genérico sobre um medidor de larguras, e
+  `wrapLinesLayout`/`countLinesLayout` quebram o texto pelos AVANÇOS REAIS
+  de um `FontAtlas` (fonte proporcional) em vez de colunas. As variantes
+  com métricas de fallback mantêm o comportamento idêntico.
+- `widgets`: **rótulo multilinha com fonte real** (M137, aditivo) —
+  `label.labelAtlasWrapped` quebra o texto pela largura real dos glifos e
+  desenha cada linha como blits do atlas (limite de 64 linhas, como no
+  `labelWrapped`).
+
 ## [1.36.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a base de UI ganha **imagens** (RGBA8 nos

@@ -207,7 +207,7 @@ pub const Layout = struct {
         var i: usize = 0;
         while (i < text.len) {
             const d = metrics_mod.decodeOne(text[i..]) catch return i;
-            const adv = self.glyphAdvance(d.codepoint);
+            const adv = self.advanceOf(d.codepoint);
             if (x < acc + adv / 2) return i;
             acc += adv;
             i += d.len;
@@ -216,7 +216,7 @@ pub const Layout = struct {
     }
 
     /// Avanço de UM glifo (0 quando o glifo não existe no atlas).
-    fn glyphAdvance(self: Layout, codepoint: u21) f32 {
+    pub fn advanceOf(self: Layout, codepoint: u21) f32 {
         return switch (self.source) {
             .metrics => |m| m.advance,
             .atlas => |a| if (a.glyph(codepoint)) |g| g.metrics.advance else 0,

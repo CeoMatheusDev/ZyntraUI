@@ -151,6 +151,78 @@ pub fn labelAtlas(
     return res;
 }
 
+/// Rótulo multilinha com fonte real (M137, aditivo).
+///
+/// Quebra o texto pela LARGURA REAL dos glifos (não por colunas) e
+/// desenha cada linha como blits do atlas. `bounds.w` precisa ser > 0;
+/// além de `max_wrapped_lines` linhas o resto trunca (`truncated=true`).
+pub fn labelAtlasWrapped(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    text: []const u8,
+    color: types.Color,
+    atlas: *const atlas_mod.FontAtlas,
+    debug_draw: bool,
+) !LabelResult {
+    if (id.isNull()) return error.InvalidArgument;
+    if (atlas.glyphs.len == 0) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h) or
+        bounds.w <= 0 or bounds.h < 0)
+    {
+        return error.InvalidArgument;
+    }
+    const layout = try layout_mod.Layout.fromAtlas(atlas);
+    const m = try layout.measure(text);
+    const line_h = layout.lineHeight();
+    var ranges: [max_wrapped_lines]wrap_mod.LineRange = undefined;
+    var capped = false;
+    const n = wrap_mod.wrapLinesLayout(text, &layout, bounds.w, &ranges) catch |err| switch (err) {
+        error.NoSpaceLeft => blk: {
+            capped = true;
+            break :blk max_wrapped_lines;
+        },
+        error.InvalidUtf8 => return error.InvalidUtf8,
+        error.InvalidMetrics => return error.InvalidArgument,
+        error.InvalidGlyph => return error.InvalidArgument,
+        error.InvalidArgument => return error.InvalidArgument,
+        error.InvalidCommand => return error.InvalidCommand,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    const res = LabelResult{
+        .metrics = m,
+        .truncated = capped or (bounds.h > 0 and m.height > bounds.h),
+    };
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const r = ranges[i];
+        if (r.len == 0) continue; // linha vazia ocupa altura, sem comando
+        const slice = text[r.start..][0..r.len];
+        layout.draw(
+            &ctx.draw,
+            ctx.allocator,
+            slice,
+            .{ .x = bounds.x, .y = bounds.y + @as(f32, @floatFromInt(i)) * line_h },
+            color,
+        ) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.InvalidCommand => return error.InvalidCommand,
+            error.InvalidUtf8 => return error.InvalidArgument,
+            error.InvalidMetrics => return error.InvalidArgument,
+            error.InvalidGlyph => return error.InvalidArgument,
+            error.InvalidArgument => return error.InvalidArgument,
+        };
+    }
+    if (debug_draw) {
+        ctx.draw.rectOutline(ctx.allocator, bounds, color, 1.0) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.InvalidCommand => return error.InvalidCommand,
+        };
+    }
+    return res;
+}
+
 test "labelAtlas mede pelos avanços reais e blita os glifos" {
     const stdt = @import("std");
     const gpa = stdt.testing.allocator;
@@ -347,5 +419,80 @@ test "labelWrapped fatia, pula vazias e capa em 64" {
     try stdt.testing.expectError(error.InvalidArgument, labelWrapped(&ctx, id, types.Rect.init(0, 0, 0, 10), "a", white, font, false));
     try stdt.testing.expectError(error.InvalidUtf8, labelWrapped(&ctx, id, types.Rect.init(0, 0, 100, 100), "\xff", white, font, false));
     try stdt.testing.expectError(error.InvalidArgument, labelWrapped(&ctx, .null, types.Rect.init(0, 0, 100, 100), "a", white, font, false));
+    ctx.endFrame();
+}
+
+test "labelAtlasWrapped quebra pela largura real dos glifos (M137)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:label-atlas-w");
+
+    // 'A' = 5, 'B' = 3, espaço = 2 ⇒ "AB AB" mede 18 e não cabe em 11.
+    var b = atlas_mod.Builder.init(32, 32, 1);
+    defer b.deinit(gpa);
+    _ = try b.addGlyph(gpa, 'A', 4, 8, .{ .advance = 5, .bearing_y = -8, .height = 8 });
+    _ = try b.addGlyph(gpa, 'B', 4, 8, .{ .advance = 3, .bearing_y = -8, .height = 8 });
+    _ = try b.addGlyph(gpa, ' ', 1, 1, .{ .advance = 2 });
+    var bytes: [32 * 32 * 4]u8 = undefined;
+    for (&bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = try image_mod.Image.init(32, 32, &bytes);
+    var atlas = try b.finish(gpa, img);
+    defer atlas.deinit(gpa);
+
+    ctx.beginFrame();
+    const r = try labelAtlasWrapped(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 11, 40),
+        "AB AB",
+        types.Color.rgb(255, 255, 255),
+        &atlas,
+        false,
+    );
+    try stdt.testing.expectEqual(@as(f32, 18), r.metrics.width);
+    try stdt.testing.expectEqual(@as(u32, 1), r.metrics.lines);
+    // Duas linhas ("AB" e "AB") ⇒ 4 blits (2 glifos por linha).
+    try stdt.testing.expectEqual(@as(usize, 4), ctx.drawCommands().len);
+    const y0 = ctx.drawCommands()[0].image.rect.y;
+    const y2 = ctx.drawCommands()[2].image.rect.y;
+    try stdt.testing.expect(y2 > y0);
+    ctx.endFrame();
+
+    // Largura 18 ⇒ uma linha só (2 blits).
+    ctx.beginFrame();
+    _ = try labelAtlasWrapped(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 18, 40),
+        "AB AB",
+        types.Color.rgb(255, 255, 255),
+        &atlas,
+        false,
+    );
+    try stdt.testing.expectEqual(@as(usize, 5), ctx.drawCommands().len); // 4 glifos + espaço
+    ctx.endFrame();
+
+    // Contratos.
+    ctx.beginFrame();
+    try stdt.testing.expectError(error.InvalidArgument, labelAtlasWrapped(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 0, 40),
+        "AB",
+        types.Color.rgb(255, 255, 255),
+        &atlas,
+        false,
+    ));
+    try stdt.testing.expectError(error.InvalidUtf8, labelAtlasWrapped(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 20, 40),
+        "\xff",
+        types.Color.rgb(255, 255, 255),
+        &atlas,
+        false,
+    ));
     ctx.endFrame();
 }
