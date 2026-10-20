@@ -195,6 +195,35 @@ image — the same mechanism a sprite atlas or a glyph atlas needs. The
 reference rasterizer samples with bilinear filtering in premultiplied alpha
 and honours clip, culling and partial repaint like every other command.
 
+### Glyph atlases
+
+`text.atlas` builds a font atlas without decoding fonts: the host rasterizes
+each glyph and the packer tells it where to draw. The finished `FontAtlas`
+answers glyph lookups, measures runs and draws text by blitting glyph
+regions.
+
+```zig
+var b = zyntra_ui.AtlasBuilder.init(512, 512, 1); // atlas 512x512, 1px padding
+const g = try b.addGlyph(gpa, 'A', 12, 16, .{
+    .advance = 9, .bearing_y = -12, .height = 16,
+});
+// Rasterize the glyph bitmap into the atlas image at `g.region`.
+var atlas = try b.finish(gpa, image);
+defer atlas.deinit(gpa);
+
+try zyntra_ui.text.atlas.drawRun(
+    &ctx.draw,
+    gpa,
+    &atlas,
+    "Hello",
+    zyntra_ui.Vec2.init(10, 40),
+    zyntra_ui.Color.rgb(255, 255, 255),
+);
+```
+
+Glyph metrics are in logical pixels; `atlas.scale` records how many atlas
+pixels make one logical pixel, which is what high-DPI atlases need.
+
 ### Multi-window registry
 
 `WindowRegistry` is a pure, allocation-free model of the UI surfaces an

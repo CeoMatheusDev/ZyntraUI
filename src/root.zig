@@ -28,6 +28,7 @@ pub const draw = struct {
 pub const text = struct {
     pub const metrics = @import("text/metrics.zig");
     pub const wrap = @import("text/wrap.zig");
+    pub const atlas = @import("text/atlas.zig");
 };
 
 pub const c_abi = struct {
@@ -143,6 +144,10 @@ pub const Backend = draw.renderer.Backend;
 pub const FontMetrics = text.metrics.FontMetrics;
 pub const TextMetrics = text.metrics.TextMetrics;
 pub const LineRange = text.wrap.LineRange;
+pub const FontAtlas = text.atlas.FontAtlas;
+pub const AtlasBuilder = text.atlas.Builder;
+pub const GlyphMetrics = text.atlas.GlyphMetrics;
+pub const Glyph = text.atlas.Glyph;
 
 pub const ZyntraResult = c_abi.types.ZyntraResult;
 pub const ZyntraRect = c_abi.types.ZyntraRect;
@@ -322,6 +327,7 @@ test {
     _ = @import("dnd/service.zig");
     _ = @import("text/metrics.zig");
     _ = @import("text/wrap.zig");
+    _ = @import("text/atlas.zig");
     _ = @import("draw/renderer.zig");
     _ = @import("c-abi/types.zig");
     _ = @import("c-abi/api.zig");

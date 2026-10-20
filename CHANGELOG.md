@@ -15,6 +15,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   devolve o rect de destino e o rasterizador de referência amostra com
   bilinear em alfa pré-multiplicado, respeitando clip, culling e repintura
   parcial. Sem alocação: os pixels continuam sendo do chamador.
+- `text`: **atlas de glifos** (M124, aditivo) — `Builder` empacota bitmaps de
+  glifos em prateleiras e devolve a região de cada um (o host rasteriza a
+  fonte; a biblioteca não decodifica fontes). `FontAtlas` junta a imagem
+  emprestada aos glifos ordenados por codepoint, com busca binária, `measure`
+  (largura lógica do trecho) e `lineHeight`; `drawRun` desenha um trecho
+  blitando cada glifo do atlas. `GlyphMetrics` carrega avanço/bearing em
+  pixels lógicos e o atlas tem `scale` (pixels do atlas por pixel lógico),
+  pronto para telas HiDPI.
 
 ## [1.35.0] - 2026-10-20
 
