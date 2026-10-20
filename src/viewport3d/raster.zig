@@ -21,6 +21,7 @@ const camera_mod = @import("camera.zig");
 const clipping = @import("clipping.zig");
 const depth_mod = @import("depth.zig");
 const mesh_mod = @import("mesh.zig");
+const frustum_mod = @import("frustum.zig");
 
 const Vec3 = math.Vec3;
 const Vec4 = math.Vec4;
@@ -191,10 +192,17 @@ pub const Rasterizer = struct {
         const proj = cam.projectionMatrix(aspect) orelse return;
         const mvp = Mat4.mul(proj, Mat4.mul(view, model));
         const view_model = Mat4.mul(view, model);
+        // Culling de frustum (M140): triângulos fora da câmera são
+        // descartados ANTES da projeção.
+        const frustum = frustum_mod.Frustum.fromViewProjection(mvp);
 
         var ti: usize = 0;
         while (ti < mesh.triangleCount()) : (ti += 1) {
             const tri = mesh.triangle(ti) orelse continue;
+            if (frustum) |f| {
+                const sphere = mesh_mod.triangleSphere(tri) orelse continue;
+                if (!f.containsSphere(sphere.center, sphere.radius)) continue;
+            }
             self.drawTriangleWorld(tri, view_model, mvp, cam, opts);
         }
     }
@@ -449,5 +457,41 @@ fn fuzzRaster(_: void, smith: *std.testing.Smith) !void {
     var i: usize = w * h * 4;
     while (i < buf.len) : (i += 1) {
         try std.testing.expectEqual(@as(u8, 0xAA), buf[i]);
+    }
+}
+
+test "Rasterizer: o culling de frustum descarta triângulos fora da câmera" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var buf: [64 * 64 * 4]u8 = undefined;
+    @memset(&buf, 0);
+    const target = Target{ .pixels = &buf, .width = 64, .height = 64, .stride = 64 * 4 };
+
+    var r = try Rasterizer.init(gpa, 64, 64);
+    defer r.deinit();
+    try r.setTarget(target);
+    r.clear(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
+
+    // Um triângulo gigante longe da câmera: descartado pelo frustum.
+    const far_away = [_]Vec3{
+        Vec3.init(1000, 1000, -1000),
+        Vec3.init(1010, 1000, -1000),
+        Vec3.init(1000, 1010, -1000),
+    };
+    const cam = camera_mod.Camera{ .distance = 5.0, .yaw = 0.6, .pitch = 0.4 };
+    r.drawMesh(
+        .{ .positions = &far_away, .indices = &.{ 0, 1, 2 } },
+        Mat4.identity(),
+        cam,
+        1.0,
+        .{ .color = .{ .r = 255, .g = 0, .b = 0, .a = 255 } },
+    );
+    // Nada foi desenhado (o fundo intacto).
+    var y: u32 = 0;
+    while (y < 64) : (y += 1) {
+        var x: u32 = 0;
+        while (x < 64) : (x += 1) {
+            try stdt.testing.expectEqual(@as(u8, 0), buf[(y * 64 + x) * 4]);
+        }
     }
 }

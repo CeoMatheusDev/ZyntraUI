@@ -17,6 +17,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   capacidade antes do frame (sem realocação no caminho quente; os buffers
   são reutilizados entre frames). O rasterizador ganha `RasterMetrics`
   (caminho rápido/genérico, pixels escritos) em `SoftwareFramebuffer`.
+- `text`: **geração do atlas** (M138, aditivo) — `FontAtlas.generation`
+  muda a cada glifo adicionado; o cache de medições inclui a geração na
+  chave, então um atlas alterado invalida as entradas antigas (sem medir
+  de novo).
+- `viewport3d`: **culling de frustum** (M140, aditivo) — `viewport3d.frustum`
+  extrai os 6 planos do frustum da matriz view-projection (Gribb–Hartmann,
+  profundidade [0,1]) e o rasterizador descarta os triângulos fora da
+  câmera ANTES de projetar (esfera envolvente por triângulo). É culling
+  puro: não muda o resultado na tela, só o trabalho feito.
 - `viewport3d`: **viewport 3D modular e opcional** (M156/M157, aditivo) —
   novo módulo `viewport3d` com `math` (Vec2/3/4 e Mat4 column-major, mão
   direita, depth [0,1]), `camera` (dados + helpers de órbita/pan/zoom),

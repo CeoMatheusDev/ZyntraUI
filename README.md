@@ -403,6 +403,9 @@ try zyntra_ui.viewport3d.viewport.viewport3d(
 );
 ```
 
+Triangles outside the camera are discarded before the projection
+(`viewport3d.frustum` — pure culling, the image is unchanged).
+
 Conventions: right-handed, the camera looks down `-Z`, `Mat4` is
 column-major, clip space is `x,y ∈ [-1,1]` with `z ∈ [0,1]`, and screen
 `y` grows downwards. See `docs/` and the module docs for the details.

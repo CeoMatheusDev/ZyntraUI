@@ -53,6 +53,31 @@ pub const Mesh = struct {
     }
 };
 
+/// Esfera envolvente (centro + raio) de um conjunto de pontos.
+pub const Sphere = struct {
+    center: Vec3 = .{},
+    radius: f32 = 0,
+
+    pub fn isValid(self: Sphere) bool {
+        return self.center.isFinite() and std.math.isFinite(self.radius) and self.radius >= 0;
+    }
+};
+
+/// Esfera envolvente de 3 pontos (usada no culling de triângulos).
+pub fn triangleSphere(tri: [3]Vec3) ?Sphere {
+    var center = Vec3.splat(0);
+    for (tri) |p| {
+        if (!p.isFinite()) return null;
+        center = center.add(p);
+    }
+    center = center.scale(1.0 / 3.0);
+    var radius: f32 = 0;
+    for (tri) |p| {
+        radius = @max(radius, p.sub(center).length());
+    }
+    return .{ .center = center, .radius = radius };
+}
+
 /// Cubo unitário (centrado na origem), com lados de `size`.
 /// Sem alocação: os dados são do app.
 pub const CubeMesh = struct {

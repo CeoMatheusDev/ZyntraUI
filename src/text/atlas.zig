@@ -90,6 +90,10 @@ pub const Builder = struct {
     shelf_y: u32 = 0,
     shelf_height: u32 = 0,
     entries: std.ArrayList(Glyph) = .empty,
+    /// Geração do conteúdo (muda a cada glifo adicionado): o cache
+    /// de medições usa ela para invalidar entradas de um atlas que
+    /// mudou (M139).
+    generation: u32 = 0,
 
     const Self = @This();
 
@@ -132,6 +136,7 @@ pub const Builder = struct {
             .metrics = metrics,
         };
         try self.entries.append(gpa, glyph);
+        self.generation +%= 1;
         self.shelf_x += w + self.padding;
         self.shelf_height = @max(self.shelf_height, h);
         return glyph;
@@ -162,6 +167,7 @@ pub const Builder = struct {
             .image = image,
             .glyphs = glyphs,
             .scale = self.scale,
+            .generation = self.generation,
         };
     }
 };
@@ -176,6 +182,9 @@ pub const FontAtlas = struct {
     image: image_mod.Image = .{},
     /// Glifos ordenados por codepoint (possuídos).
     glyphs: []Glyph = &.{},
+    /// Geração do conteúdo (o cache de medições invalida entradas
+    /// quando ela muda).
+    generation: u32 = 0,
     /// Pixels do atlas por pixel lógico.
     scale: f32 = 1.0,
 

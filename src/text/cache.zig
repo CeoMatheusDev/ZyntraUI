@@ -16,6 +16,7 @@ const std = @import("std");
 const types = @import("../core/types.zig");
 const metrics_mod = @import("metrics.zig");
 const atlas_mod = @import("atlas.zig");
+const image_mod = @import("../draw/image.zig");
 const layout_mod = @import("layout.zig");
 
 /// Resultado de uma medição (largura, altura, linhas e glifos).
@@ -216,6 +217,10 @@ fn fontKey(source: layout_mod.Source) u64 {
             const scale_bits: u32 = @bitCast(a.scale);
             h ^= @as(u64, scale_bits);
             h *%= 0x100000001b3;
+            // A GERAÇÃO invalida as entradas quando o atlas muda (mesmo
+            // ponteiro, glifos diferentes) — M139.
+            h ^= @as(u64, a.generation);
+            h *%= 0x100000001b3;
             break :blk h;
         },
     };
@@ -303,4 +308,33 @@ test "TextCache: capacidade limitada (evictions) e texto inválido" {
 
     // UTF-8 inválido: erro (sem entrada poisonous).
     try stdt.testing.expectError(error.InvalidUtf8, cache.measure("\xff", source, 0));
+}
+
+test "TextCache: a geração do atlas invalida as entradas" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+
+    var b = atlas_mod.Builder.init(32, 32, 1);
+    defer b.deinit(gpa);
+    _ = try b.addGlyph(gpa, 'A', 4, 8, .{ .advance = 5, .bearing_y = -8, .height = 8 });
+    var bytes: [32 * 32 * 4]u8 = undefined;
+    for (&bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = try image_mod.Image.init(32, 32, &bytes);
+    var atlas = try b.finish(gpa, img);
+    defer atlas.deinit(gpa);
+
+    const source = layout_mod.Source{ .atlas = &atlas };
+    var cache = try TextCache.init(gpa, 8);
+    defer cache.deinit();
+
+    _ = try cache.measure("A", source, 0);
+    try stdt.testing.expectEqual(@as(u64, 1), cache.misses);
+    _ = try cache.measure("A", source, 0);
+    try stdt.testing.expectEqual(@as(u64, 1), cache.hits);
+
+    // O atlas muda (mesmo ponteiro, geração nova): a entrada antiga
+    // NÃO pode ser reutilizada.
+    atlas.generation +%= 1;
+    _ = try cache.measure("A", source, 0);
+    try stdt.testing.expectEqual(@as(u64, 2), cache.misses);
 }
