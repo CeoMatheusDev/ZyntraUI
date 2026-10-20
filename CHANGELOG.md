@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.43.0] - 2026-10-20
+
+MINOR estável, 100% compatível: a UI passa a expor uma **árvore de
+acessibilidade** — a cada frame, cada widget registra papel, estado,
+caixa e o texto anunciado, para que um leitor de tela (ou qualquer
+ferramenta de AT) possa descrever a tela. A fronteira C acompanha com
+`zyntra_a11y_node_count`/`_node_at`/`_set_label`/`_set_value`. Nada que
+já existia mudou de assinatura, layout ou comportamento.
+
 ### Adicionado
 
 - `a11y`/`core`/`widgets`/`c-abi`: **árvore de acessibilidade** (M164,

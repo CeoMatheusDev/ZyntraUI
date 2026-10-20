@@ -29,7 +29,7 @@ int main(void) {
      * release; o CI detecta divergência). major==1 também trava
      * MAJOR acidental (ver M44). */
     assert(zyntra_version_major() == 1);
-    assert(zyntra_version_minor() == 42);
+    assert(zyntra_version_minor() == 43);
     assert(zyntra_version_patch() == 0);
     assert(strcmp(zyntra_version_prerelease(), "") == 0);
 
@@ -3880,6 +3880,36 @@ int main(void) {
         c161_paths = (lit > 100);
     }
 
+    /* Árvore de acessibilidade em C (M164). */
+    int c164_a11y = 0;
+    {
+        CHECK(zyntra_context_begin_frame(ctx));
+        ZyntraButtonStyle abs;
+        CHECK(zyntra_style_button(ZYNTRA_THEME_DARK, &abs));
+        ZyntraId bid = zyntra_id_from_string("a11y:btn", 9);
+        CHECK(zyntra_widget_button(ctx, bid, (ZyntraRect){10, 10, 100, 30},
+            &abs, NULL));
+        CHECK(zyntra_a11y_set_label(ctx, bid, (const uint8_t *)"Enviar", 6));
+        CHECK(zyntra_context_end_frame(ctx));
+
+        uint32_t count = 0;
+        CHECK(zyntra_a11y_node_count(ctx, &count));
+        assert(count >= 1);
+
+        ZyntraA11yNode node;
+        CHECK(zyntra_a11y_node_at(ctx, 0, &node));
+        assert(node.id == bid);
+        assert(node.role == ZYNTRA_A11Y_BUTTON);
+        assert(node.label != NULL && node.label_len == 6);
+        assert(memcmp(node.label, "Enviar", 6) == 0);
+
+        /* Índice fora da faixa ⇒ erro. */
+        assert(zyntra_a11y_node_at(ctx, 999, &node) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_a11y_node_at(ctx, 0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_a11y_node_count(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        c164_a11y = (count >= 1 && node.role == ZYNTRA_A11Y_BUTTON);
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -3958,6 +3988,7 @@ int main(void) {
     printf("C-ABI atlas=%d\n", c139_atlas);
     printf("C-ABI vp3d=%d\n", c146_vp3d);
     printf("C-ABI paths=%d\n", c161_paths);
+    printf("C-ABI a11y=%d\n", c164_a11y);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }
