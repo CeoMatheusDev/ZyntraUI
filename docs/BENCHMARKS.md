@@ -47,6 +47,14 @@ alocador — Debug preenche com `0xAA`). Com `clear`, pxsum idêntico
 (`293316480`, 6/6 execuções, ambos os modos). Framebuffer sem limpar tem
 conteúdo indefinido — documentado em `SoftwareFramebuffer`.
 
+## Nota de otimização (Zig 0.17)
+
+`b.standardOptimizeOption` com `-Doptimize=ReleaseFast` gera o comando
+`-Ofast` no Zig 0.17 (ver `zig build --verbose`). Comparações feitas com
+`zig build-exe -OReleaseFast` (modo diferente) subestimam o desempenho em
+~7x no build de comandos — todas as comparações abaixo usam o mesmo modo
+do repo (`-Ofast`, via `zig build`).
+
 ## M153 — observabilidade, reservas e fill empacotado (2026-10-20)
 
 Metodologia nova: o próprio `examples/bench.zig` mede cada fase com
@@ -67,6 +75,24 @@ frame + 100 frames de treeview).
 Métricas do frame medidas: `cmds=5500 visible=4824 culled=676 rects=5000
 texts=500 bytes=18500 growths=0`; no raster: `fast=1001 generic=0
 pixels=4311502` (o caminho rápido cobre todos os retângulos opacos).
+
+### Antes × depois (v1.40.0 × HEAD), mesmo programa e mesmo modo
+
+Micro-benchmarks isolados, `-Ofast`, 5 rodadas alternadas, mesma máquina:
+
+| Fase | v1.40.0 | HEAD | Δ |
+|---|---|---|---|
+| Construção de comandos (20 frames × 5500 cmds) | 3.582 µs (32 ns/cmd) | 3.507 µs (31 ns/cmd) | **sem regressão** |
+| Raster (50 renders, mesmo frame) | 332.973 µs | 87.278 µs | **3,8× mais rápido** |
+
+O ganho do raster vem do fill opaco com escrita empacotada: com `-Ofast` o
+compilador vetoriza o store de `u32` (o mesmo resultado de 4 stores de
+byte fica 3,8× mais rápido neste workload). O `pxsum` do bench é
+bit-idêntico.
+
+O programa do bench (que agora reserva capacidade, mede 3 amostras e
+reporta as métricas) tem números absolutos diferentes do programa antigo —
+por isso a comparação acima usa o MESMO programa nas duas bibliotecas.
 
 ### Fill de retângulo opaco: A/B alternado
 

@@ -99,9 +99,10 @@ pub fn main() !void {
     var backend = zyntra_ui.NullRenderer{};
 
     // Capacidade reservada antes do aquecimento: a fase 1 não deve
-    // realocar (M153).
-    try ctx.reserveDrawCommands(FRAMES * (RECTS_PER_FRAME + TEXTS_PER_FRAME), 0);
-    try ctx.reserveTextBytes(FRAMES * TEXTS_PER_FRAME * TEXT.len);
+    // realocar (M153). Reserva de 2 frames (o suficiente para o
+    // steady-state; reservar o frame inteiro custaria dezenas de MB).
+    try ctx.reserveDrawCommands(2 * (RECTS_PER_FRAME + TEXTS_PER_FRAME), 0);
+    try ctx.reserveTextBytes(2 * TEXTS_PER_FRAME * TEXT.len);
 
     // Aquecimento (caches, ramos, alocadores).
     var w: u32 = 0;
