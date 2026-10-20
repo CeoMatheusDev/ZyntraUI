@@ -5,6 +5,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.38.0] - 2026-10-20
+
+MINOR estável, 100% compatível: o desenho ganha **alfa global** (o
+gancho das animações sobre widgets) e a UI ganha **fonte de bitmap
+global** — um atlas monoespaçado registrado uma vez faz TODOS os
+widgets desenharem o texto a partir dele, com a mesma medida e o mesmo
+desenho. A fronteira C acompanha as duas novidades. Nada que já
+existia mudou de assinatura ou layout.
+
+### Adicionado
+
 ### Adicionado
 
 - `draw`: **alfa global nos draw commands** (M140, aditivo) — o novo
@@ -32,6 +43,7 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `zyntra_context_set_bitmap_font`/`_clear_bitmap_font` registram no
   contexto o atlas monoespaçado (`ZyntraFontAtlas`), usado por TODOS os
   widgets; `zyntra_draw_text` passou a respeitar a fonte registrada.
+
 
 ## [1.37.0] - 2026-10-20
 
