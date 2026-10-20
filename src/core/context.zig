@@ -274,6 +274,13 @@ pub const Context = struct {
         self.a11y_prev_focus = cur_focus;
     }
 
+    /// Valida a hierarquia da árvore a11y (M167): devolve quantos
+    /// problemas foram achados (pai desconhecido, pai depois do filho).
+    /// `out` recebe os problemas (opcional).
+    pub fn validateA11y(self: *const Self, out: []a11y_mod.Issue) usize {
+        return a11y_mod.validate(&self.a11y, out);
+    }
+
     /// As mudanças semânticas do frame (M167): nós que entraram, saíram,
     /// mudaram e a mudança de foco. Válido depois do `endFrame`.
     pub fn a11yChanges(self: *const Self) []const a11y_mod.Change {

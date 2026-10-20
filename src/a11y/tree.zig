@@ -208,6 +208,52 @@ pub const Change = union(enum) {
     },
 };
 
+/// Um problema na hierarquia da árvore.
+pub const Issue = enum {
+    /// O pai declarado não existe na árvore.
+    unknown_parent,
+    /// O pai vem DEPOIS do filho (a hierarquia deve ser topológica).
+    out_of_order_parent,
+    /// O nó se declara pai de si mesmo.
+    self_parent,
+};
+
+/// Valida a hierarquia da árvore (O(n²) no pior caso — a árvore é
+/// pequena; use só quando precisar).
+///
+/// A hierarquia é rasa e explícita: o pai de um nó é o container que
+/// estava aberto quando o nó foi registrado.
+pub fn validate(tree: *const Tree, out: []Issue) usize {
+    var count: usize = 0;
+    for (tree.items(), 0..) |node, i| {
+        if (node.parent == 0) continue;
+        if (node.parent == node.id) {
+            if (count >= out.len) return count;
+            out[count] = .self_parent;
+            count += 1;
+            continue;
+        }
+        var found = false;
+        var parent_index: usize = 0;
+        for (tree.items(), 0..) |other, j| {
+            if (other.id != node.parent) continue;
+            found = true;
+            parent_index = j;
+            break;
+        }
+        if (!found) {
+            if (count >= out.len) return count;
+            out[count] = .unknown_parent;
+            count += 1;
+        } else if (parent_index > i) {
+            if (count >= out.len) return count;
+            out[count] = .out_of_order_parent;
+            count += 1;
+        }
+    }
+    return count;
+}
+
 /// Compara o conteúdo de dois nós (ignora a posição e o pai: o que
 /// importa para o leitor de tela é o papel, o texto e o estado).
 fn sameContent(a: Node, b: Node) bool {
@@ -412,4 +458,34 @@ test "a11y M167: o diff da Context acusa as mudanças do frame" {
     try stdt.testing.expectEqual(@as(usize, 2), changes.len);
     try stdt.testing.expect(changes[0] == .removed);
     try stdt.testing.expect(changes[1] == .focus);
+}
+
+test "a11y: a validação da hierarquia" {
+    const gpa = std.testing.allocator;
+    var tree = Tree{};
+    defer tree.nodes.deinit(gpa);
+
+    // Sem pai: nada a reclamar.
+    try tree.push(gpa, .{ .id = 1, .role = .button });
+    var issues: [4]Issue = undefined;
+    try std.testing.expectEqual(@as(usize, 0), validate(&tree, &issues));
+
+    // Pai que existe e vem antes: ok.
+    try tree.push(gpa, .{ .id = 2, .role = .group });
+    try tree.push(gpa, .{ .id = 3, .role = .button, .parent = 2 });
+    try std.testing.expectEqual(@as(usize, 0), validate(&tree, &issues));
+
+    // Pai desconhecido.
+    try tree.push(gpa, .{ .id = 4, .role = .button, .parent = 99 });
+    const n = validate(&tree, &issues);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqual(Issue.unknown_parent, issues[0]);
+
+    // Pai depois do filho (ordem errada).
+    var tree2 = Tree{};
+    defer tree2.nodes.deinit(gpa);
+    try tree2.push(gpa, .{ .id = 10, .role = .button, .parent = 11 });
+    try tree2.push(gpa, .{ .id = 11, .role = .group });
+    try std.testing.expectEqual(@as(usize, 1), validate(&tree2, &issues));
+    try std.testing.expectEqual(Issue.out_of_order_parent, issues[0]);
 }
