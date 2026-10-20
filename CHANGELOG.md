@@ -69,6 +69,9 @@ existia mudou de assinatura ou layout.
   comum do texto com atlas/fonte de bitmap), o rasterizador copia o pixel
   direto, sem amostragem bilinear. A cor resultante é idêntica à do
   caminho geral (mesma matemática de tint e mistura).
+- `examples`: **demo da área de texto com atlas** (M152) — o exemplo
+  mínimo digita numa área de texto com fonte real e confere o texto no
+  framebuffer.
 - `c-abi`: **campo de texto com atlas e bloco de texto** (M151, aditivo)
   — `zyntra_widget_text_input_atlas` dá ao campo de texto em C a fonte
   real do atlas (caret/seleção/clique pelos avanços reais) e

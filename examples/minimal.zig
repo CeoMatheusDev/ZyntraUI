@@ -2594,4 +2594,89 @@ pub fn main() !void {
         std.debug.assert(lit == 70); // 2 glifos de 5x7
         std.debug.assert(runs == 1);
     }
+
+    // ---- M152: área de texto com fonte real (atlas) --------------------
+    // A área de texto mede e posiciona o caret pelos AVANÇOS REAIS dos
+    // glifos: o texto sai como run e aparece no rasterizador.
+    {
+        var builder = zyntra_ui.text.atlas.Builder.init(16, 16, 1);
+        defer builder.deinit(allocator);
+        _ = try builder.addGlyph(allocator, 'A', 5, 7, .{
+            .advance = 6,
+            .bearing_y = -7,
+            .height = 7,
+        });
+        _ = try builder.addGlyph(allocator, 'B', 5, 7, .{
+            .advance = 6,
+            .bearing_y = -7,
+            .height = 7,
+        });
+
+        var atlas_img: [16 * 16 * 4]u8 = undefined;
+        @memset(&atlas_img, 0);
+        var atlas = try builder.finish(allocator, .{
+            .width = 16,
+            .height = 16,
+            .stride = 16 * 4,
+            .pixels = &atlas_img,
+        });
+        defer atlas.deinit(allocator);
+        for (atlas.glyphs) |g| {
+            for (0..7) |gy| {
+                for (0..5) |gx| {
+                    const o = (@as(usize, g.region.y + gy) * 16 +
+                        (g.region.x + gx)) * 4;
+                    atlas_img[o] = 255;
+                    atlas_img[o + 3] = 255;
+                }
+            }
+        }
+
+        var fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 24, 16);
+        defer fb.deinit(allocator);
+        fb.clear(zyntra_ui.Color.rgb(0, 0, 0));
+
+        var buf: [16]u8 = undefined;
+        var len: usize = 0;
+        var cursor: usize = 0;
+        var anchor: usize = 0;
+        var scroll: f32 = 0;
+
+        ctx.beginFrame();
+        try ctx.pushEvent(.{ .mouse_button = .{
+            .button = .left,
+            .pressed = true,
+            .pos = .{ .x = 6, .y = 10 },
+        } });
+        try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
+        try ctx.pushEvent(.{ .text = .{ .codepoint = 'B' } });
+        _ = try textarea_mod.textAreaAtlas(
+            &ctx,
+            zyntra_ui.Id.fromString("examples/m152:ta"),
+            zyntra_ui.Rect.init(0, 0, 24, 14),
+            &buf,
+            &len,
+            &cursor,
+            &anchor,
+            &scroll,
+            &atlas,
+            theme.textInputStyle(),
+        );
+        _ = try zyntra_ui.software.raster.render(
+            &fb,
+            ctx.drawCommands(),
+            zyntra_ui.Rect.init(0, 0, 24, 16),
+        );
+        ctx.endFrame();
+
+        var lit: u32 = 0;
+        for (0..16) |y| {
+            for (0..24) |x| {
+                if (fb.get(@intCast(x), @intCast(y))[0] > 0) lit += 1;
+            }
+        }
+        std.debug.print("m152 textarea len={d} lit={d}\n", .{ len, lit });
+        std.debug.assert(len == 2);
+        std.debug.assert(lit >= 70);
+    }
 }
