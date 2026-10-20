@@ -1255,6 +1255,28 @@ zyntra_text_grapheme_next(utf8, utf8_len, 1, &off);  /* 4: o "b" */
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
+## Acessibilidade: o que a árvore É e o que ela NÃO é
+
+A árvore de acessibilidade da ZyntraUI é uma **estrutura semântica
+genérica**: papéis, estados, rótulos, valores e caixas, com as mudanças
+entre frames. Ela é o **contrato** que um consumidor externo converte
+na API de acessibilidade do sistema operacional (AT-SPI no Linux,
+UI Automation no Windows, AX no macOS).
+
+**A árvore não é a integração com o leitor de tela.** Conectar a UI a um
+leitor de tela exige, FORA da biblioteca:
+
+* a ponte com a API nativa do sistema (o consumidor a implementa — a
+  ZyntraUI não depende de AT-SPI/UI Automation/AX nem de nenhum
+  toolkit);
+* a decisão de política (o que anunciar, em que ordem, como agrupar);
+* a camada de eventos da plataforma (a ZyntraUI entrega eventos
+  genéricos de teclado/mouse, sem conhecer a origem).
+
+O núcleo segue a regra: **nenhuma dependência de API nativa dentro da
+biblioteca**. O que a ZyntraUI garante é a parte difícil e testável — a
+semântica (papel/estado/texto) e o delta entre frames.
+
 ## Versão
 
 Fonte única de verdade: `build.zig.zon` (`.version`). Espelhos manuais
