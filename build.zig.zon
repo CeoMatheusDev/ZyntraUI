@@ -1,6 +1,6 @@
 .{
     .name = .zyntra_ui,
-    .version = "1.38.0",
+    .version = "1.39.0",
     .fingerprint = 0x7aefb13a24db0cb2, // Gerado localmente para identidade do pacote; não alterar sem revisão.
     .minimum_zig_version = "0.17.0",
     .dependencies = .{

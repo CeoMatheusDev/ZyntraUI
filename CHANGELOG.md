@@ -5,6 +5,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.39.0] - 2026-10-20
+
+MINOR estável, 100% compatível: o texto com fonte real ficou mais
+barato — o rasterizador tem caminho rápido de blit 1:1 e o texto de um
+atlas vira UM comando de run (não um por glifo) — e chega um widget de
+bloco de texto multilinha com quebra pela largura real. Os módulos
+novos ganharam cobertura de fuzz. Nada que já existia mudou de
+assinatura ou layout.
+
+### Adicionado
+
+
 ## [1.38.0] - 2026-10-20
 
 MINOR estável, 100% compatível: o desenho ganha **alfa global** (o
