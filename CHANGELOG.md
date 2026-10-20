@@ -5,7 +5,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
-### Adicionado
+## [1.44.0] - 2026-10-20
+
+MINOR estável, 100% compatível: o **texto deixa de ser uma string só** —
+o texto rico dá trechos com estilos diferentes (cor, negrito, itálico, uma
+etiqueta livre), e o cursor passa a andar por **grapheme cluster** (a letra
+com o acento, o emoji com ZWJ e a bandeira são UM caractere para o
+usuário). A árvore de acessibilidade passa a publicar **o que mudou**
+entre frames, para o leitor de tela não repintar a tela inteira. A
+fronteira C acompanha com `zyntra_text_rich_runs`/`_atlas` e
+`zyntra_text_grapheme_*`. Nada que já existia mudou de assinatura, layout
+ou comportamento.
 
 - `text`/`widgets`/`c-abi`: **grapheme clusters** (M166, aditivo) — o
   novo módulo `text.unicode` separa bytes, codepoints e CLUSTERS (o
