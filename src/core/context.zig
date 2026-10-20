@@ -131,6 +131,14 @@ pub const Context = struct {
     /// Árvore de acessibilidade do frame (M164): os widgets registram
     /// aqui o que um leitor de tela precisa saber. Zera a cada frame.
     a11y: a11y_mod.Tree = .{},
+    /// Árvore do frame ANTERIOR (o diff é calculado no `endFrame`).
+    a11y_prev: a11y_mod.Tree = .{},
+    /// Mudanças semânticas do frame (M167): o que mudou desde o frame
+    /// anterior (entrou, saiu, mudou ou o foco mudou). Zera a cada
+    /// frame; o app consome depois do `endFrame`.
+    a11y_changes: std.ArrayList(a11y_mod.Change) = .empty,
+    /// O foco no frame anterior (para o diff de foco).
+    a11y_prev_focus: ?u64 = null,
     /// Id do "pai" a11y atual (o container que começou por último):
     /// os nós registrados herdam esse pai.
     a11y_parent: u64 = 0,
@@ -179,12 +187,17 @@ pub const Context = struct {
         self.hot_prev.deinit(self.allocator);
         self.hot_now.deinit(self.allocator);
         self.a11y.nodes.deinit(self.allocator);
+        self.a11y_prev.nodes.deinit(self.allocator);
+        self.a11y_changes.deinit(self.allocator);
         self.events = event_mod.EventQueue.initEmpty();
         self.draw = draw_mod.DrawList.initEmpty();
         self.focusables = .empty;
         self.hot_prev = .empty;
         self.hot_now = .empty;
         self.a11y = .{};
+        self.a11y_prev = .{};
+        self.a11y_changes = .empty;
+        self.a11y_prev_focus = null;
         self.a11y_parent = 0;
         self.a11y_depth = 0;
         self.state = .idle;
@@ -215,8 +228,11 @@ pub const Context = struct {
         self.events.clearRetainingCapacity();
         self.draw.clearRetainingCapacity();
         self.focusables.clearRetainingCapacity();
-        // A árvore a11y é do frame: zera (a capacidade é retida).
+        // A árvore a11y é do frame: a do frame anterior fica para o
+        // diff (calculado no endFrame) e a de agora começa vazia.
+        std.mem.swap(a11y_mod.Tree, &self.a11y, &self.a11y_prev);
         self.a11y.clear();
+        self.a11y_changes.clearRetainingCapacity();
         self.a11y_parent = 0;
         self.a11y_depth = 0;
         // Fecha o ciclo de interação: o registro quente do frame que
@@ -230,8 +246,38 @@ pub const Context = struct {
     /// Precondição: frame ativo.
     pub fn endFrame(self: *Self) void {
         std.debug.assert(self.state == .active);
+        // O diff da árvore a11y (M167): o que mudou desde o frame
+        // anterior (o app atualiza o leitor de tela com isto).
+        self.computeA11yChanges();
         self.state = .idle;
         self.frame_index +%= 1;
+    }
+
+    /// Calcula as mudanças semânticas da árvore a11y (frame anterior →
+    /// frame atual) e guarda em `a11y_changes`.
+    fn computeA11yChanges(self: *Self) void {
+        self.a11y_changes.clearRetainingCapacity();
+        const cur_focus: ?u64 = if (self.focus_owner) |f| f.value() else null;
+        var buf: [64]a11y_mod.Change = undefined;
+        const n = a11y_mod.diff(
+            &self.a11y_prev,
+            &self.a11y,
+            self.a11y_prev_focus,
+            cur_focus,
+            &buf,
+        );
+        self.a11y_changes.appendSlice(self.allocator, buf[0..n]) catch {
+            // Sem memória: as mudanças ficam de fora (o app continua
+            // funcionando; a árvore completa segue disponível).
+            return;
+        };
+        self.a11y_prev_focus = cur_focus;
+    }
+
+    /// As mudanças semânticas do frame (M167): nós que entraram, saíram,
+    /// mudaram e a mudança de foco. Válido depois do `endFrame`.
+    pub fn a11yChanges(self: *const Self) []const a11y_mod.Change {
+        return self.a11y_changes.items;
     }
 
     pub fn isFrameActive(self: *const Self) bool {

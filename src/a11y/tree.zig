@@ -181,6 +181,99 @@ pub const Tree = struct {
     }
 };
 
+/// Uma mudança semântica na árvore (o que o leitor de tela precisa
+/// saber entre dois frames).
+///
+/// As mudanças são calculadas por `diff`: os nós são comparados na
+/// ORDEM (a ordem dos widgets é estável no modo imediato) e casados
+/// pelo id (0 = nó sem id, casado pela posição).
+pub const Change = union(enum) {
+    /// Um nó novo (não existia no frame anterior).
+    added: Node,
+    /// Um nó que saiu (existia no frame anterior).
+    removed: Node,
+    /// Um nó que ficou, mas mudou (rótulo, valor, estado ou papel).
+    updated: struct {
+        /// O nó como era.
+        before: Node,
+        /// O nó como está.
+        after: Node,
+    },
+    /// O foco mudou (de `before` para `after`; `null` = sem foco).
+    focus: struct {
+        /// O foco anterior (null = nenhum).
+        before: ?u64,
+        /// O foco novo (null = nenhum).
+        after: ?u64,
+    },
+};
+
+/// Compara o conteúdo de dois nós (ignora a posição e o pai: o que
+/// importa para o leitor de tela é o papel, o texto e o estado).
+fn sameContent(a: Node, b: Node) bool {
+    return a.role == b.role and
+        std.mem.eql(u8, a.label, b.label) and
+        std.mem.eql(u8, a.value, b.value) and
+        @as(u32, @bitCast(a.state)) == @as(u32, @bitCast(b.state));
+}
+
+/// As mudanças entre duas árvores (frame anterior → frame atual).
+///
+/// Os nós são casados na ordem: um id diferente (e não-nulo) é uma
+/// troca (remove + adiciona); o mesmo id com conteúdo diferente é uma
+/// atualização. Devolve quantas mudanças foram escritas em `out`.
+pub fn diff(
+    prev: *const Tree,
+    cur: *const Tree,
+    prev_focus: ?u64,
+    cur_focus: ?u64,
+    out: []Change,
+) usize {
+    var count: usize = 0;
+    const n = @max(prev.len(), cur.len());
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const before = prev.at(i);
+        const after = cur.at(i);
+        if (before == null and after == null) break;
+        if (before) |b| {
+            if (after) |a| {
+                // Mesmo id (ou ambos sem id): compara o conteúdo.
+                if (b.id == a.id or (b.id == 0 and a.id == 0)) {
+                    if (!sameContent(b, a)) {
+                        if (count >= out.len) return count;
+                        out[count] = .{ .updated = .{ .before = b, .after = a } };
+                        count += 1;
+                    }
+                } else {
+                    // O id mudou: o nó saiu e outro entrou.
+                    if (count >= out.len) return count;
+                    out[count] = .{ .removed = b };
+                    count += 1;
+                    if (count >= out.len) return count;
+                    out[count] = .{ .added = a };
+                    count += 1;
+                }
+            } else {
+                if (count >= out.len) return count;
+                out[count] = .{ .removed = b };
+                count += 1;
+            }
+        } else if (after) |a| {
+            if (count >= out.len) return count;
+            out[count] = .{ .added = a };
+            count += 1;
+        }
+    }
+    // O foco: só quando muda.
+    if (prev_focus != cur_focus) {
+        if (count >= out.len) return count;
+        out[count] = .{ .focus = .{ .before = prev_focus, .after = cur_focus } };
+        count += 1;
+    }
+    return count;
+}
+
 // ---------------------------------------------------------------------------
 // Testes
 // ---------------------------------------------------------------------------
@@ -222,4 +315,101 @@ test "a11y: os estados são flags" {
     try std.testing.expect(st.focused);
     try std.testing.expect(st.checked);
     try std.testing.expect(!st.disabled);
+}
+
+test "a11y: o diff acusa a entrada, a saída e a mudança" {
+    const gpa = std.testing.allocator;
+    var prev = Tree{};
+    defer prev.nodes.deinit(gpa);
+    var cur = Tree{};
+    defer cur.nodes.deinit(gpa);
+
+    try prev.push(gpa, .{ .id = 1, .role = .button, .label = "OK" });
+    try cur.push(gpa, .{ .id = 1, .role = .button, .label = "Enviar" });
+    try cur.push(gpa, .{ .id = 2, .role = .textbox });
+
+    var changes: [8]Change = undefined;
+    const n = diff(&prev, &cur, null, null, &changes);
+    // Uma atualização (o rótulo) e uma entrada (o novo campo).
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expect(changes[0] == .updated);
+    try std.testing.expectEqualStrings("OK", changes[0].updated.before.label);
+    try std.testing.expectEqualStrings("Enviar", changes[0].updated.after.label);
+    try std.testing.expect(changes[1] == .added);
+    try std.testing.expectEqual(@as(u64, 2), changes[1].added.id);
+
+    // Sem mudanças: nada é reportado.
+    const n2 = diff(&cur, &cur, null, null, &changes);
+    try std.testing.expectEqual(@as(usize, 0), n2);
+}
+
+test "a11y: o diff acusa a remoção e a mudança de foco" {
+    const gpa = std.testing.allocator;
+    var prev = Tree{};
+    defer prev.nodes.deinit(gpa);
+    var cur = Tree{};
+    defer cur.nodes.deinit(gpa);
+
+    try prev.push(gpa, .{ .id = 7, .role = .button });
+    var changes: [8]Change = undefined;
+    const n = diff(&prev, &cur, 7, null, &changes);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expect(changes[0] == .removed);
+    try std.testing.expect(changes[1] == .focus);
+    try std.testing.expectEqual(@as(?u64, 7), changes[1].focus.before);
+    try std.testing.expectEqual(@as(?u64, null), changes[1].focus.after);
+}
+
+test "a11y M167: o diff da Context acusa as mudanças do frame" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const ctx_mod = @import("../core/context.zig");
+    const id_mod = @import("../core/id.zig");
+
+    var ctx = try ctx_mod.Context.init(gpa, .{ .viewport = types.Rect.init(0, 0, 100, 100) });
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("a11y:btn");
+
+    // Frame 1: o botão entra.
+    ctx.beginFrame();
+    try ctx.pushA11yWidget(id, .button, types.Rect.init(0, 0, 10, 10), .{});
+    ctx.endFrame();
+    var changes = ctx.a11yChanges();
+    try stdt.testing.expectEqual(@as(usize, 1), changes.len);
+    try stdt.testing.expect(changes[0] == .added);
+
+    // Frame 2: nada muda (o nó é o mesmo) ⇒ nenhuma mudança.
+    ctx.beginFrame();
+    try ctx.pushA11yWidget(id, .button, types.Rect.init(0, 0, 10, 10), .{});
+    ctx.endFrame();
+    changes = ctx.a11yChanges();
+    try stdt.testing.expectEqual(@as(usize, 0), changes.len);
+
+    // Frame 3: o rótulo muda ⇒ uma atualização.
+    ctx.beginFrame();
+    try ctx.pushA11yWidget(id, .button, types.Rect.init(0, 0, 10, 10), .{});
+    ctx.setA11yLabel(id, "Enviar");
+    ctx.endFrame();
+    changes = ctx.a11yChanges();
+    try stdt.testing.expectEqual(@as(usize, 1), changes.len);
+    try stdt.testing.expect(changes[0] == .updated);
+
+    // Frame 4: o foco muda ⇒ uma mudança de foco (o rótulo segue).
+    ctx.beginFrame();
+    try ctx.pushA11yWidget(id, .button, types.Rect.init(0, 0, 10, 10), .{});
+    ctx.setA11yLabel(id, "Enviar");
+    ctx.focus_owner = id;
+    ctx.endFrame();
+    changes = ctx.a11yChanges();
+    try stdt.testing.expectEqual(@as(usize, 1), changes.len);
+    try stdt.testing.expect(changes[0] == .focus);
+
+    // Frame 5: o nó sai ⇒ uma remoção (e o foco some).
+    ctx.beginFrame();
+    ctx.focus_owner = null;
+    ctx.endFrame();
+    changes = ctx.a11yChanges();
+    try stdt.testing.expectEqual(@as(usize, 2), changes.len);
+    try stdt.testing.expect(changes[0] == .removed);
+    try stdt.testing.expect(changes[1] == .focus);
 }

@@ -42,6 +42,7 @@ pub const text = struct {
     pub const cache = @import("text/cache.zig");
     pub const layout = @import("text/layout.zig");
     pub const rich = @import("text/rich.zig");
+    pub const unicode = @import("text/unicode.zig");
 };
 
 pub const c_abi = struct {
@@ -372,6 +373,7 @@ test {
     _ = @import("draw/svg.zig");
     _ = @import("a11y/tree.zig");
     _ = @import("text/rich.zig");
+    _ = @import("text/unicode.zig");
     _ = @import("widgets/rich_label.zig");
     _ = @import("widgets/icon.zig");
     _ = @import("software/path_fill.zig");

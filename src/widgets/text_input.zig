@@ -27,6 +27,7 @@ const context_mod = @import("../core/context.zig");
 const id_mod = @import("../core/id.zig");
 const style_mod = @import("../style/style.zig");
 const metrics_mod = @import("../text/metrics.zig");
+const unicode_mod = @import("../text/unicode.zig");
 const edit = @import("../text/edit.zig");
 const ime_mod = @import("../text/ime.zig");
 const atlas_mod = @import("../text/atlas.zig");
@@ -137,13 +138,17 @@ fn visibleOffset(buf: []const u8, len: usize, cursor: usize, font: metrics_mod.F
 }
 
 /// Remove o último codepoint de `buf[0..len]`. Retorna o novo `len`.
+/// O início do GRAPHEME anterior (o cursor anda por cluster, não por
+/// byte nem por codepoint — M166).
 fn popCodepoint(buf: []u8, len: usize) usize {
-    var i = len;
-    if (i == 0) return 0;
-    i -= 1;
-    // Recua sobre bytes de continuação (10xxxxxx).
-    while (i > 0 and buf[i] & 0xC0 == 0x80) : (i -= 1) {}
-    return i;
+    if (len == 0) return 0;
+    return unicode_mod.prevGrapheme(buf[0..len], len);
+}
+
+/// O tamanho (em bytes) do GRAPHEME que começa em `at` (M166).
+fn graphemeLen(buf: []u8, len: usize, at: usize) usize {
+    if (at >= len) return 0;
+    return unicode_mod.graphemeLen(buf[0..len], at);
 }
 
 /// Campo de texto clássico (1.0.0, preservado): sem seleção e sem
@@ -321,7 +326,10 @@ fn textInputInner(
         // Click posiciona o caret; captura p/ arrasto de seleção (M45).
         if (ctx.press_owner == null) {
             if (fm.pressed_pos) |pp| {
-                const at = layout.offsetAtX(buffer[0..len.*], pp.x - (bounds.x + 4) + xoff_hit);
+                const at = unicode_mod.snapToGrapheme(
+                    buffer[0..len.*],
+                    layout.offsetAtX(buffer[0..len.*], pp.x - (bounds.x + 4) + xoff_hit),
+                );
                 cursor.* = at;
                 if (anchor) |a| a.* = at;
             }
@@ -340,7 +348,10 @@ fn textInputInner(
     }
     if (ctx.press_owner == id and ctx.mouse_down_left and mouse_fresh) {
         if (ctx.mouse_pos) |mp| {
-            cursor.* = layout.offsetAtX(buffer[0..len.*], mp.x - (bounds.x + 4) + xoff_hit);
+            cursor.* = unicode_mod.snapToGrapheme(
+                buffer[0..len.*],
+                layout.offsetAtX(buffer[0..len.*], mp.x - (bounds.x + 4) + xoff_hit),
+            );
         }
     }
     // Release do dono solta (vale p/ todas as variantes).
@@ -541,11 +552,12 @@ fn textInputInner(
                             }
                             if (cursor.* < len.*) {
                                 if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
-                                const d = metrics_mod.decodeOne(buffer[cursor.*..len.*]) catch {
-                                    return error.InvalidArgument; // buffer do chamador corrompido
-                                };
-                                std.mem.copyForwards(u8, buffer[cursor.* .. len.* - d.len], buffer[cursor.* + d.len .. len.*]);
-                                len.* -= d.len;
+                                // Apaga o GRAPHEME inteiro (o emoji com
+                                // ZWJ e o acento saem junto — M166).
+                                const d = graphemeLen(buffer, len.*, cursor.*);
+                                if (d == 0) return error.InvalidArgument; // buffer do chamador corrompido
+                                std.mem.copyForwards(u8, buffer[cursor.* .. len.* - d], buffer[cursor.* + d .. len.*]);
+                                len.* -= d;
                                 res.changed = true;
                             }
                         },
@@ -569,10 +581,10 @@ fn textInputInner(
                             if (k.modifiers.ctrl) {
                                 cursor.* = wordEndFwd(buffer, len.*, cursor.*);
                             } else if (cursor.* < len.*) {
-                                const d = metrics_mod.decodeOne(buffer[cursor.*..len.*]) catch {
-                                    return error.InvalidArgument;
-                                };
-                                cursor.* += d.len;
+                                // Anda um GRAPHEME (M166).
+                                const d = graphemeLen(buffer, len.*, cursor.*);
+                                if (d == 0) return error.InvalidArgument;
+                                cursor.* += d;
                             }
                             if (!extend) {
                                 if (anchor) |a| a.* = cursor.*;
@@ -1910,5 +1922,59 @@ test "textInputAtlas usa os avanços reais do atlas (M135)" {
         &atlas,
         style,
     ));
+    ctx.endFrame();
+}
+
+test "text_input M166: o cursor anda por GRAPHEME (emoji e acento)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{ .viewport = types.Rect.init(0, 0, 400, 100) });
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:grapheme");
+    const bounds = types.Rect.init(0, 0, 400, 30);
+    const font = metrics_mod.FontMetrics.withSize(10);
+
+    // "a" + "e" + acento combinante (2 bytes) + "b" = 5 bytes:
+    // os clusters são "a" (0..1), "é" (1..4) e "b" (4..5).
+    var buf: [32]u8 = undefined;
+    const text = "ae\xCC\x81b";
+    @memcpy(buf[0..text.len], text);
+    var len: usize = text.len;
+    var cursor: usize = text.len;
+    var anchor: usize = text.len;
+    // O campo começa focado (o clique posicionaria o caret).
+    ctx.focus_owner = id;
+
+    // A seta esquerda anda um GRAPHEME: o "b" (1 byte).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expectEqual(@as(usize, 4), cursor); // antes do "b"
+    ctx.endFrame();
+
+    // Mais uma: volta para o início do "é" (byte 1) — o acento
+    // combinante NÃO fica sozinho.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expectEqual(@as(usize, 1), cursor);
+    ctx.endFrame();
+
+    // Volta para o fim do "é" (byte 4) e apaga: o GRAPHEME inteiro
+    // ("e" + acento = 3 bytes) sai de uma vez.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expectEqual(@as(usize, 4), cursor);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{} } });
+    const r = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try stdt.testing.expect(r.changed);
+    try stdt.testing.expectEqual(@as(usize, 2), len);
+    try stdt.testing.expectEqualStrings("ab", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 1), cursor);
     ctx.endFrame();
 }

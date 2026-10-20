@@ -38,6 +38,7 @@ const context_mod = @import("../core/context.zig");
 const id_mod = @import("../core/id.zig");
 const style_mod = @import("../style/style.zig");
 const metrics_mod = @import("../text/metrics.zig");
+const unicode_mod = @import("../text/unicode.zig");
 const edit = @import("../text/edit.zig");
 const layout_mod = @import("../text/layout.zig");
 const atlas_mod = @import("../text/atlas.zig");
@@ -127,12 +128,10 @@ fn lineOfOffset(buf: []const u8, offset: usize) usize {
     return line;
 }
 
+/// O início do GRAPHEME anterior (o cursor anda por cluster — M166).
 fn prevCodepoint(buf: []const u8, pos: usize) usize {
-    var i = pos;
-    if (i == 0) return 0;
-    i -= 1;
-    while (i > 0 and buf[i] & 0xC0 == 0x80) : (i -= 1) {}
-    return i;
+    if (pos == 0) return 0;
+    return unicode_mod.prevGrapheme(buf, pos);
 }
 
 fn nextCodepoint(buf: []const u8, len: usize, pos: usize) usize {
@@ -765,7 +764,8 @@ fn textAreaInner(
                             if (use_hist) hist.closeGroup();
                             if (cursor.* < len.*) {
                                 if (use_hist) hist.checkpointBreak(buffer[0..len.*], len.*, cursor.*);
-                                const to = nextCodepoint(buffer, len.*, cursor.*);
+                                // Apaga o GRAPHEME inteiro (M166).
+                                const to = cursor.* + unicode_mod.graphemeLen(buffer[0..len.*], cursor.*);
                                 deleteRange(buffer, len, cursor.*, to);
                                 anchor.* = cursor.*;
                                 res.changed = true;
@@ -794,7 +794,10 @@ fn textAreaInner(
                         },
                         .right => {
                             if (use_hist) hist.closeGroup();
-                            cursor.* = nextCodepoint(buffer, len.*, cursor.*);
+                            // Anda um GRAPHEME (M166).
+                            if (cursor.* < len.*) {
+                                cursor.* += unicode_mod.graphemeLen(buffer[0..len.*], cursor.*);
+                            }
                             if (!extend) anchor.* = cursor.*;
                             moved = true;
                         },

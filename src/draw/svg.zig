@@ -499,3 +499,54 @@ test "svg: o path achatado tem o bbox esperado" {
     try std.testing.expectApproxEqAbs(@as(f32, 40), r.w, 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 20), r.h, 0.001);
 }
+
+// ---------------------------------------------------------------------------
+// Fuzz
+// ---------------------------------------------------------------------------
+
+test "fuzz svg: o parser nunca quebra (nada de panic, sem laço infinito)" {
+    try std.testing.fuzz({}, fuzzParse, .{});
+}
+
+fn fuzzParse(_: void, smith: *std.testing.Smith) !void {
+    var buf: [128]u8 = undefined;
+    smith.bytes(&buf);
+    const n: usize = smith.valueRangeAtMost(u8, 0, 128);
+    const input = buf[0..n];
+
+    var segs: [256]path_mod.Segment = undefined;
+    const builder = parsePath(input, &segs) catch {
+        // Path inválido: erro esperado (nunca panic).
+        return;
+    };
+    // O path válido tem segmentos coerentes.
+    for (builder.segments()) |seg| {
+        switch (seg) {
+            .move_to, .line_to => |p| {
+                try std.testing.expect(std.math.isFinite(p.x) and std.math.isFinite(p.y));
+            },
+            .cubic_to => |c| {
+                try std.testing.expect(std.math.isFinite(c.c1.x) and std.math.isFinite(c.c1.y));
+                try std.testing.expect(std.math.isFinite(c.c2.x) and std.math.isFinite(c.c2.y));
+                try std.testing.expect(std.math.isFinite(c.p.x) and std.math.isFinite(c.p.y));
+            },
+            .quad_to => |c| {
+                try std.testing.expect(std.math.isFinite(c.c.x) and std.math.isFinite(c.c.y));
+                try std.testing.expect(std.math.isFinite(c.p.x) and std.math.isFinite(c.p.y));
+            },
+            .close => {},
+        }
+    }
+    // O achatamento não pode estourar os buffers nem o tempo.
+    var points: [1024]types.Vec2 = undefined;
+    var contours: [128]path_mod.ContourRange = undefined;
+    const flat = path_mod.flatten(builder.segments(), 0.25, &points, &contours) catch |err| {
+        try std.testing.expectEqual(error.NoSpaceLeft, err);
+        return;
+    };
+    // Cada contorno cabe nos pontos.
+    for (flat.contours) |c| {
+        try std.testing.expect(c.start + c.len <= flat.points.len);
+        try std.testing.expect(c.len >= 2);
+    }
+}
