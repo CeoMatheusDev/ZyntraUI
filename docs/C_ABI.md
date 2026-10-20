@@ -944,6 +944,10 @@ zyntra_widget_label_atlas(ctx, id, bounds, "AB", 2, color, atlas);
   da sua região — o texto fica visível até no rasterizador de referência,
   que não rasteriza glifos); `zyntra_widget_label_atlas` faz o mesmo
   posicionando pelo canto superior-esquerdo do rect.
+* `zyntra_widget_text_area_atlas` é a área de texto com a mesma fonte:
+  caret, seleção, clique e rolagem horizontal seguem os AVANÇOS REAIS
+  dos glifos (fonte proporcional). Sem quebra suave (as linhas visuais
+  são as linhas lógicas).
 * Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: atlas/ponteiros nulos, dimensões
   zero, `stride` menor que `width * 4`, codepoint fora de
   `0..0x10FFFF` (ou surrogate), avanço/medida inválidos, glifo

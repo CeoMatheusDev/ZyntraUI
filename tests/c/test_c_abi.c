@@ -3692,6 +3692,29 @@ int main(void) {
         assert(n_text_draw == 1); /* sem a fonte: comando de texto */
         CHECK(zyntra_context_end_frame(ctx));
 
+        /* Área de texto com a mesma fonte real (M150). */
+        {
+            char abuf[32] = {0};
+            size_t alen = 0;
+            size_t acursor = 0;
+            size_t aanchor = 0;
+            float ascroll = 0.0f;
+            const ZyntraId ta_atlas = zyntra_id_from_string("m150:ta", 7);
+            ZyntraTextAreaResult tar;
+            ZyntraTextInputStyle tis2;
+            CHECK(zyntra_style_text_input(0, &tis2));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_focus(ctx, ta_atlas));
+            CHECK(zyntra_context_push_text(ctx, 'A'));
+            CHECK(zyntra_widget_text_area_atlas(ctx, ta_atlas,
+                (ZyntraRect){0, 0, 200, 60}, abuf, sizeof(abuf), &alen,
+                &acursor, &aanchor, &ascroll, atlas, &tis2, &tar));
+            assert(tar.focused && tar.changed);
+            assert(alen == 1);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
         CHECK(zyntra_font_atlas_destroy(atlas));
         c139_atlas = (w == 8.0f && lh == 7.0f);
     }

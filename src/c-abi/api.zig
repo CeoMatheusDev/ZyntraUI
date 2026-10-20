@@ -2693,6 +2693,57 @@ pub export fn zyntra_widget_text_area_ime(
     return .ok;
 }
 
+/// Área de texto com fonte real (atlas de glifos): o caret, a seleção,
+/// o clique e a rolagem usam os AVANÇOS REAIS dos glifos. Sem quebra
+/// suave (as linhas visuais são as linhas lógicas).
+pub export fn zyntra_widget_text_area_atlas(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    buffer: ?[*]u8,
+    buffer_len: usize,
+    len: ?*usize,
+    cursor: ?*usize,
+    anchor: ?*usize,
+    scroll_y: ?*f32,
+    atlas: ?*ZyntraFontAtlas,
+    style: ?*const ct.ZyntraTextInputStyle,
+    out_result: ?*ct.ZyntraTextAreaResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const n = len orelse return .invalid_argument;
+    const cur = cursor orelse return .invalid_argument;
+    const anc = anchor orelse return .invalid_argument;
+    const scroll = scroll_y orelse return .invalid_argument;
+    const a = atlas orelse return .invalid_argument;
+    const buf = byteBufOf(buffer, buffer_len) catch return .invalid_argument;
+    const state = toFontAtlas(a);
+    state.refresh();
+    const res = textarea_mod.textAreaAtlas(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        buf,
+        n,
+        cur,
+        anc,
+        scroll,
+        &state.view,
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .focused = res.focused,
+        .changed = res.changed,
+        .overflowed = res.overflowed,
+        .selected = res.selected,
+        .undone = res.undone,
+        .redone = res.redone,
+        .len = res.len,
+    };
+    return .ok;
+}
+
 pub export fn zyntra_widget_text_area(
     handle: ?*ZyntraContext,
     id: ct.ZyntraId,
@@ -7758,4 +7809,133 @@ test "C-ABI M144: fonte de bitmap global no contexto C" {
 
     // Nulos nunca crasham.
     try stdt.testing.expectEqual(bad, zyntra_context_clear_bitmap_font(null));
+}
+
+test "C-ABI M150: área de texto com atlas (fonte real)" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(ok, zyntra_context_create(.{
+        .x = 0,
+        .y = 0,
+        .w = 200,
+        .h = 100,
+    }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    // Atlas com 'A' (avanço 5) e 'B' (avanço 3).
+    var atlas: ?*ZyntraFontAtlas = null;
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_create(16, 16, 1, &atlas));
+    defer _ = zyntra_font_atlas_destroy(atlas);
+    var gx: u32 = 0;
+    var gy: u32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_add_glyph(atlas, 'A', 4, 8, 5.0, -8.0, &gx, &gy));
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_add_glyph(atlas, 'B', 4, 8, 3.0, -8.0, &gx, &gy));
+    var pixels: [16 * 16 * 4]u8 = undefined;
+    for (&pixels, 0..) |*p, i| p.* = @truncate(i);
+    // Glifo 'A' (região 0,0,4,8) pintado de branco.
+    for (0..8) |row| {
+        for (0..4) |col| {
+            const o = (@as(usize, row) * 16 + col) * 4;
+            pixels[o] = 255;
+            pixels[o + 1] = 255;
+            pixels[o + 2] = 255;
+            pixels[o + 3] = 255;
+        }
+    }
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_set_image(atlas, &pixels, 16, 16, 16 * 4));
+
+    var style: ct.ZyntraTextInputStyle = undefined;
+    try stdt.testing.expectEqual(ok, zyntra_style_text_input(0, &style));
+    var buf: [32]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    const id = zyntra_id_from_string("m150:ta", 7);
+    var res: ct.ZyntraTextAreaResult = .{};
+
+    // Digita "AB" e confere o buffer + o run de glifos.
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_context_focus(handle, id));
+    try stdt.testing.expectEqual(ok, zyntra_context_push_text(handle, 'A'));
+    try stdt.testing.expectEqual(ok, zyntra_context_push_text(handle, 'B'));
+    try stdt.testing.expectEqual(ok, zyntra_widget_text_area_atlas(
+        handle,
+        id,
+        .{ .x = 0, .y = 0, .w = 200, .h = 60 },
+        &buf,
+        buf.len,
+        &len,
+        &cursor,
+        &anchor,
+        &scroll,
+        atlas,
+        &style,
+        &res,
+    ));
+    try stdt.testing.expect(res.focused and res.changed);
+    try stdt.testing.expectEqual(@as(usize, 2), len);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    var n_draw: usize = 0;
+    try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expect(n_draw > 0);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // O texto sai do atlas: o glifo aparece no framebuffer.
+    var fb: ?*ZyntraFramebuffer = null;
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_create(16, 16, &fb));
+    defer zyntra_framebuffer_destroy(fb);
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_widget_text_area_atlas(
+        handle,
+        id,
+        .{ .x = 0, .y = 0, .w = 200, .h = 60 },
+        &buf,
+        buf.len,
+        &len,
+        &cursor,
+        &anchor,
+        &scroll,
+        atlas,
+        &style,
+        &res,
+    ));
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_render(fb, handle, null));
+    var px: ct.ZyntraColor = .{};
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_pixel(fb, 4, 4, &px));
+    // O glifo aparece (a cor é a do tema, não branco puro).
+    try stdt.testing.expect(px.r > 150);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // Contratos: atlas nulo e handle nulo.
+    try stdt.testing.expectEqual(bad, zyntra_widget_text_area_atlas(
+        handle,
+        id,
+        .{ .x = 0, .y = 0, .w = 200, .h = 60 },
+        &buf,
+        buf.len,
+        &len,
+        &cursor,
+        &anchor,
+        &scroll,
+        null,
+        &style,
+        &res,
+    ));
+    try stdt.testing.expectEqual(bad, zyntra_widget_text_area_atlas(
+        null,
+        id,
+        .{ .x = 0, .y = 0, .w = 200, .h = 60 },
+        &buf,
+        buf.len,
+        &len,
+        &cursor,
+        &anchor,
+        &scroll,
+        atlas,
+        &style,
+        &res,
+    ));
 }

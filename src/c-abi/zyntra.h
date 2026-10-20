@@ -1525,6 +1525,15 @@ ZyntraResult zyntra_widget_inspector_view(ZyntraContext *handle, ZyntraId id,
  * bitmap fica acima da linha de base. */
 typedef struct ZyntraFontAtlas ZyntraFontAtlas;
 
+/* Área de texto com fonte real (atlas): caret/seleção/clique seguem os
+ * AVANÇOS REAIS dos glifos. Sem quebra suave (as linhas visuais são as
+ * linhas lógicas). */
+ZyntraResult zyntra_widget_text_area_atlas(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, char *buffer, size_t buffer_len, size_t *len,
+    size_t *cursor, size_t *anchor, float *scroll_y,
+    const ZyntraFontAtlas *atlas, const ZyntraTextInputStyle *style,
+    ZyntraTextAreaResult *out_result);
+
 ZyntraResult zyntra_font_atlas_create(uint32_t width, uint32_t height,
     uint32_t padding, ZyntraFontAtlas **out_atlas);
 ZyntraResult zyntra_font_atlas_destroy(ZyntraFontAtlas *atlas);
