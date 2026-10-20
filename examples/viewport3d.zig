@@ -60,6 +60,43 @@ pub fn main() !void {
     drawWireframeCube(&raster, &cam, aspect, &cube);
     const wire_lit = countLit(&pixels);
 
+    // 3c) SELEÇÃO: o clique no centro da tela vira um raio que acerta o
+    // cubo (o objeto mais próximo).
+    const mvp = zyntra_ui.viewport3d.math.Mat4.mul(
+        cam.projectionMatrix(aspect).?,
+        cam.view().?,
+    );
+    var picked: ?zyntra_ui.viewport3d.pick.Hit = null;
+    if (zyntra_ui.viewport3d.pick.screenRay(mvp, WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT)) |ray| {
+        picked = zyntra_ui.viewport3d.pick.pickMesh(
+            ray,
+            cube.mesh(),
+            zyntra_ui.viewport3d.math.Mat4.identity(),
+            1,
+            false,
+        );
+    }
+    // O triângulo atingido é redesenhado com a cor de destaque.
+    if (picked) |hit| {
+        const hl = zyntra_ui.viewport3d.mesh.Mesh{
+            .positions = &cube.positions,
+            .indices = &[_]u32{
+                cube.indices[hit.triangle * 3],
+                cube.indices[hit.triangle * 3 + 1],
+                cube.indices[hit.triangle * 3 + 2],
+            },
+        };
+        raster.clear(.{ .r = 12, .g = 14, .b = 20, .a = 255 });
+        raster.drawMesh(
+            hl,
+            zyntra_ui.viewport3d.math.Mat4.identity(),
+            cam,
+            aspect,
+            .{ .color = .{ .r = 255, .g = 120, .b = 60, .a = 255 } },
+        );
+    }
+    const pick_lit = countLit(&pixels);
+
     // 4b) Órbita: a câmera gira e o render muda.
     cam.orbit(0.4, 0.1);
     raster.clear(.{ .r = 12, .g = 14, .b = 20, .a = 255 });
@@ -107,12 +144,13 @@ pub fn main() !void {
     ctx.endFrame();
 
     std.debug.print(
-        "viewport3d filled={d} wire={d} orbit={d} widget_cmds={d} focused={} dragging={} yaw={d:.3}\n",
-        .{ filled_lit, wire_lit, orbit_lit, cmds, res.focused, res.dragging, state.yaw },
+        "viewport3d filled={d} wire={d} orbit={d} pick={d} widget_cmds={d} focused={} dragging={} yaw={d:.3}\n",
+        .{ filled_lit, wire_lit, orbit_lit, pick_lit, cmds, res.focused, res.dragging, state.yaw },
     );
     std.debug.assert(filled_lit > 0);
     std.debug.assert(wire_lit > 0);
     std.debug.assert(orbit_lit > 0);
+    std.debug.assert(pick_lit > 0); // o clique no centro acerta o cubo
     std.debug.assert(res.focused);
 }
 

@@ -21,6 +21,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   muda a cada glifo adicionado; o cache de medições inclui a geração na
   chave, então um atlas alterado invalida as entradas antigas (sem medir
   de novo).
+- `viewport3d`: **seleção de objetos** (M141, aditivo) —
+  `viewport3d.pick` converte a posição do mouse em raio de mundo
+  (`screenRay`, via o inverso da view-projection) e testa a interseção
+  com os triângulos da malha (Möller–Trumbore), devolvendo o objeto, a
+  distância e o ponto de impacto (`pickMesh`). `Mat4.inverse` foi
+  acrescentado para o picking. O app decide o destaque e os gizmos.
 - `viewport3d`: **culling de frustum** (M140, aditivo) — `viewport3d.frustum`
   extrai os 6 planos do frustum da matriz view-projection (Gribb–Hartmann,
   profundidade [0,1]) e o rasterizador descarta os triângulos fora da

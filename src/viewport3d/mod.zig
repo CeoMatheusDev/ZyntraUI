@@ -23,6 +23,7 @@ pub const depth = @import("depth.zig");
 pub const raster = @import("raster.zig");
 pub const grid = @import("grid.zig");
 pub const frustum = @import("frustum.zig");
+pub const pick = @import("pick.zig");
 pub const viewport = @import("viewport.zig");
 
 comptime {
@@ -34,5 +35,6 @@ comptime {
     _ = raster;
     _ = grid;
     _ = frustum;
+    _ = pick;
     _ = viewport;
 }
