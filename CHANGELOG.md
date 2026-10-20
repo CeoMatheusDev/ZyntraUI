@@ -5,74 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.40.1] - 2026-10-20
+
+PATCH de correção e ajustes, 100% compatível: a revisão geral do projeto
+(região suja, área de texto, runs grandes, cache de texto), o viewport
+3D modular e opcional — com paridade na fronteira C —, a observabilidade
+do frame e o fill opaco empacotado. Nenhuma API pública mudou de
+assinatura ou de layout.
+
 ### Adicionado
 
-- `c-abi`/`viewport3d`: **viewport 3D na fronteira C** (M146, aditivo) —
-  novo handle opaco `ZyntraViewport3D` roda o rasterizador 3D em software
-  (cena de cubos, câmera de órbita, grade, eixos, profundidade e picking
-  por raio): `zyntra_vp3d_create/destroy/resize/camera/orbit/zoom/
-  add_object/clear_objects/render/pick/pixels`. Os pixels (RGBA8,
-  emprestados) são apresentados na UI com `zyntra_draw_image` — nenhuma
-  dependência de GPU. `zyntra_image_fit_rect` calcula o rect de destino
-  e a região de origem nos modos de ajuste (stretch/contain/cover/none).
-  O widget de imagem ganhou `fitRectSize` (o cálculo a partir das
-  dimensões, sem a imagem) — a API existente segue igual.
-- `draw`/`core`: **observabilidade e reserva de capacidade** (M153, aditivo)
-  — novo módulo `draw.stats` com `FrameMetrics` (contadores por tipo de
-  comando, bytes de texto, glifos, regiões sujas e crescimentos de buffer;
-  `FrameStats` — que é `extern struct` público — fica INTACTO), e
-  `Context.frameMetrics()`. `DrawList.reserve`/`pushAssumeCapacity`/
-  `pushTextAssumeCapacity`/`reserveGlyphs` e
-  `Context.reserveDrawCommands`/`reserveTextBytes` permitem reservar
-  capacidade antes do frame (sem realocação no caminho quente; os buffers
-  são reutilizados entre frames). O rasterizador ganha `RasterMetrics`
-  (caminho rápido/genérico, pixels escritos) em `SoftwareFramebuffer`.
-- `text`/`c-abi`: **cache de texto com fuzz e revisão do atlas na C-ABI**
-  (M145, aditivo) — o cache ganhou um teste de fuzz que prova que o
-  resultado cacheado é sempre igual à medição direta (a chave distingue
-  texto e fonte); na C-ABI, a verificação de codepoint duplicado passou a
-  usar a tabela ordenada do estado (a cópia interna do builder deixou de
-  crescer).
-- `core`/`widgets`: **região suja mais correta** (M144, aditivo) — o
-  contexto agora guarda a ÁREA de cada widget "quente" (não só o id): ao
-  sair do estado quente, a área que o widget ocupava no frame anterior é
-  repintada (antes ficavam pixels velhos quando o widget mudava de lugar
-  ou sumia). O `tooltip` passou a declarar a área que ocupa (aparece e
-  some no hover) e o `spinner` (animado) marca o próprio retângulo como
-  sujo. Nenhuma API pública mudou de assinatura.
-- `core`/`draw`/`text`/`docs`: **revisão geral do projeto** (M143, aditivo) —
-  a área de texto passou a usar o `text.layout.Layout` compartilhado (o
-  `textarea` reimplementava medição e caret: `colAtX`/`advanceOf` foram
-  removidos); o `DrawList.scaledInto` deixou de falhar com runs acima de
-  256 glifos (a cópia é feita em pedaços, sem buffer grande na pilha); o
-  cache de texto mede UMA vez por texto (a largura é o avanço); a
-  documentação da C-ABI ganhou o índice completo das 192 funções e dos
-  104 tipos públicos (a lista de funções/documentação estava defasada) e
-  as notas de ownership de atlas/fonte de bitmap; o README lista a
-  arquitetura atual (módulos de `text`, `layout`, `viewport3d`) e os novos
-  exemplos. Nenhuma API pública mudou de assinatura.
-- `text`: **geração do atlas** (M138, aditivo) — `FontAtlas.generation`
-  muda a cada glifo adicionado; o cache de medições inclui a geração na
-  chave, então um atlas alterado invalida as entradas antigas (sem medir
-  de novo).
-- `viewport3d`: **gizmos de transformação** (M142, aditivo) —
-  `viewport3d.gizmo` traz os gizmos de translação, rotação e escala sobre o
-  objeto selecionado: a posição das alças (nas pontas dos eixos), o
-  picking da alça (`pickHandle`, por raio-esfera) e o delta do arraste
-  (`drag`: translação ao longo do eixo, ângulo em torno do eixo e fator de
-  escala). O app aplica o delta no seu próprio transform e desenha as
-  alças — o gizmo não desenha nada.
-- `viewport3d`: **seleção de objetos** (M141, aditivo) —
-  `viewport3d.pick` converte a posição do mouse em raio de mundo
-  (`screenRay`, via o inverso da view-projection) e testa a interseção
-  com os triângulos da malha (Möller–Trumbore), devolvendo o objeto, a
-  distância e o ponto de impacto (`pickMesh`). `Mat4.inverse` foi
-  acrescentado para o picking. O app decide o destaque e os gizmos.
-- `viewport3d`: **culling de frustum** (M140, aditivo) — `viewport3d.frustum`
-  extrai os 6 planos do frustum da matriz view-projection (Gribb–Hartmann,
-  profundidade [0,1]) e o rasterizador descarta os triângulos fora da
-  câmera ANTES de projetar (esfera envolvente por triângulo). É culling
-  puro: não muda o resultado na tela, só o trabalho feito.
 - `viewport3d`: **viewport 3D modular e opcional** (M156/M157, aditivo) —
   novo módulo `viewport3d` com `math` (Vec2/3/4 e Mat4 column-major, mão
   direita, depth [0,1]), `camera` (dados + helpers de órbita/pan/zoom),
@@ -85,6 +27,34 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   produtor e a apresenta, tratando arraste/roda/foco). `grid` desenha o
   plano de grade e os eixos XYZ. Tudo opcional: a ZyntraUI continua sendo
   uma biblioteca de UI leve, sem GPU e sem dependências externas.
+- `viewport3d`: **culling de frustum** (M140, aditivo) — `viewport3d.frustum`
+  extrai os 6 planos do frustum da matriz view-projection (Gribb–Hartmann,
+  profundidade [0,1]) e o rasterizador descarta os triângulos fora da
+  câmera ANTES de projetar (esfera envolvente por triângulo). É culling
+  puro: não muda o resultado na tela, só o trabalho feito.
+- `viewport3d`: **seleção de objetos** (M141, aditivo) —
+  `viewport3d.pick` converte a posição do mouse em raio de mundo
+  (`screenRay`, via o inverso da view-projection) e testa a interseção
+  com os triângulos da malha (Möller–Trumbore), devolvendo o objeto, a
+  distância e o ponto de impacto (`pickMesh`). `Mat4.inverse` foi
+  acrescentado para o picking. O app decide o destaque e os gizmos.
+- `viewport3d`: **gizmos de transformação** (M142, aditivo) —
+  `viewport3d.gizmo` traz os gizmos de translação, rotação e escala sobre o
+  objeto selecionado: a posição das alças (nas pontas dos eixos), o
+  picking da alça (`pickHandle`, por raio-esfera) e o delta do arraste
+  (`drag`: translação ao longo do eixo, ângulo em torno do eixo e fator de
+  escala). O app aplica o delta no seu próprio transform e desenha as
+  alças — o gizmo não desenha nada.
+- `text`: **geração do atlas** (M138, aditivo) — `FontAtlas.generation`
+  muda a cada glifo adicionado; o cache de medições inclui a geração na
+  chave, então um atlas alterado invalida as entradas antigas (sem medir
+  de novo).
+- `text`: **cache opcional de medições** (M155, aditivo) —
+  `text.cache.TextCache` guarda as medições com capacidade limitada e
+  chave que compara o CONTEÚDO EXATO do texto (não só o hash), a
+  identidade da fonte (métricas ou atlas) e a largura disponível; tem
+  `clear` para invalidação e contadores de acerto/erro. É do app: a
+  biblioteca não o usa por padrão (o ganho precisa ser medido no app).
 - `layout`: **helpers de virtualização** (M154, aditivo) —
   `layout.virtual.fixedRange` (altura fixa, cálculo direto) e
   `variableRange` (altura variável, offsets acumulados + busca binária)
@@ -92,12 +62,56 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `contains`. São helpers PUROS: o estado (scroll, itens) continua do
   app; culling (não rasterizar) e virtualização (não construir) ficam
   claramente separados.
-- `text`: **cache opcional de medições** (M155, aditivo) —
-  `text.cache.TextCache` guarda as medições com capacidade limitada e
-  chave que compara o CONTEÚDO EXATO do texto (não só o hash), a
-  identidade da fonte (métricas ou atlas) e a largura disponível; tem
-  `clear` para invalidação e contadores de acerto/erro. É do app: a
-  biblioteca não o usa por padrão (o ganho precisa ser medido no app).
+- `draw`/`core`: **observabilidade e reserva de capacidade** (M153, aditivo)
+  — novo módulo `draw.stats` com `FrameMetrics` (contadores por tipo de
+  comando, bytes de texto, glifos, regiões sujas e crescimentos de buffer;
+  `FrameStats` — que é `extern struct` público — fica INTACTO), e
+  `Context.frameMetrics()`. `DrawList.reserve`/`pushAssumeCapacity`/
+  `pushTextAssumeCapacity`/`reserveGlyphs` e
+  `Context.reserveDrawCommands`/`reserveTextBytes` permitem reservar
+  capacidade antes do frame (sem realocação no caminho quente; os buffers
+  são reutilizados entre frames). O rasterizador ganha `RasterMetrics`
+  (caminho rápido/genérico, pixels escritos) em `SoftwareFramebuffer`.
+- `c-abi`/`viewport3d`: **viewport 3D na fronteira C** (M146, aditivo) —
+  novo handle opaco `ZyntraViewport3D` roda o rasterizador 3D em software
+  (cena de cubos, câmera de órbita, grade, eixos, profundidade e picking
+  por raio): `zyntra_vp3d_create/destroy/resize/camera/orbit/zoom/
+  add_object/clear_objects/render/pick/pixels`. Os pixels (RGBA8,
+  emprestados) são apresentados na UI com `zyntra_draw_image` — nenhuma
+  dependência de GPU. `zyntra_image_fit_rect` calcula o rect de destino
+  e a região de origem nos modos de ajuste (stretch/contain/cover/none).
+  O widget de imagem ganhou `fitRectSize` (o cálculo a partir das
+  dimensões, sem a imagem) — a API existente segue igual.
+
+### Corrigido
+
+- `core`/`draw`/`text`/`docs`: **revisão geral do projeto** (M143) —
+  a área de texto passou a usar o `text.layout.Layout` compartilhado (o
+  `textarea` reimplementava medição e caret: `colAtX`/`advanceOf` foram
+  removidos); o `DrawList.scaledInto` deixou de falhar com runs acima de
+  256 glifos (a cópia é feita em pedaços, sem buffer grande na pilha); o
+  cache de texto mede UMA vez por texto (a largura é o avanço); a
+  documentação da C-ABI ganhou o índice completo das 192 funções e dos
+  104 tipos públicos (a lista de funções/documentação estava defasada) e
+  as notas de ownership de atlas/fonte de bitmap; o README lista a
+  arquitetura atual (módulos de `text`, `layout`, `viewport3d`) e os novos
+  exemplos. Nenhuma API pública mudou de assinatura.
+- `core`/`widgets`: **região suja mais correta** (M144) — o
+  contexto agora guarda a ÁREA de cada widget "quente" (não só o id): ao
+  sair do estado quente, a área que o widget ocupava no frame anterior é
+  repintada (antes ficavam pixels velhos quando o widget mudava de lugar
+  ou sumia). O `tooltip` passou a declarar a área que ocupa (aparece e
+  some no hover) e o `spinner` (animado) marca o próprio retângulo como
+  sujo. Nenhuma API pública mudou de assinatura.
+- `text`/`c-abi`: **cache de texto com fuzz e revisão do atlas na C-ABI**
+  (M145) — o cache ganhou um teste de fuzz que prova que o
+  resultado cacheado é sempre igual à medição direta (a chave distingue
+  texto e fonte); na C-ABI, a verificação de codepoint duplicado passou a
+  usar a tabela ordenada do estado (a cópia interna do builder deixou de
+  crescer).
+
+### Alterado
+
 - `software`: **fill opaco com escrita empacotada** (M153) — o caminho
   rápido de retângulo opaco escreve a cor como um `u32` (RGBA
   little-endian, mesmos bytes de antes) em vez de 4 stores separados:
