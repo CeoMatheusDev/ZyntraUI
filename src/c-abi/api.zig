@@ -355,6 +355,14 @@ pub export fn zyntra_font_atlas_add_glyph(
     }
     const gpa = std.heap.page_allocator;
     const state = toFontAtlas(a);
+    // Duplicado? (a tabela do estado é ordenada por codepoint)
+    {
+        var k: usize = 0;
+        while (k < state.glyphs.items.len and state.glyphs.items[k].codepoint < codepoint) k += 1;
+        if (k < state.glyphs.items.len and state.glyphs.items[k].codepoint == codepoint) {
+            return .invalid_argument;
+        }
+    }
     const glyph = state.builder.addGlyph(gpa, @intCast(codepoint), width, height, .{
         .advance = advance,
         .bearing_y = bearing_y,
@@ -374,6 +382,9 @@ pub export fn zyntra_font_atlas_add_glyph(
         idx += 1;
     }
     state.glyphs.insert(gpa, idx, glyph) catch return .out_of_memory;
+    // A tabela do builder não é usada na fronteira C (a tabela
+    // ordenada do estado é) — libera o crescimento dela.
+    state.builder.entries.clearRetainingCapacity();
     state.refresh();
     ox.* = glyph.region.x;
     oy.* = glyph.region.y;

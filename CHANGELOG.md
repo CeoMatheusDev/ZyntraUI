@@ -17,6 +17,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   capacidade antes do frame (sem realocação no caminho quente; os buffers
   são reutilizados entre frames). O rasterizador ganha `RasterMetrics`
   (caminho rápido/genérico, pixels escritos) em `SoftwareFramebuffer`.
+- `text`/`c-abi`: **cache de texto com fuzz e revisão do atlas na C-ABI**
+  (M145, aditivo) — o cache ganhou um teste de fuzz que prova que o
+  resultado cacheado é sempre igual à medição direta (a chave distingue
+  texto e fonte); na C-ABI, a verificação de codepoint duplicado passou a
+  usar a tabela ordenada do estado (a cópia interna do builder deixou de
+  crescer).
 - `core`/`widgets`: **região suja mais correta** (M144, aditivo) — o
   contexto agora guarda a ÁREA de cada widget "quente" (não só o id): ao
   sair do estado quente, a área que o widget ocupava no frame anterior é

@@ -343,3 +343,51 @@ test "TextCache: a geração do atlas invalida as entradas" {
     _ = try cache.measure("A", source, 0);
     try stdt.testing.expectEqual(@as(u64, 2), cache.misses);
 }
+
+test "fuzz TextCache: o resultado cacheado é sempre o correto" {
+    try std.testing.fuzz({}, fuzzCache, .{});
+}
+
+fn fuzzCache(_: void, smith: *std.testing.Smith) !void {
+    var bytes: [96]u8 = undefined;
+    smith.bytes(&bytes);
+    const gpa = std.testing.allocator;
+
+    // Duas fontes (avanços diferentes) e textos aleatórios válidos.
+    const f1 = metrics_mod.FontMetrics.withSize(10);
+    const f2 = metrics_mod.FontMetrics.withSize(16);
+    var cache = try TextCache.init(gpa, 16);
+    defer cache.deinit();
+
+    var text: [32]u8 = undefined;
+    const n = bytes[0] % 32;
+    for (0..n) |i| {
+        // Só ASCII (UTF-8 válido) para o teste focar no cache.
+        text[i] = 'a' + (bytes[1 + i] % 26);
+    }
+    const slice = text[0..n];
+
+    const src1 = layout_mod.Source{ .metrics = f1 };
+    const src2 = layout_mod.Source{ .metrics = f2 };
+    const layout1 = try layout_mod.Layout.fromMetrics(f1);
+    const layout2 = try layout_mod.Layout.fromMetrics(f2);
+
+    // Mede (e mede de novo: o segundo acesso vem do cache).
+    const m1 = try cache.measure(slice, src1, 0);
+    const m1b = try cache.measure(slice, src1, 0);
+    try std.testing.expectEqual(m1.width, m1b.width);
+    const m2 = try cache.measure(slice, src2, 0);
+    const m2b = try cache.measure(slice, src2, 0);
+    try std.testing.expectEqual(m2.width, m2b.width);
+
+    // O resultado cacheado é o mesmo que a medição direta.
+    const direct1 = try layout1.measure(slice);
+    const direct2 = try layout2.measure(slice);
+    try std.testing.expectEqual(direct1.width, m1.width);
+    try std.testing.expectEqual(direct2.width, m2.width);
+    // As duas fontes têm avanços diferentes ⇒ larguras diferentes (a chave
+    // distingue a fonte).
+    if (f1.advance != f2.advance and n > 0) {
+        try std.testing.expect(m1.width != m2.width);
+    }
+}
