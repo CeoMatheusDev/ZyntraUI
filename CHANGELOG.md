@@ -44,6 +44,13 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   composição; sem foco a composição é cancelada. `textarea` ainda não tem
   variante de IME.
 
+- `widgets`: **widget de imagem** (M127, aditivo) — `widgets.image.image`
+  desenha uma imagem RGBA8 (do M123) dentro de um rect, com modos de
+  ajuste (`stretch`, `contain`, `cover`, `none`) e `tint`. `cover` recorta
+  o excedente na origem (região inteira de pixels, proporção intacta);
+  `contain`/`none` centralizam a imagem dentro do rect. Sem estado,
+  sem alocação e sem interação (a imagem é emprestada do chamador).
+
 ## [1.35.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a fronteira C avança de forma substancial e

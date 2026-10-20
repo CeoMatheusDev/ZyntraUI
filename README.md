@@ -195,6 +195,22 @@ image — the same mechanism a sprite atlas or a glyph atlas needs. The
 reference rasterizer samples with bilinear filtering in premultiplied alpha
 and honours clip, culling and partial repaint like every other command.
 
+### Image widget
+
+`widgets.image` draws an RGBA8 image inside a rect, with fit modes
+(`stretch`, `contain`, `cover`, `none`) and a tint:
+
+```zig
+try zyntra_ui.widgets.image.image(&ctx, bounds, img, .{
+    .fit = .contain,
+    .tint = zyntra_ui.Color.rgb(255, 255, 255),
+});
+```
+
+`cover` crops the excess in the source (an integer pixel region), so the
+image proportion is preserved; `contain` keeps the whole image centered.
+The image is borrowed: its pixels must outlive the frame.
+
 ### Glyph atlases
 
 `text.atlas` builds a font atlas without decoding fonts: the host rasterizes

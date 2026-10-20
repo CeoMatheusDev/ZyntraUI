@@ -117,6 +117,7 @@ pub const widgets = struct {
     pub const timeline_view = @import("widgets/timeline_view.zig");
     pub const inspector_view = @import("widgets/inspector_view.zig");
     pub const drag_ghost = @import("widgets/drag_ghost.zig");
+    pub const image = @import("widgets/image.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -198,6 +199,8 @@ pub const GraphStyle = style.style_mod.GraphStyle;
 pub const TimelineStyle = style.style_mod.TimelineStyle;
 pub const InspectorStyle = style.style_mod.InspectorStyle;
 pub const DragGhostStyle = style.style_mod.DragGhostStyle;
+pub const ImageFit = widgets.image.Fit;
+pub const ImageOptions = widgets.image.ImageOptions;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -371,4 +374,5 @@ test {
     _ = @import("widgets/timeline_view.zig");
     _ = @import("widgets/inspector_view.zig");
     _ = @import("widgets/drag_ghost.zig");
+    _ = @import("widgets/image.zig");
 }
