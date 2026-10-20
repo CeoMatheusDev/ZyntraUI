@@ -20,6 +20,24 @@ const renderer = @import("../draw/renderer.zig");
 
 pub const max_dimension: u32 = 8192;
 
+/// Métricas do rasterizador (M153): contadores por caminho e pixels
+/// escritos. Vivem no framebuffer (zeradas a cada render) — não mudam
+/// o `SoftwareStats` público (contrato da C-ABI).
+pub const RasterMetrics = extern struct {
+    /// Retângulos preenchidos no caminho rápido (cor opaca).
+    rect_fast_path: u32 = 0,
+    /// Retângulos preenchidos no caminho genérico (blend).
+    rect_generic_path: u32 = 0,
+    /// Blits 1:1 no caminho rápido (cópia direta).
+    blit_fast_path: u32 = 0,
+    /// Blits no caminho bilinear.
+    blit_generic_path: u32 = 0,
+    /// Comandos desenhados (exclui os descartados).
+    commands_drawn: u32 = 0,
+    /// Pixels escritos (soma das áreas preenchidas).
+    pixels_written: u64 = 0,
+};
+
 /// RGBA8 row-major. Conteúdo inicial INDEFINIDO (lixo do alocador —
 /// Debug preenche com 0xAA, Release zera): limpe com `clear` ou cubra
 /// tudo antes de ler pixels.
@@ -31,6 +49,8 @@ pub const SoftwareFramebuffer = struct {
     /// que precisam de uma cópia (ex.: `blur`). `init` sempre o
     /// dimensiona; uma construção manual deve fornecê-lo para usar blur.
     scratch: []u8 = &.{},
+    /// Métricas do último render (M153).
+    metrics: RasterMetrics = .{},
 
     const Self = @This();
 
@@ -140,21 +160,27 @@ pub const SoftwareFramebuffer = struct {
         }
         if (c.a == 0) return; // transparente: no-op
         if (c.a == 255) {
-            // Caminho rápido opaco (sequencial puro, vetorizável).
+            // Caminho rápido opaco: UM store de u32 por pixel (a cor é
+            // empacotada em RGBA little-endian — mesmos bytes de antes).
+            const packed_rgba: u32 = @as(u32, c.r) |
+                (@as(u32, c.g) << 8) |
+                (@as(u32, c.b) << 16) |
+                (@as(u32, c.a) << 24);
             var y = y0;
             while (y < y1) : (y += 1) {
                 var o = @as(usize, @intCast(y)) * @as(usize, self.w) * 4 + @as(usize, @intCast(x0)) * 4;
                 var x = x0;
                 while (x < x1) : (x += 1) {
-                    self.pixels[o] = c.r;
-                    self.pixels[o + 1] = c.g;
-                    self.pixels[o + 2] = c.b;
-                    self.pixels[o + 3] = c.a;
+                    std.mem.writeInt(u32, self.pixels[o..][0..4], packed_rgba, .little);
                     o += 4;
                 }
             }
+            self.metrics.rect_fast_path += 1;
+            self.metrics.pixels_written += @as(u64, @intCast(@max(0, x1 - x0))) *
+                @as(u64, @intCast(@max(0, y1 - y0)));
             return;
         }
+        self.metrics.rect_generic_path += 1;
         // Blending com base içada (mesma matemática de set()).
         const sa: u32 = c.a;
         const ia: u32 = 255 - sa;
@@ -226,6 +252,7 @@ pub const SoftwareFramebuffer = struct {
             dst.h == @as(f32, @floatFromInt(src.h)) and
             dst.x == @floor(dst.x) and dst.y == @floor(dst.y))
         {
+            self.metrics.blit_fast_path += 1;
             var y = y0;
             while (y < y1) : (y += 1) {
                 const sy = src.y + @as(u32, @intCast(y - @as(i64, @intFromFloat(@floor(dst.y)))));
@@ -245,6 +272,7 @@ pub const SoftwareFramebuffer = struct {
             return;
         }
 
+        self.metrics.blit_generic_path += 1;
         const inv_w = 1.0 / dst.w;
         const inv_h = 1.0 / dst.h;
         const src_x_max = @as(f32, @floatFromInt(src.x + src.w - 1));
@@ -956,6 +984,8 @@ fn renderInternal(
     region: ?types.Rect,
 ) !SoftwareStats {
     var out = SoftwareStats{ .submitted = @intCast(cmds.len) };
+    // Métricas do frame (M153): zera a cada render.
+    fb.metrics = .{};
     var clip: ?types.Rect = null;
     // Alfa global: vale para os comandos SEGUINTES (comando `.alpha`).
     var alpha: f32 = 1.0;
@@ -980,14 +1010,17 @@ fn renderInternal(
                 // Parcial: preserva o resto do framebuffer.
                 if (region == null) fb.clear(c.color) else fb.fillRect(area, null, c.color);
                 out.drawn += 1;
+                fb.metrics.commands_drawn += 1;
             },
             .clip => |c| {
                 clip = if (c.null_rect) null else c.rect;
                 out.drawn += 1;
+                fb.metrics.commands_drawn += 1;
             },
             .alpha => |c| {
                 alpha = std.math.clamp(c.factor, 0.0, 1.0);
                 out.drawn += 1;
+                fb.metrics.commands_drawn += 1;
             },
             .glyph_run => |c| {
                 if (!boundsVisible(cmd, cull_rect)) {
@@ -1020,6 +1053,7 @@ fn renderInternal(
                     );
                 }
                 out.drawn += 1;
+                fb.metrics.commands_drawn += 1;
             },
             .text => {
                 out.skipped_text += 1;
@@ -1056,6 +1090,7 @@ fn renderInternal(
                     else => unreachable,
                 }
                 out.drawn += 1;
+                fb.metrics.commands_drawn += 1;
             },
         }
     }

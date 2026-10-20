@@ -5,6 +5,23 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `draw`/`core`: **observabilidade e reserva de capacidade** (M153, aditivo)
+  — novo módulo `draw.stats` com `FrameMetrics` (contadores por tipo de
+  comando, bytes de texto, glifos, regiões sujas e crescimentos de buffer;
+  `FrameStats` — que é `extern struct` público — fica INTACTO), e
+  `Context.frameMetrics()`. `DrawList.reserve`/`pushAssumeCapacity`/
+  `pushTextAssumeCapacity`/`reserveGlyphs` e
+  `Context.reserveDrawCommands`/`reserveTextBytes` permitem reservar
+  capacidade antes do frame (sem realocação no caminho quente; os buffers
+  são reutilizados entre frames). O rasterizador ganha `RasterMetrics`
+  (caminho rápido/genérico, pixels escritos) em `SoftwareFramebuffer`.
+- `software`: **fill opaco com escrita empacotada** (M153) — o caminho
+  rápido de retângulo opaco escreve a cor como um `u32` (RGBA
+  little-endian, mesmos bytes de antes) em vez de 4 stores separados:
+  ~12–20% mais rápido no fill (medido, ver `docs/BENCHMARKS.md`).
+
 ## [1.40.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a frente de **fonte real** fecha — a área

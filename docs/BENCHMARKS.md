@@ -47,6 +47,52 @@ alocador — Debug preenche com `0xAA`). Com `clear`, pxsum idêntico
 (`293316480`, 6/6 execuções, ambos os modos). Framebuffer sem limpar tem
 conteúdo indefinido — documentado em `SoftwareFramebuffer`.
 
+## M153 — observabilidade, reservas e fill empacotado (2026-10-20)
+
+Metodologia nova: o próprio `examples/bench.zig` mede cada fase com
+`std.Io.Clock.awake` (aquecimento + 3 amostras, mediana reportada) e
+imprime as métricas estendidas (M153). O tempo externo continua valendo
+como total do processo.
+
+Máquina: Intel Xeon E5-2680 v3, Linux x86_64, alocador `page_allocator`.
+Carga igual à acima (200 frames × 5500 comandos + 50 renders do último
+frame + 100 frames de treeview).
+
+| Fase | Mediana (ReleaseFast) |
+|---|---|
+| Construção de comandos (200 frames) | ~45,5 ms (~13 ns/comando) |
+| Raster (50 frames do último frame) | ~86,7 ms (~1,73 ms/frame) |
+| Crescimentos de buffer no frame | **0** (com `reserve` antecipada) |
+
+Métricas do frame medidas: `cmds=5500 visible=4824 culled=676 rects=5000
+texts=500 bytes=18500 growths=0`; no raster: `fast=1001 generic=0
+pixels=4311502` (o caminho rápido cobre todos os retângulos opacos).
+
+### Fill de retângulo opaco: A/B alternado
+
+Micro-benchmark isolado (`fillRect` repetido, 64×64, 2000 chamadas por
+tamanho), três variantes alternadas no mesmo processo/máquina, 5 rodadas:
+
+| Variante | 16×16 | 64×64 | 256×256 |
+|---|---|---|---|
+| A: 4 stores de byte (histórico) | ~683 ns | ~10,1 µs | ~167,7 µs |
+| B: escrita empacotada (`u32`) | ~542 ns | ~9,7 µs | ~148,1 µs |
+| C: linha tipada `[]u32` | — | — | — |
+
+* **B foi adotada**: ~12–20% mais rápida que A, de forma consistente
+  (medianas de 5 rodadas alternadas). O `pxsum` do bench é bit-idêntico
+  (`293181120`).
+* **C foi descartada**: a linha tipada `[]u32` exigia `alignCast` do
+  ponteiro do framebuffer (framebuffers construídos à mão podem ter
+  ponteiro desalinhado) e, no build testado, ficou ~4× mais lenta. Não
+  foi adotada.
+* O ambiente é ruidoso (a mesma variante variou ~2× entre janelas de
+  medição): as comparações acima são sempre alternadas e relativas.
+
+Nota: a carga do bench passou a rodar 3 amostras (o `checksum` e o
+`pxsum` mudaram de valor por isso — `3300600` e `293181120` — e são
+determinísticos para a carga atual).
+
 ## Leitura
 
 * Steady-state retém capacidade (`clearRetainingCapacity`): sem syscalls de

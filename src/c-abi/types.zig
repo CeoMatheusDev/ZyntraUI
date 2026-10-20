@@ -728,6 +728,34 @@ pub const ZyntraInspectorViewResult = extern struct {
     scrolled: bool = false,
 };
 
+/// Métricas estendidas de um frame (M153) — espelho de
+/// `draw.stats.FrameMetrics`.
+pub const ZyntraFrameMetrics = extern struct {
+    commands_total: u32 = 0,
+    commands_visible: u32 = 0,
+    commands_culled: u32 = 0,
+    rects: u32 = 0,
+    texts: u32 = 0,
+    text_bytes: u32 = 0,
+    images: u32 = 0,
+    image_regions: u32 = 0,
+    glyph_runs: u32 = 0,
+    glyphs_total: u32 = 0,
+    dirty_rects: u32 = 0,
+    buffer_growths: u32 = 0,
+};
+
+/// Métricas do rasterizador (M153) — espelho de
+/// `software.raster.RasterMetrics`.
+pub const ZyntraRasterMetrics = extern struct {
+    rect_fast_path: u32 = 0,
+    rect_generic_path: u32 = 0,
+    blit_fast_path: u32 = 0,
+    blit_generic_path: u32 = 0,
+    commands_drawn: u32 = 0,
+    pixels_written: u64 = 0,
+};
+
 /// Resultado do bloco de texto (M151).
 pub const ZyntraTextBlockResult = extern struct {
     lines: u32 = 0,
@@ -918,6 +946,8 @@ comptime {
     if (@sizeOf(ZyntraTween) != 16 or @alignOf(ZyntraTween) != 4) @compileError("ZyntraTween ABI drift");
     if (@sizeOf(ZyntraImeComposition) != 40 or @alignOf(ZyntraImeComposition) != 8) @compileError("ZyntraImeComposition ABI drift");
     if (@sizeOf(ZyntraTextBlockResult) != 8 or @alignOf(ZyntraTextBlockResult) != 4) @compileError("ZyntraTextBlockResult ABI drift");
+    if (@sizeOf(ZyntraFrameMetrics) != 48 or @alignOf(ZyntraFrameMetrics) != 4) @compileError("ZyntraFrameMetrics ABI drift");
+    if (@sizeOf(ZyntraRasterMetrics) != 32 or @alignOf(ZyntraRasterMetrics) != 8) @compileError("ZyntraRasterMetrics ABI drift");
     if (@sizeOf(ZyntraAnimTimer) != 12 or @alignOf(ZyntraAnimTimer) != 4) @compileError("ZyntraAnimTimer ABI drift");
     if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
         @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
@@ -1017,6 +1047,9 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 40), @sizeOf(ZyntraImeComposition));
     // Bloco de texto M151.
     try stdt.testing.expectEqual(@as(usize, 8), @sizeOf(ZyntraTextBlockResult));
+    // Métricas M153.
+    try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraFrameMetrics));
+    try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraRasterMetrics));
     try stdt.testing.expectEqual(@as(usize, 12), @sizeOf(ZyntraAnimTimer));
     // Docking: espelhos do modelo e do resultado da área interativa.
     try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));

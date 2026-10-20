@@ -27,6 +27,7 @@ const atlas_mod = @import("../text/atlas.zig");
 const bitmap_mod = @import("../text/bitmap.zig");
 const event_mod = @import("../event/event.zig");
 const draw_mod = @import("../draw/commands.zig");
+const stats_mod = @import("../draw/stats.zig");
 const dnd_mod = @import("../dnd/service.zig");
 
 /// Erros públicos do contexto (M1+M2).
@@ -100,6 +101,10 @@ pub const Context = struct {
     /// registrados no frame e resultado do último solto. O `beginFrame`
     /// resolve o solto do frame anterior. Ver `dnd/service`.
     dnd: dnd_mod.State = .{},
+    /// Chamadas de `mark_dirty` no frame corrente (observabilidade,
+    /// M153). As regiões são unidas em `dirty_rect`; o contador é o
+    /// número de marcações feitas.
+    dirty_marks: u32 = 0,
     /// Região suja acumulada no frame corrente: união das áreas
     /// marcadas via `mark_dirty` (vazia = nada a repintar). Limpa em
     /// `beginFrame`. Consumida por `software.raster.renderRegion` para
@@ -168,6 +173,7 @@ pub const Context = struct {
         self.pending_focus_advance = null;
         self.dnd = .{};
         self.dirty_rect = types.Rect.init(0, 0, 0, 0);
+        self.dirty_marks = 0;
     }
 
     /// Inicia um novo frame: aplica avanço de foco pendente (sobre o
@@ -325,12 +331,38 @@ pub const Context = struct {
     /// modificadas); marcar um rect vazio é no-op. O rect vale para o
     /// frame corrente: `beginFrame` limpa antes do próximo.
     pub fn mark_dirty(self: *Self, rect: types.Rect) void {
+        self.dirty_marks += 1;
         self.dirty_rect = self.dirty_rect.unionWith(rect);
     }
 
     /// Limpa o rectângulo sujo (chamado no `beginFrame`).
     pub fn clear_dirty(self: *Self) void {
         self.dirty_rect = types.Rect.init(0, 0, 0, 0);
+    }
+
+    /// Reserva capacidade para os comandos (e bytes de texto) do frame
+    /// seguinte (M153). Sem alocação quando a capacidade já basta.
+    pub fn reserveDrawCommands(self: *Self, commands: usize, text_bytes: usize) ContextError!void {
+        self.draw.reserve(self.allocator, commands, text_bytes, 0) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+    }
+
+    /// Reserva capacidade só para os bytes de texto (M153).
+    pub fn reserveTextBytes(self: *Self, text_bytes: usize) ContextError!void {
+        self.draw.reserve(self.allocator, 0, text_bytes, 0) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+    }
+
+    /// Métricas estendidas do frame (M153): contadores por tipo de
+    /// comando, bytes de texto, glifos e crescimentos de buffer.
+    /// Sem alocação (uso diagnóstico).
+    pub fn frameMetrics(self: *const Self) stats_mod.FrameMetrics {
+        var m = stats_mod.frameMetrics(&self.draw, self.viewport);
+        m.dirty_rects = self.dirty_marks;
+        m.buffer_growths = self.draw.growths;
+        return m;
     }
 
     /// Declara o estado de interação do widget `id` neste frame e mantém o
@@ -874,5 +906,44 @@ test "Context M142: fonte de bitmap global desenha o texto dos widgets (M142)" {
     ctx.beginFrame();
     try ctx.pushText(types.Vec2.init(0, 0), types.Color.rgb(255, 255, 255), metrics, "AB");
     try stdt.testing.expect(ctx.drawCommands()[0] == .text);
+    ctx.endFrame();
+}
+
+test "Context M153: métricas do frame e reserva de capacidade" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var ctx = try Context.init(gpa, .{});
+    defer ctx.deinit();
+
+    // Reserva: a capacidade cobre o frame inteiro.
+    try ctx.reserveDrawCommands(16, 64);
+    const cap = ctx.draw.list.capacity;
+    try stdt.testing.expect(cap >= 16);
+    try ctx.reserveTextBytes(64);
+    try stdt.testing.expect(ctx.draw.text_bytes.capacity >= 64);
+
+    ctx.beginFrame();
+    try ctx.draw.rectFilled(ctx.allocator, types.Rect.init(0, 0, 10, 10), types.Color.rgb(1, 2, 3));
+    try ctx.draw.pushText(ctx.allocator, types.Vec2.init(0, 0), types.Color.rgb(1, 2, 3), metrics_mod.FontMetrics.withSize(10), "ab");
+    ctx.mark_dirty(types.Rect.init(0, 0, 5, 5));
+    ctx.mark_dirty(types.Rect.init(0, 0, 8, 8));
+
+    const m = ctx.frameMetrics();
+    try stdt.testing.expectEqual(@as(u32, 2), m.commands_total);
+    try stdt.testing.expectEqual(@as(u32, 1), m.rects);
+    try stdt.testing.expectEqual(@as(u32, 1), m.texts);
+    try stdt.testing.expectEqual(@as(u32, 2), m.text_bytes);
+    try stdt.testing.expectEqual(@as(u32, 2), m.dirty_rects);
+    // A reserva evitou qualquer crescimento.
+    try stdt.testing.expectEqual(@as(u32, 0), m.buffer_growths);
+    ctx.endFrame();
+
+    // Sem reserva, o crescimento é contabilizado.
+    ctx.beginFrame();
+    var i: usize = 0;
+    while (i < cap + 4) : (i += 1) {
+        try ctx.draw.rectFilled(ctx.allocator, types.Rect.init(0, 0, 1, 1), types.Color.rgb(1, 2, 3));
+    }
+    try stdt.testing.expect(ctx.frameMetrics().buffer_growths > 0);
     ctx.endFrame();
 }

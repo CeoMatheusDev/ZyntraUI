@@ -1559,6 +1559,60 @@ pub export fn zyntra_framebuffer_render_region(
 }
 
 // ---------------------------------------------------------------------------
+// Métricas estendidas (M153)
+// ---------------------------------------------------------------------------
+
+/// Métricas estendidas do frame (M153): contadores por tipo de
+/// comando, bytes de texto, glifos e crescimentos de buffer.
+pub export fn zyntra_context_frame_metrics(
+    handle: ?*ZyntraContext,
+    out_metrics: ?*ct.ZyntraFrameMetrics,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_metrics orelse return .invalid_argument;
+    const m = toCtx(h).frameMetrics();
+    out.* = .{
+        .commands_total = m.commands_total,
+        .commands_visible = m.commands_visible,
+        .commands_culled = m.commands_culled,
+        .rects = m.rects,
+        .texts = m.texts,
+        .text_bytes = m.text_bytes,
+        .images = m.images,
+        .image_regions = m.image_regions,
+        .glyph_runs = m.glyph_runs,
+        .glyphs_total = m.glyphs_total,
+        .dirty_rects = m.dirty_rects,
+        .buffer_growths = m.buffer_growths,
+    };
+    return .ok;
+}
+
+/// Rasteriza o frame atual e devolve as métricas do rasterizador
+/// (M153): contadores por caminho (rápido/genérico) e pixels escritos.
+pub export fn zyntra_framebuffer_render_metrics(
+    fb_handle: ?*ZyntraFramebuffer,
+    ctx_handle: ?*ZyntraContext,
+    out_stats: ?*ct.ZyntraRenderStats,
+    out_metrics: ?*ct.ZyntraRasterMetrics,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkFb(fb_handle) catch return .invalid_argument;
+    const ch = checkHandle(ctx_handle) catch return .invalid_argument;
+    const fb = toFb(h);
+    const ctx = toCtx(ch);
+    const stats = software_mod.render(fb, ctx.drawCommands(), ctx.viewport) catch |err| return mapRenderErr(err);
+    if (out_stats) |s| s.* = stats;
+    if (out_metrics) |m| m.* = .{
+        .rect_fast_path = fb.metrics.rect_fast_path,
+        .rect_generic_path = fb.metrics.rect_generic_path,
+        .blit_fast_path = fb.metrics.blit_fast_path,
+        .blit_generic_path = fb.metrics.blit_generic_path,
+        .commands_drawn = fb.metrics.commands_drawn,
+        .pixels_written = fb.metrics.pixels_written,
+    };
+    return .ok;
+}
+
 // Widgets: primeira superfície C (M107)
 // ---------------------------------------------------------------------------
 

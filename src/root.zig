@@ -24,6 +24,7 @@ pub const draw = struct {
     pub const commands = @import("draw/commands.zig");
     pub const renderer = @import("draw/renderer.zig");
     pub const image = @import("draw/image.zig");
+    pub const stats = @import("draw/stats.zig");
 };
 
 pub const text = struct {
@@ -146,6 +147,7 @@ pub const DrawList = draw.commands.DrawList;
 pub const Image = draw.image.Image;
 pub const ImageRegion = draw.image.Region;
 pub const FrameStats = draw.renderer.FrameStats;
+pub const FrameMetrics = draw.stats.FrameMetrics;
 pub const NullRenderer = draw.renderer.NullRenderer;
 pub const Backend = draw.renderer.Backend;
 
@@ -333,6 +335,7 @@ test {
     _ = @import("event/event.zig");
     _ = @import("draw/commands.zig");
     _ = @import("draw/image.zig");
+    _ = @import("draw/stats.zig");
     _ = @import("layout/layout.zig");
     _ = @import("layout/flex.zig");
     _ = @import("style/style.zig");

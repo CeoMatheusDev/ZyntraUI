@@ -499,6 +499,9 @@ fn scaleVec(p: *types.Vec2, factor: f32) void {
 pub const DrawList = struct {
     list: std.ArrayList(DrawCommand),
     text_bytes: std.ArrayList(u8) = .empty,
+    /// Crescimentos (realocações) dos buffers desde o `clear` mais recente
+    /// (observabilidade; M153).
+    growths: u32 = 0,
     /// Blocos de glifos dos runs (ver `DrawCommand.glyph_run`). O
     /// ponteiro do comando precisa ser estável ⇒ os blocos nunca são
     /// movidos (quando um enche, outro é alocado).
@@ -524,6 +527,7 @@ pub const DrawList = struct {
     pub fn clearRetainingCapacity(self: *Self) void {
         self.list.clearRetainingCapacity();
         self.text_bytes.clearRetainingCapacity();
+        self.growths = 0;
         // Os blocos são REUSADOS no frame seguinte (mesmo endereço ⇒ os
         // comandos do frame anterior, já descartados, não importam).
         self.glyph_block_len = 0;
@@ -554,7 +558,30 @@ pub const DrawList = struct {
 
     pub fn push(self: *Self, gpa: std.mem.Allocator, cmd: DrawCommand) !void {
         if (!cmd.isValid()) return error.InvalidCommand;
+        if (self.list.items.len == self.list.capacity) self.growths += 1;
         try self.list.append(gpa, cmd);
+    }
+
+    /// Reserva capacidade para comandos, bytes de texto e glifos
+    /// (M153). Sem alocação quando a capacidade já basta: os buffers são
+    /// reutilizados entre frames.
+    pub fn reserve(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        commands: usize,
+        text_bytes: usize,
+        glyphs: usize,
+    ) !void {
+        try self.list.ensureTotalCapacity(gpa, self.list.items.len + commands);
+        try self.text_bytes.ensureTotalCapacity(gpa, self.text_bytes.items.len + text_bytes);
+        if (glyphs > 0) try self.reserveGlyphs(gpa, glyphs);
+    }
+
+    /// Enfileira um comando SEM realocar: exige reserva prévia
+    /// (`reserve`). Em Debug, um assert pega o uso indevido.
+    pub fn pushAssumeCapacity(self: *Self, cmd: DrawCommand) void {
+        std.debug.assert(self.list.items.len < self.list.capacity);
+        self.list.appendAssumeCapacity(cmd);
     }
 
     /// Reconstrói `out` como esta lista deslocada por (`dx`,`dy`): limpa
@@ -804,6 +831,35 @@ pub const DrawList = struct {
         try self.push(gpa, .{ .blur = .{ .rect = rect, .radius = radius } });
     }
 
+    /// Enfileira texto copiando os bytes para a arena interna SEM
+    /// realocar: exige reserva prévia (`reserve`). Em Debug, um assert
+    /// pega o uso indevido.
+    pub fn pushTextAssumeCapacity(
+        self: *Self,
+        pos: types.Vec2,
+        color: types.Color,
+        font: metrics_mod.FontMetrics,
+        text: []const u8,
+    ) !void {
+        if (!font.isValid()) return error.InvalidMetrics;
+        const m = try metrics_mod.measure(text, font);
+        const start = self.text_bytes.items.len;
+        if (start > std.math.maxInt(u32) or text.len > std.math.maxInt(u32) - start) {
+            return error.OutOfMemory;
+        }
+        std.debug.assert(self.text_bytes.items.len + text.len <= self.text_bytes.capacity);
+        std.debug.assert(self.list.items.len < self.list.capacity);
+        self.text_bytes.appendSliceAssumeCapacity(text);
+        self.list.appendAssumeCapacity(.{ .text = .{
+            .pos = pos,
+            .color = color,
+            .size = font.size,
+            .width = m.width,
+            .start = @intCast(start),
+            .len = @intCast(text.len),
+        } });
+    }
+
     /// Enfileira texto copiando os bytes para a arena interna.
     /// Valida UTF-8 no push (backend nunca recebe texto malformado).
     /// Textos que não couberem em offsets `u32` retornam `OutOfMemory`.
@@ -821,6 +877,7 @@ pub const DrawList = struct {
         if (start > std.math.maxInt(u32) or text.len > std.math.maxInt(u32) - start) {
             return error.OutOfMemory;
         }
+        if (self.text_bytes.items.len + text.len > self.text_bytes.capacity) self.growths += 1;
         try self.text_bytes.appendSlice(gpa, text);
         try self.push(gpa, .{ .text = .{
             .pos = pos,
@@ -884,19 +941,26 @@ pub const DrawList = struct {
         } });
     }
 
-    /// Copia `refs` para um bloco estável da lista (aloca um bloco novo
-    /// quando o atual não cabe) e devolve o ponteiro.
-    fn allocGlyphs(self: *Self, gpa: std.mem.Allocator, refs: []const GlyphRef) ![*]const GlyphRef {
+    /// Garante blocos de glifos para `count` glifos (M153).
+    pub fn reserveGlyphs(self: *Self, gpa: std.mem.Allocator, count: usize) !void {
+        if (count == 0) return;
         const block_cap: usize = 256;
         if (self.glyph_blocks.items.len == 0 or
-            self.glyph_block_len + refs.len > self.glyph_blocks.items[self.glyph_blocks.items.len - 1].len)
+            self.glyph_block_len + count > self.glyph_blocks.items[self.glyph_blocks.items.len - 1].len)
         {
-            const cap = @max(block_cap, refs.len);
+            const cap = @max(block_cap, count);
             const block = try gpa.alloc(GlyphRef, cap);
             errdefer gpa.free(block);
             try self.glyph_blocks.append(gpa, block);
             self.glyph_block_len = 0;
+            self.growths += 1;
         }
+    }
+
+    /// Copia `refs` para um bloco estável da lista (aloca um bloco novo
+    /// quando o atual não cabe) e devolve o ponteiro.
+    fn allocGlyphs(self: *Self, gpa: std.mem.Allocator, refs: []const GlyphRef) ![*]const GlyphRef {
+        try self.reserveGlyphs(gpa, refs.len);
         const block = self.glyph_blocks.items[self.glyph_blocks.items.len - 1];
         const dst = block.ptr + self.glyph_block_len;
         @memcpy(dst[0..refs.len], refs);
@@ -1691,4 +1755,86 @@ fn fuzzGlyphRun(_: void, smith: *std.testing.Smith) !void {
     try std.testing.expect(dl.items()[0].isValid());
     const got = dl.glyphsOf(dl.items()[0]);
     try std.testing.expectEqual(n, got.len);
+}
+
+test "DrawList reserve/assumeCapacity: capacidade, crescimento e reutilização (M153)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    // Reserva zero: nada muda.
+    try dl.reserve(gpa, 0, 0, 0);
+    try stdt.testing.expectEqual(@as(usize, 0), dl.list.capacity);
+
+    // Reserva explícita: a capacidade cobre os comandos e os bytes.
+    try dl.reserve(gpa, 8, 32, 0);
+    const cap = dl.list.capacity;
+    try stdt.testing.expect(cap >= 8);
+    try stdt.testing.expect(dl.text_bytes.capacity >= 32);
+
+    // Reserva repetida: não realoca (a capacidade não encolhe).
+    try dl.reserve(gpa, 8, 32, 0);
+    try stdt.testing.expectEqual(cap, dl.list.capacity);
+
+    // pushAssumeCapacity: sem realocação e sem crescimento do contador.
+    dl.pushAssumeCapacity(.{ .rect_filled = .{
+        .rect = types.Rect.init(0, 0, 1, 1),
+        .color = types.Color.rgb(1, 2, 3),
+    } });
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    try stdt.testing.expectEqual(cap, dl.list.capacity);
+    try stdt.testing.expectEqual(@as(u32, 0), dl.growths);
+
+    // Texto sem realocar: os bytes vão para a arena reservada.
+    const font = metrics_mod.FontMetrics.withSize(10);
+    try dl.pushTextAssumeCapacity(types.Vec2.init(0, 0), types.Color.rgb(1, 2, 3), font, "abc");
+    try stdt.testing.expectEqual(@as(usize, 2), dl.len());
+    try stdt.testing.expectEqual(@as(usize, 3), dl.text_bytes.items.len);
+    try stdt.testing.expectEqualStrings("abc", dl.textOf(dl.items()[1]));
+
+    // Capacidade insuficiente: o push normal cresce (e conta).
+    const before = dl.list.capacity;
+    var i: usize = 0;
+    while (i < before * 2) : (i += 1) {
+        try dl.rectFilled(gpa, types.Rect.init(0, 0, 1, 1), types.Color.rgb(1, 2, 3));
+    }
+    try stdt.testing.expect(dl.list.capacity > before);
+    try stdt.testing.expect(dl.growths > 0);
+
+    // Limpeza e reutilização: a capacidade é mantida e o contador zera.
+    dl.clearRetainingCapacity();
+    try stdt.testing.expectEqual(@as(usize, 0), dl.len());
+    try stdt.testing.expectEqual(@as(usize, 0), dl.text_bytes.items.len);
+    try stdt.testing.expectEqual(@as(u32, 0), dl.growths);
+    try stdt.testing.expect(dl.list.capacity >= before);
+}
+
+test "DrawList reserve de glyph runs: bloco estável e sem realocação (M153)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    var bytes: [16]u8 = undefined;
+    for (&bytes, 0..) |*b, i| b.* = @intCast(i);
+    const img = try image_mod.Image.init(2, 2, &bytes);
+    const refs = [_]GlyphRef{.{ .src_x = 0, .src_y = 0, .src_w = 2, .src_h = 2 }};
+
+    try dl.reserve(gpa, 4, 0, 4);
+    const blocks = dl.glyph_blocks.items.len;
+    try dl.glyphRun(gpa, types.Vec2.init(0, 0), types.Color.rgb(1, 2, 3), img, &refs, 1.0);
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    // O bloco de glifos não cresceu (a reserva serviu).
+    try stdt.testing.expectEqual(blocks, dl.glyph_blocks.items.len);
+    const got = dl.glyphsOf(dl.items()[0]);
+    try stdt.testing.expectEqual(@as(usize, 1), got.len);
+    try stdt.testing.expectEqual(@as(u32, 2), got[0].src_w);
+
+    // Limpar e reutilizar: o bloco continua válido (ponteiro estável).
+    dl.clearRetainingCapacity();
+    try dl.glyphRun(gpa, types.Vec2.init(0, 0), types.Color.rgb(1, 2, 3), img, &refs, 1.0);
+    const got2 = dl.glyphsOf(dl.items()[0]);
+    try stdt.testing.expectEqual(@as(usize, 1), got2.len);
+    try stdt.testing.expectEqual(@as(u32, 2), got2[0].src_w);
 }

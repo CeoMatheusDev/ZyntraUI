@@ -230,6 +230,42 @@ ZyntraResult zyntra_framebuffer_render(ZyntraFramebuffer *handle, ZyntraContext 
 ZyntraResult zyntra_framebuffer_render_region(ZyntraFramebuffer *handle, ZyntraContext *ctx,
     ZyntraRect region, ZyntraRenderStats *out_stats);
 
+/* ------------------------------------------------------------------ */
+/* Métricas estendidas (M153)                                          */
+/* ------------------------------------------------------------------ */
+
+/* Contadores por frame (independentes de ZyntraRenderStats). */
+typedef struct ZyntraFrameMetrics {
+    uint32_t commands_total;
+    uint32_t commands_visible;
+    uint32_t commands_culled;
+    uint32_t rects;
+    uint32_t texts;
+    uint32_t text_bytes;
+    uint32_t images;
+    uint32_t image_regions;
+    uint32_t glyph_runs;
+    uint32_t glyphs_total;
+    uint32_t dirty_rects;
+    uint32_t buffer_growths;
+} ZyntraFrameMetrics;
+
+/* Contadores do rasterizador (caminhos e pixels escritos). */
+typedef struct ZyntraRasterMetrics {
+    uint32_t rect_fast_path;
+    uint32_t rect_generic_path;
+    uint32_t blit_fast_path;
+    uint32_t blit_generic_path;
+    uint32_t commands_drawn;
+    uint64_t pixels_written;
+} ZyntraRasterMetrics;
+
+ZyntraResult zyntra_context_frame_metrics(ZyntraContext *ctx,
+    ZyntraFrameMetrics *out_metrics);
+ZyntraResult zyntra_framebuffer_render_metrics(ZyntraFramebuffer *fb,
+    ZyntraContext *ctx, ZyntraRenderStats *out_stats,
+    ZyntraRasterMetrics *out_metrics);
+
 /* Widgets (M107): primeira superfície C. Os estilos são os mesmos `extern
  * struct` da API Zig (uma definição só por widget; as travas de layout em
  * src/c-abi/types.zig falham o build se mudarem). `ZyntraId` é o `u64`
