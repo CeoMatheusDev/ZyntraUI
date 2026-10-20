@@ -105,6 +105,21 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `GraphTransform=12`, `GraphViewState=56`, `GraphViewOptions=20`,
   `GraphViewResult=48`. O consumidor C ganhou os frames 89–95 (pixel do nó,
   hover, seleção, arraste com write-back, release, zoom e inválidos).
+- `c-abi`: **timeline na fronteira C** (M120, aditivo) —
+  `zyntra_widget_timeline_view` desenha e interage com
+  `ZyntraTimelineTrack[]`/`ZyntraTimelineKey[]` e
+  `ZyntraTimelineViewState` do chamador: scrub na régua, pan no corpo,
+  seleção/arraste de chaves (com write-back de `t` na memória C e `tag`
+  preservada) e zoom pela roda. `ZyntraTimelineViewOptions`/
+  `ZyntraTimelineViewResult` reportam pares trilha/chave, delta, playhead e
+  flags do frame; estado e opções têm inicializadores
+  (`zyntra_timeline_view_state_init`/`_options_default`) e o estilo vem do
+  tema via `zyntra_style_timeline`. Travas de ABI: `TimelineStyle=80`,
+  `TimelineKey=8`, `TimelineTrack=32`, `TimelineTransform=8`,
+  `TimelineViewState=64`, `TimelineViewOptions=20`,
+  `TimelineViewResult=64` e o enum `ZyntraTimelineDragMode` (0..3). O
+  consumidor C ganhou os frames 96–105 (pixel da trilha, hover, seleção,
+  arraste com write-back, release, scrub, zoom e inválidos).
 
 ## [1.34.0] - 2026-10-18
 

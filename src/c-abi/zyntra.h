@@ -1248,6 +1248,113 @@ ZyntraResult zyntra_widget_graph_view(ZyntraContext *handle, ZyntraId id,
     const ZyntraGraphStyle *style, float size,
     ZyntraGraphViewResult *out_result);
 
+/* ------------------------------------------------------------------ */
+/* Timeline (M120)                                                    */
+/* ------------------------------------------------------------------ */
+
+typedef struct ZyntraTimelineStyle {
+    ZyntraColor bg;
+    ZyntraColor ruler_bg;
+    float ruler_height;
+    ZyntraColor tick;
+    ZyntraColor tick_label;
+    float min_tick_px;
+    ZyntraColor track_bg;
+    ZyntraColor track_alt;
+    float name_width;
+    ZyntraColor names_bg;
+    ZyntraColor track_name;
+    float name_pad;
+    ZyntraColor separator;
+    float row_height;
+    ZyntraColor key;
+    ZyntraColor key_selected;
+    float key_size;
+    float key_line_width;
+    ZyntraColor playhead;
+    float playhead_width;
+} ZyntraTimelineStyle;
+
+typedef struct ZyntraTimelineKey {
+    float t;
+    uint32_t tag;
+} ZyntraTimelineKey;
+
+/* `name` é emprestado só na chamada; `keys` é mutável (arraste atualiza t). */
+typedef struct ZyntraTimelineTrack {
+    ZyntraStr name;
+    ZyntraTimelineKey *keys;
+    size_t keys_len;
+} ZyntraTimelineTrack;
+
+/* x_local = (t - start) * pps. */
+typedef struct ZyntraTimelineTransform {
+    float start;
+    float pps;
+} ZyntraTimelineTransform;
+
+typedef enum ZyntraTimelineDragMode {
+    ZYNTRA_TIMELINE_DRAG_NONE = 0,
+    ZYNTRA_TIMELINE_DRAG_SCRUB = 1,
+    ZYNTRA_TIMELINE_DRAG_PAN = 2,
+    ZYNTRA_TIMELINE_DRAG_KEY = 3
+} ZyntraTimelineDragMode;
+
+/* Estado retido entre frames. Índices -1 = nenhum. `drag` usa
+ * ZYNTRA_TIMELINE_DRAG_* (int32_t). Inicie com
+ * zyntra_timeline_view_state_init. */
+typedef struct ZyntraTimelineViewState {
+    ZyntraTimelineTransform transform;
+    float duration;
+    float playhead;
+    int64_t selected_track;
+    int64_t selected_key;
+    int32_t drag;
+    int64_t drag_track;
+    int64_t drag_key;
+    float drag_grab;
+    float pan_time;
+} ZyntraTimelineViewState;
+
+/* Inicie com zyntra_timeline_view_options_default. */
+typedef struct ZyntraTimelineViewOptions {
+    float min_pps;
+    float max_pps;
+    float zoom_step;
+    bool snap_keys;
+    float key_hit_px;
+} ZyntraTimelineViewOptions;
+
+typedef struct ZyntraTimelineViewResult {
+    int64_t hovered_track;  /* -1 = nenhum */
+    int64_t hovered_key;    /* -1 = nenhum */
+    int64_t selected_track; /* -1 = nenhum */
+    int64_t selected_key;   /* -1 = nenhum */
+    int64_t dragging_track; /* -1 = nenhum */
+    int64_t dragging_key;   /* -1 = nenhum */
+    float key_delta;
+    float playhead;
+    bool scrubbing;
+    bool panning;
+    bool zoom_changed;
+    bool changed;
+} ZyntraTimelineViewResult;
+
+ZyntraResult zyntra_style_timeline(int32_t theme_kind,
+    ZyntraTimelineStyle *out_style);
+ZyntraResult zyntra_timeline_view_state_init(ZyntraTimelineViewState *out_state);
+ZyntraResult zyntra_timeline_view_options_default(
+    ZyntraTimelineViewOptions *out_options);
+
+/* Desenha e interage. `tracks` é mutável: o arraste atualiza keys[i].t na
+ * memória do chamador. Nomes são emprestados só na chamada. `out_result` é
+ * opcional. */
+ZyntraResult zyntra_widget_timeline_view(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, ZyntraTimelineTrack *tracks, size_t tracks_len,
+    ZyntraTimelineViewState *state, const ZyntraTimelineViewOptions *options,
+    const ZyntraTimelineStyle *style, float size,
+    ZyntraTimelineViewResult *out_result);
+
 #ifdef __cplusplus
 }
 #endif

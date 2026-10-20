@@ -55,6 +55,8 @@ const statusbar_mod = @import("../widgets/statusbar.zig");
 const layout_mod = @import("../layout/layout.zig");
 const graph_view_mod = @import("../widgets/graph_view.zig");
 const graph_mod = @import("../graph/view.zig");
+const timeline_view_mod = @import("../widgets/timeline_view.zig");
+const timeline_mod = @import("../timeline/view.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -3174,6 +3176,225 @@ pub export fn zyntra_widget_graph_view(
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Timeline: trilhas, chaves, scrub/pan/zoom (M120)
+// ---------------------------------------------------------------------------
+
+/// Buffers temporários da timeline: trilhas convertidas, chaves achatadas e
+/// as trilhas C para escrever de volta os tempos arrastados.
+const TimelineArgs = struct {
+    tracks: []timeline_mod.Track,
+    keys: []timeline_mod.Keyframe,
+    c_tracks: ?[*]ct.ZyntraTimelineTrack,
+    track_count: usize,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *TimelineArgs) void {
+        self.allocator.free(self.tracks);
+        self.allocator.free(self.keys);
+    }
+
+    fn writeBack(self: *const TimelineArgs) void {
+        if (self.track_count == 0) return;
+        const owners = self.c_tracks.?[0..self.track_count];
+        for (self.tracks, owners) |track, *owner| {
+            if (track.keys.len == 0) continue;
+            const dest = owner.keys.?[0..track.keys.len];
+            for (track.keys, dest) |k, *ck| ck.t = k.t;
+        }
+    }
+};
+
+/// Converte trilhas C em trilhas Zig; as chaves são achatadas num buffer
+/// único e os nomes ficam emprestados só durante a chamada.
+fn timelineArgsOf(
+    allocator: std.mem.Allocator,
+    c_tracks: ?[*]ct.ZyntraTimelineTrack,
+    tracks_len: usize,
+) !TimelineArgs {
+    if (tracks_len > 0 and c_tracks == null) return error.InvalidArgument;
+
+    var total_keys: usize = 0;
+    if (tracks_len > 0) {
+        for (c_tracks.?[0..tracks_len]) |t| {
+            if (t.keys_len > 0 and t.keys == null) return error.InvalidArgument;
+            total_keys = std.math.add(usize, total_keys, t.keys_len) catch return error.InvalidArgument;
+        }
+    }
+
+    const tracks = try allocator.alloc(timeline_mod.Track, tracks_len);
+    errdefer allocator.free(tracks);
+    const keys = try allocator.alloc(timeline_mod.Keyframe, total_keys);
+    errdefer allocator.free(keys);
+
+    var offset: usize = 0;
+    if (tracks_len > 0) {
+        for (c_tracks.?[0..tracks_len], 0..) |t, i| {
+            const name: []const u8 = if (t.name.len == 0) &.{} else blk: {
+                const p = t.name.ptr orelse return error.InvalidArgument;
+                break :blk p[0..t.name.len];
+            };
+            const slice = keys[offset .. offset + t.keys_len];
+            if (t.keys_len > 0) {
+                for (t.keys.?[0..t.keys_len], 0..) |k, ki| {
+                    slice[ki] = .{ .t = k.t, .tag = k.tag };
+                }
+            }
+            offset += t.keys_len;
+            tracks[i] = .{ .name = name, .keys = slice };
+        }
+    }
+
+    return .{
+        .tracks = tracks,
+        .keys = keys,
+        .c_tracks = c_tracks,
+        .track_count = tracks_len,
+        .allocator = allocator,
+    };
+}
+
+/// (`track`, `key`) C (-1 = nenhum) → referência Zig.
+fn timelineRef(track: i64, key: i64) ?timeline_mod.KeyRef {
+    if (track < 0 or key < 0) return null;
+    const t = std.math.cast(u32, track) orelse return null;
+    const k = std.math.cast(u32, key) orelse return null;
+    return .{ .track = t, .key = k };
+}
+
+fn timelineRefTrack(r: ?timeline_mod.KeyRef) i64 {
+    return if (r) |v| @intCast(v.track) else -1;
+}
+
+fn timelineRefKey(r: ?timeline_mod.KeyRef) i64 {
+    return if (r) |v| @intCast(v.key) else -1;
+}
+
+fn timelineDragFromC(mode: i32) ?timeline_view_mod.TimelineDragMode {
+    return switch (mode) {
+        0 => .none,
+        1 => .scrub,
+        2 => .pan,
+        3 => .key,
+        else => null,
+    };
+}
+
+fn timelineViewStateFromC(s: ct.ZyntraTimelineViewState) !timeline_view_mod.TimelineViewState {
+    const drag = timelineDragFromC(s.drag) orelse return error.InvalidArgument;
+    return .{
+        .transform = .{ .start = s.transform.start, .pps = s.transform.pps },
+        .duration = s.duration,
+        .playhead = s.playhead,
+        .selected = timelineRef(s.selected_track, s.selected_key),
+        .drag = drag,
+        .drag_key = timelineRef(s.drag_track, s.drag_key),
+        .drag_grab = s.drag_grab,
+        .pan_time = s.pan_time,
+    };
+}
+
+fn timelineViewStateToC(s: *const timeline_view_mod.TimelineViewState) ct.ZyntraTimelineViewState {
+    return .{
+        .transform = .{ .start = s.transform.start, .pps = s.transform.pps },
+        .duration = s.duration,
+        .playhead = s.playhead,
+        .selected_track = timelineRefTrack(s.selected),
+        .selected_key = timelineRefKey(s.selected),
+        .drag = @backingInt(s.drag),
+        .drag_track = timelineRefTrack(s.drag_key),
+        .drag_key = timelineRefKey(s.drag_key),
+        .drag_grab = s.drag_grab,
+        .pan_time = s.pan_time,
+    };
+}
+
+/// Estilo de timeline do tema embutido.
+pub export fn zyntra_style_timeline(kind: i32, out_style: ?*ct.ZyntraTimelineStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.timelineStyle();
+    return .ok;
+}
+
+/// Inicializa o estado da timeline (duração 10 s, playhead 0, pps 80,
+/// nenhuma seleção/arraste). Chame antes do primeiro frame.
+pub export fn zyntra_timeline_view_state_init(out_state: ?*ct.ZyntraTimelineViewState) callconv(.c) ct.ZyntraResult {
+    const out = out_state orelse return .invalid_argument;
+    out.* = .{};
+    return .ok;
+}
+
+/// Preenche as opções de interação com os padrões da API Zig.
+pub export fn zyntra_timeline_view_options_default(out_options: ?*ct.ZyntraTimelineViewOptions) callconv(.c) ct.ZyntraResult {
+    const out = out_options orelse return .invalid_argument;
+    out.* = .{};
+    return .ok;
+}
+
+/// Desenha e interage com uma timeline. `tracks` é mutável: o arraste de uma
+/// chave atualiza `keys[i].t` na memória do chamador. Nomes são emprestados
+/// só na chamada. `state` é retido entre frames; índices -1 = nenhum.
+pub export fn zyntra_widget_timeline_view(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    tracks: ?[*]ct.ZyntraTimelineTrack,
+    tracks_len: usize,
+    state: ?*ct.ZyntraTimelineViewState,
+    options: ?*const ct.ZyntraTimelineViewOptions,
+    style: ?*const ct.ZyntraTimelineStyle,
+    size: f32,
+    out_result: ?*ct.ZyntraTimelineViewResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st_c = state orelse return .invalid_argument;
+    const opts_c = options orelse return .invalid_argument;
+    const sty = style orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+
+    const ctx = toCtx(h);
+    var args = timelineArgsOf(ctx.allocator, tracks, tracks_len) catch |err| return mapWidgetErr(err);
+    defer args.deinit();
+
+    const opts = timeline_view_mod.TimelineViewOptions{
+        .min_pps = opts_c.min_pps,
+        .max_pps = opts_c.max_pps,
+        .zoom_step = opts_c.zoom_step,
+        .snap_keys = opts_c.snap_keys,
+        .key_hit_px = opts_c.key_hit_px,
+    };
+    var st = timelineViewStateFromC(st_c.*) catch return .invalid_argument;
+    const outcome = timeline_view_mod.timelineView(
+        ctx,
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        args.tracks,
+        &st,
+        opts,
+        sty.*,
+        metrics_mod.FontMetrics.withSize(size),
+    );
+    args.writeBack();
+    st_c.* = timelineViewStateToC(&st);
+    const res = outcome catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .hovered_track = fromIndex(res.hovered_track),
+        .hovered_key = timelineRefKey(res.hovered_key),
+        .selected_track = timelineRefTrack(res.selected),
+        .selected_key = timelineRefKey(res.selected),
+        .dragging_track = timelineRefTrack(res.dragging_key),
+        .dragging_key = timelineRefKey(res.dragging_key),
+        .key_delta = res.key_delta,
+        .playhead = res.playhead,
+        .scrubbing = res.scrubbing,
+        .panning = res.panning,
+        .zoom_changed = res.zoom_changed,
+        .changed = res.changed,
+    };
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -5628,5 +5849,174 @@ test "C-ABI grafo M119: estilo, estado, hover, arraste, pan e zoom" {
 
     // Conjunto vazio é aceito e `out_result` nulo é válido.
     try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, null, 0, null, 0, &state, &options, &style, 10, null));
+    try eq(ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI timeline M120: hover, chave, scrub, zoom e write-back" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    const nan = std.math.nan(f32);
+
+    var handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 260, .h = 160 }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    var style: ct.ZyntraTimelineStyle = undefined;
+    var state: ct.ZyntraTimelineViewState = undefined;
+    var options: ct.ZyntraTimelineViewOptions = undefined;
+    try eq(ok, zyntra_style_timeline(0, &style));
+    try stdt.testing.expect(style.isValid());
+    try eq(bad, zyntra_style_timeline(9, &style));
+    try eq(bad, zyntra_style_timeline(0, null));
+    try eq(ok, zyntra_timeline_view_state_init(&state));
+    try eq(@as(f32, 10), state.duration);
+    try eq(@as(f32, 80), state.transform.pps);
+    try eq(@as(i64, -1), state.selected_track);
+    try eq(@as(i64, -1), state.drag_key);
+    try eq(@as(i32, 0), state.drag);
+    try eq(ok, zyntra_timeline_view_options_default(&options));
+    try stdt.testing.expectEqual(ct.ZyntraTimelineViewOptions{}, options);
+    try eq(bad, zyntra_timeline_view_state_init(null));
+    try eq(bad, zyntra_timeline_view_options_default(null));
+    options.snap_keys = false; // passo exato de 0.125 s no arraste
+
+    var keys = [_]ct.ZyntraTimelineKey{
+        .{ .t = 0.5, .tag = 7 },
+        .{ .t = 1.0, .tag = 8 },
+    };
+    var tracks = [_]ct.ZyntraTimelineTrack{
+        .{ .name = .{ .ptr = "T", .len = 1 }, .keys = &keys, .keys_len = keys.len },
+    };
+    const bounds = ct.ZyntraRect{ .x = 0, .y = 0, .w = 240, .h = 120 };
+    var res: ct.ZyntraTimelineViewResult = undefined;
+    var n_draw: usize = 0;
+
+    // Frame 1: desenho.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, -1), res.hovered_track);
+    try eq(@as(i64, -1), res.hovered_key);
+    try eq(@as(i64, -1), res.selected_track);
+    try eq(@as(i64, -1), res.dragging_track);
+    try eq(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expect(n_draw > 0);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 2: hover na chave 0 (t=0.5 ⇒ x=130, y=34).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 130, .y = 34 }));
+    try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, 0), res.hovered_track);
+    try eq(@as(i64, 0), res.hovered_key);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 3: press seleciona e captura a chave.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 130, .y = 34 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 130, .y = 34 }));
+    try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, 0), res.selected_track);
+    try eq(@as(i64, 0), res.selected_key);
+    try eq(@as(i64, 0), res.dragging_track);
+    try eq(@as(i64, 0), res.dragging_key);
+    try stdt.testing.expect(res.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 4: arraste para t=0.625, write-back em keys[0].t, tag intacta.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 140, .y = 34 }));
+    try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try eq(@as(f32, 0.125), res.key_delta);
+    try stdt.testing.expectApproxEqAbs(@as(f32, 0.625), keys[0].t, 0.0001);
+    try eq(@as(u32, 7), keys[0].tag);
+    try eq(@as(i64, 0), res.dragging_key);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 5: release encerra o arraste.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 140, .y = 34 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 140, .y = 34 }));
+    try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, -1), res.dragging_track);
+    try eq(@as(i64, 0), res.selected_track);
+    try eq(@as(i64, 0), res.selected_key);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 6: scrub na régua (y=10) ⇒ playhead 0.375.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 120, .y = 10 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 120, .y = 10 }));
+    try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try stdt.testing.expect(res.scrubbing);
+    try eq(@as(f32, 0.375), res.playhead);
+    try stdt.testing.expect(res.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 7: arraste da régua ⇒ playhead 0.75.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 150, .y = 10 }));
+    try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try stdt.testing.expect(res.scrubbing);
+    try eq(@as(f32, 0.75), res.playhead);
+    try eq(@as(f32, 0.75), state.playhead);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 8: release do scrub.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 150, .y = 10 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 150, .y = 10 }));
+    try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try stdt.testing.expect(!res.scrubbing);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 9: roda dá zoom (80 → 100 px/s).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 150, .y = 50 }));
+    try eq(ok, zyntra_context_push_mouse_wheel(handle, 0, 1, .{ .x = 150, .y = 50 }));
+    try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try stdt.testing.expect(res.zoom_changed);
+    try eq(@as(f32, 100), state.transform.pps);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Inválidos: handle/id/ponteiros/estado/opções/fonte/track.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(bad, zyntra_widget_timeline_view(null, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_timeline_view(handle, 0, bounds, &tracks, tracks.len, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, null, 1, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, null, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, null, &style, 10, &res));
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, null, 10, &res));
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, 0, &res));
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &options, &style, nan, &res));
+
+    var bad_tracks = tracks;
+    bad_tracks[0].name = .{ .ptr = null, .len = 1 };
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &bad_tracks, bad_tracks.len, &state, &options, &style, 10, &res));
+    bad_tracks = tracks;
+    bad_tracks[0].keys = null;
+    bad_tracks[0].keys_len = 1;
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &bad_tracks, bad_tracks.len, &state, &options, &style, 10, &res));
+
+    var bad_state = state;
+    bad_state.transform.pps = 0;
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &bad_state, &options, &style, 10, &res));
+    bad_state = state;
+    bad_state.duration = 0;
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &bad_state, &options, &style, 10, &res));
+    bad_state = state;
+    bad_state.playhead = nan;
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &bad_state, &options, &style, 10, &res));
+    bad_state = state;
+    bad_state.drag = 9;
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &bad_state, &options, &style, 10, &res));
+
+    var bad_options = options;
+    bad_options.min_pps = 0;
+    try eq(bad, zyntra_widget_timeline_view(handle, 0x7101, bounds, &tracks, tracks.len, &state, &bad_options, &style, 10, &res));
+
+    // Conjunto vazio e `out_result` nulo são válidos.
+    try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, null, 0, &state, &options, &style, 10, null));
     try eq(ok, zyntra_context_end_frame(handle));
 }

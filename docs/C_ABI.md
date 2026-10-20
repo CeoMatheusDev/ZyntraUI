@@ -673,6 +673,58 @@ zyntra_widget_graph_view(ctx, graph_id, bounds, nodes, 2, &edge, 1,
   opções inválidas (`0 < min_zoom <= max_zoom`, `zoom_step > 0`, `pan_step >= 0`,
   `edge_segments >= 1`) e fonte (`size`) ≤ 0/não-finita.
 
+### Décimo segundo lote (M120): timeline
+
+```c
+ZyntraTimelineStyle ts;
+zyntra_style_timeline(ZYNTRA_THEME_DARK, &ts);
+
+ZyntraTimelineViewState state;
+zyntra_timeline_view_state_init(&state);     /* 10 s, playhead 0, 80 px/s */
+
+ZyntraTimelineViewOptions opt;
+zyntra_timeline_view_options_default(&opt);
+
+ZyntraTimelineKey keys[2] = {{0.5f, 7}, {1.0f, 8}};  /* t (s), tag opaca */
+ZyntraTimelineTrack tracks[1] = {
+    {.name = {"T", 1}, .keys = keys, .keys_len = 2},
+};
+
+ZyntraTimelineViewResult res;
+zyntra_widget_timeline_view(ctx, id, bounds, tracks, 1,
+    &state, &opt, &ts, 10, &res);
+```
+
+* `ZyntraTimelineTrack` traz nome **emprestado só durante a chamada** e
+  `keys` **mutável**: arrastar uma chave atualiza `keys[i].t` na memória do
+  chamador (o `tag` é preservado; o widget não interpreta o dado). Chaves com
+  índice fora de faixa são ignoradas.
+* `ZyntraTimelineViewState` pertence ao chamador e é retido entre frames:
+  `transform` (`start`/`pps`), `duration`, `playhead`, seleção e estado
+  transiente de scrub/pan/arraste. **Inicie com
+  `zyntra_timeline_view_state_init`** — o zero de C deixa `pps == 0`
+  (inválido). Índices opcionais usam `-1`; `drag` usa
+  `ZYNTRA_TIMELINE_DRAG_*` como `int32_t` (valor desconhecido ⇒
+  `ZYNTRA_INVALID_ARGUMENT`).
+* Interação: press na régua faz scrub do `playhead`; arraste no corpo faz pan
+  (`start` recalculado e clampado); press numa chave seleciona/arrasta
+  (`snap_keys` alinha ao passo da régua); roda com hover dá zoom em torno do
+  cursor (passo `zoom_step`, clamp `[min_pps, max_pps]`). Teclado/Home/End e
+  Tab seguem o comportamento da API Zig.
+* `ZyntraTimelineViewResult` reporta pares `track`/`key` (`-1` = nenhum) para
+  hover, seleção e arraste, além de `key_delta` (s), `playhead`,
+  `scrubbing`, `panning`, `zoom_changed` e `changed`. `out_result` é
+  opcional.
+* Memória: as trilhas são convertidas e as chaves achatadas num buffer
+  temporário no alocador do `Context`; os nomes não são copiados. Falha de
+  alocação ⇒ `ZYNTRA_OUT_OF_MEMORY`.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle/id/estado/opções/estilo nulos,
+  geometria sem área ou não-finita, trilha/chave com ponteiro nulo e
+  `len > 0`, transform inválido (`pps` ≤ 0/não-finito), `duration` ≤ 0,
+  `playhead` não-finito, `drag` desconhecido, opções inválidas
+  (`0 < min_pps <= max_pps`, `zoom_step > 0`, `key_hit_px >= 0`) e fonte
+  (`size`) ≤ 0/não-finita.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -732,6 +784,11 @@ zyntra_widget_graph_view(ctx, graph_id, bounds, nodes, 2, &edge, 1,
   `ZyntraGraphEdge=16`, `ZyntraGraphTransform=12`,
   `ZyntraGraphViewState=56`, `ZyntraGraphViewOptions=20` e
   `ZyntraGraphViewResult=48`.
+* M120: também travados `ZyntraTimelineStyle=80`, `ZyntraTimelineKey=8`,
+  `ZyntraTimelineTrack=32`, `ZyntraTimelineTransform=8`,
+  `ZyntraTimelineViewState=64`, `ZyntraTimelineViewOptions=20`,
+  `ZyntraTimelineViewResult=64` e o enum `ZyntraTimelineDragMode` (0..3,
+  mesmos valores de `timeline_view.TimelineDragMode`).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -752,5 +809,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..."
 ```

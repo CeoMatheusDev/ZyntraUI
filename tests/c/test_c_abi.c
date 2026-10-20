@@ -2798,6 +2798,224 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 96-105: timeline (M120) — pixel, hover, chave com write-back,
+     * scrub, zoom e inválidos. */
+    int c120_px = 0, c120_hover = 0, c120_key = 0, c120_writeback = 0;
+    int c120_scrub = 0, c120_zoom = 0;
+    {
+        ZyntraTimelineStyle c_ts;
+        ZyntraTimelineViewState c_tstate;
+        ZyntraTimelineViewOptions c_topt;
+        ZyntraTimelineViewResult c_tres;
+        ZyntraTimelineKey c_keys[2] = {{0.5f, 7}, {1.0f, 8}};
+        ZyntraTimelineTrack c_tracks[1] = {
+            {.name = {"T", 1}, .keys = c_keys, .keys_len = 2},
+        };
+
+        _Static_assert(sizeof(ZyntraTimelineStyle) == 80, "ZyntraTimelineStyle ABI");
+        _Static_assert(sizeof(ZyntraTimelineKey) == 8, "ZyntraTimelineKey ABI");
+        _Static_assert(sizeof(ZyntraTimelineTrack) == 32, "ZyntraTimelineTrack ABI");
+        _Static_assert(sizeof(ZyntraTimelineTransform) == 8,
+            "ZyntraTimelineTransform ABI");
+        _Static_assert(sizeof(ZyntraTimelineViewState) == 64,
+            "ZyntraTimelineViewState ABI");
+        _Static_assert(sizeof(ZyntraTimelineViewOptions) == 20,
+            "ZyntraTimelineViewOptions ABI");
+        _Static_assert(sizeof(ZyntraTimelineViewResult) == 64,
+            "ZyntraTimelineViewResult ABI");
+
+        CHECK(zyntra_style_timeline(ZYNTRA_THEME_DARK, &c_ts));
+        assert(zyntra_style_timeline(9, &c_ts) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_timeline(0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_timeline_view_state_init(&c_tstate));
+        assert(c_tstate.duration == 10.0f && c_tstate.transform.pps == 80.0f);
+        assert(c_tstate.selected_track == -1 && c_tstate.drag_key == -1);
+        assert(c_tstate.drag == ZYNTRA_TIMELINE_DRAG_NONE);
+        CHECK(zyntra_timeline_view_options_default(&c_topt));
+        assert(c_topt.min_pps == 4.0f && c_topt.max_pps == 4000.0f);
+        assert(c_topt.snap_keys);
+        c_topt.snap_keys = false; /* passo exato de 0.125 s no arraste */
+        assert(zyntra_timeline_view_state_init(NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_timeline_view_options_default(NULL)
+            == ZYNTRA_INVALID_ARGUMENT);
+
+        ZyntraFramebuffer *c120fb = NULL;
+        CHECK(zyntra_framebuffer_create(260, 160, &c120fb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 260, 160}));
+        ZyntraThemeColors c120cols;
+        CHECK(zyntra_theme_colors(ZYNTRA_THEME_DARK, &c120cols));
+        ZyntraColor cp = {0, 0, 0, 0};
+        const ZyntraRect c120b = {0, 0, 240, 120};
+        const ZyntraId c120id = zyntra_id_from_string("c:timeline", 10);
+
+        /* Frame 96: desenho e pixel do fundo da trilha 0. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, c120cols.bg));
+        CHECK(zyntra_widget_timeline_view(ctx, c120id, c120b,
+            c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f, &c_tres));
+        assert(c_tres.hovered_track == -1 && c_tres.hovered_key == -1);
+        assert(c_tres.selected_track == -1 && c_tres.dragging_track == -1);
+        CHECK(zyntra_framebuffer_render(c120fb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(c120fb, 120, 30, &cp));
+        c120_px = (cp.r == c_ts.track_bg.r && cp.g == c_ts.track_bg.g &&
+            cp.b == c_ts.track_bg.b);
+        assert(c120_px);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 97: hover na chave 0 (t=0.5 ⇒ x=130, y=34). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){130, 34}));
+        CHECK(zyntra_widget_timeline_view(ctx, c120id, c120b,
+            c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f, &c_tres));
+        assert(c_tres.hovered_track == 0 && c_tres.hovered_key == 0);
+        c120_hover = (c_tres.hovered_track == 0 && c_tres.hovered_key == 0);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 98: press seleciona/captura a chave. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){130, 34}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){130, 34}));
+        CHECK(zyntra_widget_timeline_view(ctx, c120id, c120b,
+            c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f, &c_tres));
+        assert(c_tres.selected_track == 0 && c_tres.selected_key == 0);
+        assert(c_tres.dragging_track == 0 && c_tres.dragging_key == 0);
+        assert(c_tres.changed);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 99: arrasta a chave para t=0.625 e escreve de volta. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){140, 34}));
+        CHECK(zyntra_widget_timeline_view(ctx, c120id, c120b,
+            c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f, &c_tres));
+        assert(c_tres.dragging_key == 0);
+        assert(c_tres.key_delta > 0.1249f && c_tres.key_delta < 0.1251f);
+        assert(c_keys[0].t > 0.6249f && c_keys[0].t < 0.6251f);
+        assert(c_keys[0].tag == 7);
+        c120_key = (c_tres.dragging_key == 0);
+        c120_writeback = (c_keys[0].t > 0.6249f && c_keys[0].t < 0.6251f);
+        assert(c120_writeback);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 100: release encerra o arraste da chave. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){140, 34}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){140, 34}));
+        CHECK(zyntra_widget_timeline_view(ctx, c120id, c120b,
+            c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f, &c_tres));
+        assert(c_tres.dragging_key == -1 && c_tres.selected_key == 0);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 101: scrub na régua ⇒ playhead 0.375. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){120, 10}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){120, 10}));
+        CHECK(zyntra_widget_timeline_view(ctx, c120id, c120b,
+            c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f, &c_tres));
+        assert(c_tres.scrubbing);
+        assert(c_tres.playhead == 0.375f);
+        c120_scrub = (c_tres.scrubbing && c_tres.playhead == 0.375f);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 102: arraste da régua ⇒ playhead 0.75. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){150, 10}));
+        CHECK(zyntra_widget_timeline_view(ctx, c120id, c120b,
+            c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f, &c_tres));
+        assert(c_tres.scrubbing && c_tres.playhead == 0.75f);
+        assert(c_tstate.playhead == 0.75f);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 103: release do scrub. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){150, 10}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){150, 10}));
+        CHECK(zyntra_widget_timeline_view(ctx, c120id, c120b,
+            c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f, &c_tres));
+        assert(!c_tres.scrubbing);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 104: roda dá zoom (80 → 100 px/s). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){150, 50}));
+        CHECK(zyntra_context_push_mouse_wheel(ctx, 0, 1, (ZyntraVec2){150, 50}));
+        CHECK(zyntra_widget_timeline_view(ctx, c120id, c120b,
+            c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f, &c_tres));
+        assert(c_tres.zoom_changed);
+        assert(c_tstate.transform.pps == 100.0f);
+        c120_zoom = (c_tres.zoom_changed && c_tstate.transform.pps == 100.0f);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 105: inválidos e conjunto vazio. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        {
+            ZyntraTimelineTrack tbad = c_tracks[0];
+            ZyntraTimelineViewState tsbad = c_tstate;
+            ZyntraTimelineViewOptions tobad = c_topt;
+            assert(zyntra_widget_timeline_view(NULL, c120id, c120b,
+                c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_timeline_view(ctx, 0, c120b,
+                c_tracks, 1, &c_tstate, &c_topt, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                NULL, 1, &c_tstate, &c_topt, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                c_tracks, 1, NULL, &c_topt, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                c_tracks, 1, &c_tstate, NULL, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                c_tracks, 1, &c_tstate, &c_topt, NULL, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                c_tracks, 1, &c_tstate, &c_topt, &c_ts, 0.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            tbad.name.ptr = NULL;
+            tbad.name.len = 1;
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                &tbad, 1, &c_tstate, &c_topt, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            tbad = c_tracks[0];
+            tbad.keys = NULL;
+            tbad.keys_len = 1;
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                &tbad, 1, &c_tstate, &c_topt, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            tsbad.transform.pps = 0.0f;
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                c_tracks, 1, &tsbad, &c_topt, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            tsbad = c_tstate;
+            tsbad.duration = 0.0f;
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                c_tracks, 1, &tsbad, &c_topt, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            tsbad = c_tstate;
+            tsbad.playhead = NAN;
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                c_tracks, 1, &tsbad, &c_topt, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            tsbad = c_tstate;
+            tsbad.drag = 9;
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                c_tracks, 1, &tsbad, &c_topt, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            tobad.min_pps = 0.0f;
+            assert(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                c_tracks, 1, &c_tstate, &tobad, &c_ts, 10.0f,
+                &c_tres) == ZYNTRA_INVALID_ARGUMENT);
+            /* Conjunto vazio e `out_result` nulo são válidos. */
+            CHECK(zyntra_widget_timeline_view(ctx, c120id, c120b,
+                NULL, 0, &c_tstate, &c_topt, &c_ts, 10.0f, NULL));
+        }
+        CHECK(zyntra_context_end_frame(ctx));
+
+        zyntra_framebuffer_destroy(c120fb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -2864,6 +3082,8 @@ int main(void) {
     printf("C-ABI graph px=%d hover=%d drag=%d change=%d write=%d zoom=%d\n",
         c119_node_px, c119_hover, c119_drag, c119_changed, c119_writeback,
         c119_zoom);
+    printf("C-ABI timeline px=%d hover=%d key=%d write=%d scrub=%d zoom=%d\n",
+        c120_px, c120_hover, c120_key, c120_writeback, c120_scrub, c120_zoom);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

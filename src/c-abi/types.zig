@@ -13,6 +13,7 @@ const style_mod = @import("../style/style.zig");
 const event_mod = @import("../event/event.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dnd_mod = @import("../dnd/service.zig");
+const timeline_view_mod = @import("../widgets/timeline_view.zig");
 
 /// Teclas normalizadas na fronteira C (espelha `event.Key`): os valores são
 /// os mesmos da API Zig e estáveis — teclas novas entram depois das atuais.
@@ -163,6 +164,27 @@ comptime {
     }
 }
 
+/// Modo de arraste da timeline (M120). O campo `drag` do estado C usa estes
+/// valores como `int32_t`.
+pub const ZyntraTimelineDragMode = enum(c_int) {
+    none = 0,
+    scrub = 1,
+    pan = 2,
+    key = 3,
+};
+
+comptime {
+    @setEvalBranchQuota(10_000);
+    const info = @typeInfo(ZyntraTimelineDragMode).@"enum";
+    for (info.field_names, info.field_values) |name, value| {
+        const zig = std.meta.stringToEnum(timeline_view_mod.TimelineDragMode, name) orelse
+            @compileError("ZyntraTimelineDragMode sem par em timeline_view.TimelineDragMode: " ++ name);
+        if (@backingInt(zig) != value) {
+            @compileError("ZyntraTimelineDragMode com valor divergente: " ++ name);
+        }
+    }
+}
+
 /// Métricas de texto (reexporta o `extern struct` da API Zig).
 pub const ZyntraTextMetrics = metrics_mod.TextMetrics;
 
@@ -252,6 +274,8 @@ pub const ZyntraToolbarStyle = style_mod.ToolbarStyle;
 pub const ZyntraStatusBarStyle = style_mod.StatusBarStyle;
 /// Estilo do grafo de nós (M119).
 pub const ZyntraGraphStyle = style_mod.GraphStyle;
+/// Estilo da timeline (M120).
+pub const ZyntraTimelineStyle = style_mod.TimelineStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -528,6 +552,70 @@ pub const ZyntraGraphViewResult = extern struct {
     changed: bool = false,
 };
 
+/// Chave da timeline (M120): instante em segundos + dado opaco do chamador
+/// (o widget não interpreta `tag`).
+pub const ZyntraTimelineKey = extern struct {
+    t: f32 = 0,
+    tag: u32 = 0,
+};
+
+/// Trilha da timeline (M120). `name` é emprestado só na chamada; `keys` é
+/// mutável (o arraste atualiza `t` na memória do chamador).
+pub const ZyntraTimelineTrack = extern struct {
+    name: ZyntraStr = .{},
+    keys: ?[*]ZyntraTimelineKey = null,
+    keys_len: usize = 0,
+};
+
+/// Transformação tempo↔tela da timeline (`x_local = (t - start) * pps`).
+pub const ZyntraTimelineTransform = extern struct {
+    start: f32 = 0,
+    pps: f32 = 80,
+};
+
+/// Estado da timeline (M120), do chamador e retido entre frames. Índices
+/// opcionais usam -1. Inicie com `zyntra_timeline_view_state_init`.
+pub const ZyntraTimelineViewState = extern struct {
+    transform: ZyntraTimelineTransform = .{},
+    duration: f32 = 10,
+    playhead: f32 = 0,
+    selected_track: i64 = -1,
+    selected_key: i64 = -1,
+    /// `ZYNTRA_TIMELINE_DRAG_*` (`int32_t` para aceitar estado externo sem
+    /// UB de enum inválido).
+    drag: i32 = 0,
+    drag_track: i64 = -1,
+    drag_key: i64 = -1,
+    drag_grab: f32 = 0,
+    pan_time: f32 = 0,
+};
+
+/// Opções de interação da timeline (M120). Inicie com
+/// `zyntra_timeline_view_options_default`.
+pub const ZyntraTimelineViewOptions = extern struct {
+    min_pps: f32 = 4,
+    max_pps: f32 = 4000,
+    zoom_step: f32 = 1.25,
+    snap_keys: bool = true,
+    key_hit_px: f32 = 6,
+};
+
+/// Resultado do frame da timeline (M120). Índices -1 significam "nenhum".
+pub const ZyntraTimelineViewResult = extern struct {
+    hovered_track: i64 = -1,
+    hovered_key: i64 = -1,
+    selected_track: i64 = -1,
+    selected_key: i64 = -1,
+    dragging_track: i64 = -1,
+    dragging_key: i64 = -1,
+    key_delta: f32 = 0,
+    playhead: f32 = 0,
+    scrubbing: bool = false,
+    panning: bool = false,
+    zoom_changed: bool = false,
+    changed: bool = false,
+};
+
 /// Zona de acoplamento de um drop (espelha `dock.DockZone`; mesmos valores).
 pub const ZyntraDockZone = enum(c_int) {
     left = 0,
@@ -668,6 +756,13 @@ comptime {
     if (@sizeOf(ZyntraGraphViewState) != 56 or @alignOf(ZyntraGraphViewState) != 8) @compileError("ZyntraGraphViewState ABI drift");
     if (@sizeOf(ZyntraGraphViewOptions) != 20 or @alignOf(ZyntraGraphViewOptions) != 4) @compileError("ZyntraGraphViewOptions ABI drift");
     if (@sizeOf(ZyntraGraphViewResult) != 48 or @alignOf(ZyntraGraphViewResult) != 8) @compileError("ZyntraGraphViewResult ABI drift");
+    if (@sizeOf(ZyntraTimelineStyle) != 80 or @alignOf(ZyntraTimelineStyle) != 4) @compileError("ZyntraTimelineStyle ABI drift");
+    if (@sizeOf(ZyntraTimelineKey) != 8 or @alignOf(ZyntraTimelineKey) != 4) @compileError("ZyntraTimelineKey ABI drift");
+    if (@sizeOf(ZyntraTimelineTrack) != 32 or @alignOf(ZyntraTimelineTrack) != 8) @compileError("ZyntraTimelineTrack ABI drift");
+    if (@sizeOf(ZyntraTimelineTransform) != 8 or @alignOf(ZyntraTimelineTransform) != 4) @compileError("ZyntraTimelineTransform ABI drift");
+    if (@sizeOf(ZyntraTimelineViewState) != 64 or @alignOf(ZyntraTimelineViewState) != 8) @compileError("ZyntraTimelineViewState ABI drift");
+    if (@sizeOf(ZyntraTimelineViewOptions) != 20 or @alignOf(ZyntraTimelineViewOptions) != 4) @compileError("ZyntraTimelineViewOptions ABI drift");
+    if (@sizeOf(ZyntraTimelineViewResult) != 64 or @alignOf(ZyntraTimelineViewResult) != 8) @compileError("ZyntraTimelineViewResult ABI drift");
     if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
         @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
     {
@@ -744,6 +839,14 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 56), @sizeOf(ZyntraGraphViewState));
     try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraGraphViewOptions));
     try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraGraphViewResult));
+    // Timeline M120.
+    try stdt.testing.expectEqual(@as(usize, 80), @sizeOf(ZyntraTimelineStyle));
+    try stdt.testing.expectEqual(@as(usize, 8), @sizeOf(ZyntraTimelineKey));
+    try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraTimelineTrack));
+    try stdt.testing.expectEqual(@as(usize, 8), @sizeOf(ZyntraTimelineTransform));
+    try stdt.testing.expectEqual(@as(usize, 64), @sizeOf(ZyntraTimelineViewState));
+    try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraTimelineViewOptions));
+    try stdt.testing.expectEqual(@as(usize, 64), @sizeOf(ZyntraTimelineViewResult));
     // Docking: espelhos do modelo e do resultado da área interativa.
     try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));
     try stdt.testing.expectEqual(@as(usize, 28), @sizeOf(ZyntraDockPaneInfo));
