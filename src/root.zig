@@ -33,6 +33,7 @@ pub const text = struct {
     pub const atlas = @import("text/atlas.zig");
     pub const ime = @import("text/ime.zig");
     pub const bitmap = @import("text/bitmap.zig");
+    pub const cache = @import("text/cache.zig");
     pub const layout = @import("text/layout.zig");
 };
 
@@ -52,6 +53,7 @@ pub const anim = struct {
 pub const layout = struct {
     pub const layout_mod = @import("layout/layout.zig");
     pub const flex = @import("layout/flex.zig");
+    pub const virtual = @import("layout/virtual.zig");
 };
 
 pub const style = struct {
@@ -160,6 +162,7 @@ pub const GlyphMetrics = text.atlas.GlyphMetrics;
 pub const Glyph = text.atlas.Glyph;
 pub const ImeComposition = text.ime.Composition;
 pub const BitmapFont = text.bitmap.BitmapFont;
+pub const TextCache = text.cache.TextCache;
 pub const TextLayout = text.layout.Layout;
 pub const TextSource = text.layout.Source;
 
@@ -181,6 +184,7 @@ pub const FlexItem = layout.flex.Item;
 pub const FlexOptions = layout.flex.Options;
 pub const FlexDirection = layout.flex.Direction;
 pub const FlexAlign = layout.flex.Align;
+pub const VisibleRange = layout.virtual.Range;
 
 pub const Theme = style.style_mod.Theme;
 pub const ButtonStyle = style.style_mod.ButtonStyle;
@@ -338,6 +342,7 @@ test {
     _ = @import("draw/stats.zig");
     _ = @import("layout/layout.zig");
     _ = @import("layout/flex.zig");
+    _ = @import("layout/virtual.zig");
     _ = @import("style/style.zig");
     _ = @import("dock/layout.zig");
     _ = @import("dock/serialize.zig");
@@ -355,6 +360,7 @@ test {
     _ = @import("text/atlas.zig");
     _ = @import("text/ime.zig");
     _ = @import("text/bitmap.zig");
+    _ = @import("text/cache.zig");
     _ = @import("text/layout.zig");
     _ = @import("draw/renderer.zig");
     _ = @import("c-abi/types.zig");

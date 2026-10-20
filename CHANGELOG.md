@@ -17,6 +17,19 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   capacidade antes do frame (sem realocação no caminho quente; os buffers
   são reutilizados entre frames). O rasterizador ganha `RasterMetrics`
   (caminho rápido/genérico, pixels escritos) em `SoftwareFramebuffer`.
+- `layout`: **helpers de virtualização** (M154, aditivo) —
+  `layout.virtual.fixedRange` (altura fixa, cálculo direto) e
+  `variableRange` (altura variável, offsets acumulados + busca binária)
+  dizem quais itens construir; `Range` traz `start`/`end`/`len`/
+  `contains`. São helpers PUROS: o estado (scroll, itens) continua do
+  app; culling (não rasterizar) e virtualização (não construir) ficam
+  claramente separados.
+- `text`: **cache opcional de medições** (M155, aditivo) —
+  `text.cache.TextCache` guarda as medições com capacidade limitada e
+  chave que compara o CONTEÚDO EXATO do texto (não só o hash), a
+  identidade da fonte (métricas ou atlas) e a largura disponível; tem
+  `clear` para invalidação e contadores de acerto/erro. É do app: a
+  biblioteca não o usa por padrão (o ganho precisa ser medido no app).
 - `software`: **fill opaco com escrita empacotada** (M153) — o caminho
   rápido de retângulo opaco escreve a cor como um `u32` (RGBA
   little-endian, mesmos bytes de antes) em vez de 4 stores separados:
