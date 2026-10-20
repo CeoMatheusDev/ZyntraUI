@@ -21,6 +21,13 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   muda a cada glifo adicionado; o cache de medições inclui a geração na
   chave, então um atlas alterado invalida as entradas antigas (sem medir
   de novo).
+- `viewport3d`: **gizmos de transformação** (M142, aditivo) —
+  `viewport3d.gizmo` traz os gizmos de translação, rotação e escala sobre o
+  objeto selecionado: a posição das alças (nas pontas dos eixos), o
+  picking da alça (`pickHandle`, por raio-esfera) e o delta do arraste
+  (`drag`: translação ao longo do eixo, ângulo em torno do eixo e fator de
+  escala). O app aplica o delta no seu próprio transform e desenha as
+  alças — o gizmo não desenha nada.
 - `viewport3d`: **seleção de objetos** (M141, aditivo) —
   `viewport3d.pick` converte a posição do mouse em raio de mundo
   (`screenRay`, via o inverso da view-projection) e testa a interseção

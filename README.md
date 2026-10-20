@@ -406,7 +406,10 @@ try zyntra_ui.viewport3d.viewport.viewport3d(
 Triangles outside the camera are discarded before the projection
 (`viewport3d.frustum` — pure culling, the image is unchanged), and
 `viewport3d.pick` turns a mouse position into a world ray to pick the
-closest object (`screenRay` + `pickMesh`).
+closest object (`screenRay` + `pickMesh`), and `viewport3d.gizmo` provides
+the translate/rotate/scale handles for the selected object (handle
+positions, handle picking and the drag delta — the app applies it and
+draws the handles).
 
 Conventions: right-handed, the camera looks down `-Z`, `Mat4` is
 column-major, clip space is `x,y ∈ [-1,1]` with `z ∈ [0,1]`, and screen

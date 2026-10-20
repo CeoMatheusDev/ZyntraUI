@@ -97,6 +97,34 @@ pub fn main() !void {
     }
     const pick_lit = countLit(&pixels);
 
+    // 3d) GIZMO: as alças do objeto selecionado e o picking da alça.
+    const gizmo = zyntra_ui.viewport3d.gizmo.Gizmo{
+        .model = zyntra_ui.viewport3d.math.Mat4.identity(),
+        .size = 1.4,
+        .kind = .translate,
+    };
+    var gizmo_hit: ?zyntra_ui.viewport3d.gizmo.Handle = null;
+    if (zyntra_ui.viewport3d.pick.screenRay(mvp, WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT)) |ray| {
+        gizmo_hit = gizmo.pickHandle(ray);
+    }
+    // Desenha as alças (cubinhos coloridos por eixo).
+    var handle_cube = zyntra_ui.viewport3d.mesh.CubeMesh.init(0.18);
+    const handle_colors = [_]zyntra_ui.Color{
+        .{ .r = 240, .g = 90, .b = 90, .a = 255 },
+        .{ .r = 120, .g = 220, .b = 120, .a = 255 },
+        .{ .r = 110, .g = 150, .b = 240, .a = 255 },
+    };
+    for ([_]zyntra_ui.viewport3d.gizmo.Handle{ .x, .y, .z }, handle_colors) |axis, color| {
+        const p = gizmo.handleWorld(axis) orelse continue;
+        raster.drawMesh(
+            handle_cube.mesh(),
+            zyntra_ui.viewport3d.math.Mat4.translation(p),
+            cam,
+            aspect,
+            .{ .color = color },
+        );
+    }
+
     // 4b) Órbita: a câmera gira e o render muda.
     cam.orbit(0.4, 0.1);
     raster.clear(.{ .r = 12, .g = 14, .b = 20, .a = 255 });
@@ -144,8 +172,12 @@ pub fn main() !void {
     ctx.endFrame();
 
     std.debug.print(
-        "viewport3d filled={d} wire={d} orbit={d} pick={d} widget_cmds={d} focused={} dragging={} yaw={d:.3}\n",
-        .{ filled_lit, wire_lit, orbit_lit, pick_lit, cmds, res.focused, res.dragging, state.yaw },
+        "viewport3d filled={d} wire={d} orbit={d} pick={d} gizmo={s} widget_cmds={d} focused={} dragging={} yaw={d:.3}\n",
+        .{
+            filled_lit,                    wire_lit, orbit_lit,   pick_lit,
+            @tagName(gizmo_hit orelse .z), cmds,     res.focused, res.dragging,
+            state.yaw,
+        },
     );
     std.debug.assert(filled_lit > 0);
     std.debug.assert(wire_lit > 0);

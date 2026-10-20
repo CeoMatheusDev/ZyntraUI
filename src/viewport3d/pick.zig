@@ -93,6 +93,23 @@ pub fn rayTriangle(
     return t;
 }
 
+/// Interseção raio × esfera (centro + raio). Devolve a distância ao
+/// impacto (a raiz mais próxima à frente) ou `null`.
+pub fn raySphere(ray: Ray, center: Vec3, radius: f32) ?f32 {
+    if (!ray.isValid() or !center.isFinite()) return null;
+    if (!std.math.isFinite(radius) or radius < 0) return null;
+    const oc = ray.origin.sub(center);
+    const b = oc.dot(ray.direction);
+    const c = oc.dot(oc) - radius * radius;
+    const disc = b * b - c;
+    if (!std.math.isFinite(disc) or disc < 0) return null;
+    const sq = @sqrt(disc);
+    var t = -b - sq;
+    if (t < 0) t = -b + sq;
+    if (t < 0) return null;
+    return t;
+}
+
 /// Pica o objeto na malha: percorre os triângulos (transformados pelo
 /// modelo) e devolve o impacto mais próximo. `object_id` identifica a
 /// malha (o app define).
@@ -193,4 +210,13 @@ test "pickMesh: acha o cubo e devolve o objeto mais próximo" {
     // A transformação do modelo é respeitada (o cubo desloca).
     const moved = pickMesh(ray, mesh, Mat4.translation(Vec3.init(0, 0, 3)), 9, false).?;
     try stdt.testing.expectApproxEqAbs(@as(f32, 1), moved.distance, 1e-3);
+}
+
+test "raySphere: acerta a esfera e ignora o resto" {
+    const stdt = @import("std");
+    const ray = Ray{ .origin = Vec3.init(0, 0, 5), .direction = Vec3.init(0, 0, -1) };
+    const t = raySphere(ray, Vec3.init(0, 0, 0), 1.0).?;
+    try stdt.testing.expectApproxEqAbs(@as(f32, 4), t, 1e-4);
+    // Fora da esfera: nada.
+    try stdt.testing.expect(raySphere(ray, Vec3.init(5, 5, 0), 1.0) == null);
 }
