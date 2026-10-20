@@ -48,6 +48,7 @@ pub const anim = struct {
 
 pub const layout = struct {
     pub const layout_mod = @import("layout/layout.zig");
+    pub const flex = @import("layout/flex.zig");
 };
 
 pub const style = struct {
@@ -168,6 +169,10 @@ pub const Constraints = layout.layout_mod.Constraints;
 pub const EdgeInsets = layout.layout_mod.EdgeInsets;
 pub const StackPlacer = layout.layout_mod.StackPlacer;
 pub const StackDirection = layout.layout_mod.StackDirection;
+pub const FlexItem = layout.flex.Item;
+pub const FlexOptions = layout.flex.Options;
+pub const FlexDirection = layout.flex.Direction;
+pub const FlexAlign = layout.flex.Align;
 
 pub const Theme = style.style_mod.Theme;
 pub const ButtonStyle = style.style_mod.ButtonStyle;
@@ -321,6 +326,7 @@ test {
     _ = @import("draw/commands.zig");
     _ = @import("draw/image.zig");
     _ = @import("layout/layout.zig");
+    _ = @import("layout/flex.zig");
     _ = @import("style/style.zig");
     _ = @import("dock/layout.zig");
     _ = @import("dock/serialize.zig");

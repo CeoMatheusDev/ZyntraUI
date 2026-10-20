@@ -240,6 +240,26 @@ try zyntra_ui.text.atlas.drawRun(
 Glyph metrics are in logical pixels; `atlas.scale` records how many atlas
 pixels make one logical pixel, which is what high-DPI atlases need.
 
+### Flex layout
+
+`layout.flex` distributes children in a row or column with gaps,
+alignment on both axes, and grow/shrink on the main axis. It is pure
+geometry: no allocation, no state.
+
+```zig
+const items = [_]zyntra_ui.FlexItem{
+    .{ .size = .{ .w = 120, .h = 24 } },
+    .{ .size = .{ .w = 0, .h = 24 }, .grow = 1 }, // toma o espaço extra
+};
+var rects: [2]zyntra_ui.Rect = undefined;
+try zyntra_ui.layout.flex.flex(
+    bounds,
+    &items,
+    .{ .direction = .row, .gap = 8 },
+    &rects,
+);
+```
+
 ### High-DPI surfaces
 
 The toolkit works in logical pixels; the host window works in device

@@ -51,6 +51,13 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `contain`/`none` centralizam a imagem dentro do rect. Sem estado,
   sem alocação e sem interação (a imagem é emprestada do chamador).
 
+- `layout`: **layout flex** (M128, aditivo) — `layout.flex` distribui filhos
+  em linha ou coluna com `gap`, alinhamento nos dois eixos (`start`,
+  `center`, `end`, `stretch`), crescimento (`grow`) e encolhimento (`shrink`)
+  no eixo principal, respeitando `min_main`/`max_main` por filho. É
+  geometria pura: o chamador passa os itens e recebe um rect por filho no
+  slice de saída (sem alocação e sem estado global).
+
 ## [1.35.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a fronteira C avança de forma substancial e
