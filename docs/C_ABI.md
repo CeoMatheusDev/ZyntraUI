@@ -523,6 +523,57 @@ if (mres.dismissed) open = 0;
   fonte (`size`) ou `title_h` ≤ 0/não-finitos, título com ponteiro nulo e
   `len > 0`.
 
+### Nono lote (M117): arrastar-e-soltar e drag ghost
+
+O serviço de DnD vive no `Context` (uma instância por janela), sem
+alocação própria. O fluxo é o mesmo da API Zig:
+
+```c
+/* origem, depois de capturar o press e mover além do limiar */
+zyntra_dnd_begin(ctx, source_id, "node", 4, my_node, "Nó 1", 5);
+
+/* todo frame, em cada alvo candidato (mesmo sem arraste) */
+ZyntraDndAccept acc;
+zyntra_dnd_accept(ctx, target_id, target_bounds, &acc);
+if (acc == ZYNTRA_DND_HOVER)   { /* realce */ }
+if (acc == ZYNTRA_DND_DROPPED) { /* solto neste frame */ }
+
+/* por último, por cima de tudo */
+ZyntraDragGhostStyle gs;
+zyntra_style_drag_ghost(ZYNTRA_THEME_DARK, &gs);
+ZyntraDragGhostResult gres;
+zyntra_widget_drag_ghost(ctx, &gs, 12, &gres);
+```
+
+* `zyntra_dnd_begin` exige `source != 0`, `kind` não vazio/UTF-8, cursor
+  conhecido e nenhum arraste ativo. `kind`/`label` são **emprestados** e
+  devem continuar válidos até o solto/cancelamento; `label` vazio usa o
+  `kind` no fantasma. `data` é opaco (a lib nunca dereferencia; pode ser
+  `NULL`).
+* `zyntra_dnd_accept` registra o alvo sob o cursor neste frame (o último
+  desenhado vence) e devolve `ZYNTRA_DND_NONE`/`_HOVER`/`_DROPPED`.
+  Chamar **todo frame**, mesmo sem arraste, para receber o solto.
+  `zyntra_dnd_hover_target` consulta o alvo registrado.
+* `zyntra_dnd_last_drop` devolve o solto resolvido no `begin_frame`
+  seguinte ao release (ou ao cancelamento), válido por **um frame**:
+  `present`, `cancelled`, `target`/`source` (`0` = nenhum), `kind`/`label`
+  (ponteiros emprestados do `begin`) e `data`. Sem solto, `present` é falso
+  e os demais campos são zerados.
+* `zyntra_dnd_cancel` encerra o arraste sem alvo e marca `cancelled` no
+  resultado; `zyntra_dnd_is_dragging` e `zyntra_dnd_drag_source` consultam
+  o arraste ativo. `zyntra_dnd_drag_position`/`_origin`/`_distance` e
+  `zyntra_dnd_drag_exceeds` (px não-finito/negativo ⇒ `false`) acompanham
+  o movimento.
+* `zyntra_widget_drag_ghost` desenha o fantasma do arraste ativo sob o
+  cursor, clampado ao viewport, com sombra/caixa/borda/rótulo conforme
+  `ZyntraDragGhostStyle`. Sem arraste, não emite comandos e `drawn` é falso;
+  `ZyntraDragGhostResult` traz `rect` e as métricas do rótulo. Chame por
+  último para ficar por cima.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle/saída obrigatória nula, origem
+  0, arraste já ativo, cursor desconhecido, `kind` vazio/não-UTF8, `label`
+  não-UTF8 ou com ponteiro nulo e `len > 0`, estilo inválido e fonte
+  (`size`) ≤ 0/não-finita.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -573,6 +624,9 @@ if (mres.dismissed) open = 0;
   `ZyntraPopupStyle=12`, `ZyntraModalStyle=20`, os resultados
   `ZyntraScrollResult=28`, `ZyntraPopupResult=2`, `ZyntraModalResult=3` e o
   `ZyntraModalDragState=8`.
+* M117: também travados `ZyntraDragGhostStyle=48`, `ZyntraDndDrop=64`,
+  `ZyntraDragGhostResult=36` e o enum `ZyntraDndAccept` (0..2, mesmos
+  valores de `dnd.AcceptResult`).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -593,5 +647,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..."
 ```

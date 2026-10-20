@@ -48,6 +48,8 @@ const tooltip_mod = @import("../widgets/tooltip.zig");
 const scroll_mod = @import("../widgets/scroll.zig");
 const popup_mod = @import("../widgets/popup.zig");
 const modal_mod = @import("../widgets/modal.zig");
+const drag_ghost_mod = @import("../widgets/drag_ghost.zig");
+const dnd_mod = @import("../dnd/service.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -92,6 +94,10 @@ fn fromColor(c: types_mod.Color) ct.ZyntraColor {
 
 fn fromRect(r: types_mod.Rect) ct.ZyntraRect {
     return .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
+}
+
+fn cStr(s: []const u8) ct.ZyntraStr {
+    return .{ .ptr = if (s.len == 0) null else s.ptr, .len = s.len };
 }
 
 /// Erros possíveis ao enfileirar um comando na `DrawList`.
@@ -2523,6 +2529,182 @@ pub export fn zyntra_widget_modal_end(handle: ?*ZyntraContext) callconv(.c) ct.Z
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Arrastar-e-soltar e fantasma do arraste: DnD + drag ghost (M117)
+// ---------------------------------------------------------------------------
+
+/// Estilo de drag ghost do tema embutido.
+pub export fn zyntra_style_drag_ghost(kind: i32, out_style: ?*ct.ZyntraDragGhostStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.dragGhostStyle();
+    return .ok;
+}
+
+/// Inicia um arraste a partir de `source` (a origem deve já deter a captura
+/// de press). `kind` (não vazio) é o contrato entre origem e alvo; `label`
+/// (opcional) é o rótulo do fantasma; ambos são EMPRESTADOS e devem
+/// continuar válidos até o solto/cancelamento. `data` é opaco (a lib nunca
+/// dereferencia; pode ser nulo).
+pub export fn zyntra_dnd_begin(
+    handle: ?*ZyntraContext,
+    source: ct.ZyntraId,
+    kind: ?[*]const u8,
+    kind_len: usize,
+    data: ?*const anyopaque,
+    label: ?[*]const u8,
+    label_len: usize,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    if (source == 0 or kind_len == 0 or kind == null) return .invalid_argument;
+    if (label_len > 0 and label == null) return .invalid_argument;
+    const k: []const u8 = kind.?[0..kind_len];
+    const l: []const u8 = if (label_len == 0) &.{} else label.?[0..label_len];
+    dnd_mod.begin(toCtx(h), id_mod.Id.fromU64(source), .{
+        .kind = k,
+        .data = data,
+        .label = l,
+    }) catch |err| return mapWidgetErr(err);
+    return .ok;
+}
+
+/// Cancela o arraste ativo (sem alvo). Sem arraste, não tem efeito; o
+/// último solto/cancelamento permanece até o próximo `begin_frame`.
+pub export fn zyntra_dnd_cancel(handle: ?*ZyntraContext) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    dnd_mod.cancel(toCtx(h));
+    return .ok;
+}
+
+/// `true` se há arraste ativo.
+pub export fn zyntra_dnd_is_dragging(handle: ?*ZyntraContext, out_dragging: ?*bool) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_dragging orelse return .invalid_argument;
+    out.* = dnd_mod.isDragging(toCtx(h));
+    return .ok;
+}
+
+/// Registra `id` como alvo candidato neste frame e devolve o verdicto.
+/// Chamar todo frame, mesmo sem arraste (para receber `.dropped`).
+pub export fn zyntra_dnd_accept(
+    handle: ?*ZyntraContext,
+    target: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    out_accept: ?*ct.ZyntraDndAccept,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_accept orelse return .invalid_argument;
+    const res = dnd_mod.accept(toCtx(h), id_mod.Id.fromU64(target), toRect(bounds));
+    out.* = switch (res) {
+        .none => .none,
+        .hover => .hover,
+        .dropped => .dropped,
+    };
+    return .ok;
+}
+
+/// Solto resolvido neste frame. Sem solto, devolve `present == false` e
+/// zera os demais campos. `kind`/`label` apontam para a memória emprestada
+/// no `zyntra_dnd_begin` correspondente.
+pub export fn zyntra_dnd_last_drop(handle: ?*ZyntraContext, out_drop: ?*ct.ZyntraDndDrop) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_drop orelse return .invalid_argument;
+    const drop = dnd_mod.lastDrop(toCtx(h)) orelse {
+        out.* = .{};
+        return .ok;
+    };
+    out.* = .{
+        .present = true,
+        .cancelled = drop.cancelled,
+        .target = if (drop.target) |t| t.value() else 0,
+        .source = if (drop.source) |s| s.value() else 0,
+        .kind = cStr(drop.payload.kind),
+        .label = cStr(drop.payload.label),
+        .data = drop.payload.data,
+    };
+    return .ok;
+}
+
+/// Id da origem do arraste ativo (`0` sem arraste).
+pub export fn zyntra_dnd_drag_source(handle: ?*ZyntraContext, out_source: ?*ct.ZyntraId) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_source orelse return .invalid_argument;
+    out.* = if (dnd_mod.dragSource(toCtx(h))) |s| s.value() else 0;
+    return .ok;
+}
+
+/// Alvo sob o cursor registrado neste frame (`0` = nenhum).
+pub export fn zyntra_dnd_hover_target(handle: ?*ZyntraContext, out_target: ?*ct.ZyntraId) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_target orelse return .invalid_argument;
+    out.* = if (dnd_mod.hoverTarget(toCtx(h))) |t| t.value() else 0;
+    return .ok;
+}
+
+/// Posição atual do arraste (cursor conhecido; senão a última).
+pub export fn zyntra_dnd_drag_position(handle: ?*ZyntraContext, out_pos: ?*ct.ZyntraVec2) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_pos orelse return .invalid_argument;
+    const p = dnd_mod.dragPosition(toCtx(h));
+    out.* = .{ .x = p.x, .y = p.y };
+    return .ok;
+}
+
+/// Posição onde o arraste começou.
+pub export fn zyntra_dnd_drag_origin(handle: ?*ZyntraContext, out_pos: ?*ct.ZyntraVec2) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_pos orelse return .invalid_argument;
+    const p = dnd_mod.dragOrigin(toCtx(h));
+    out.* = .{ .x = p.x, .y = p.y };
+    return .ok;
+}
+
+/// Distância percorrida desde o início do arraste (`0` sem arraste).
+pub export fn zyntra_dnd_drag_distance(handle: ?*ZyntraContext, out_distance: ?*f32) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_distance orelse return .invalid_argument;
+    out.* = dnd_mod.dragDistance(toCtx(h));
+    return .ok;
+}
+
+/// `true` quando a distância percorrida excede `px`; `px` não-finito ou
+/// negativo devolve `false` (mesma regra da API Zig).
+pub export fn zyntra_dnd_drag_exceeds(
+    handle: ?*ZyntraContext,
+    px: f32,
+    out_exceeds: ?*bool,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_exceeds orelse return .invalid_argument;
+    out.* = dnd_mod.dragExceeds(toCtx(h), px);
+    return .ok;
+}
+
+/// Desenha o fantasma do arraste ativo sob o cursor (chamar por último,
+/// para ficar por cima). Sem arraste, nenhum comando é emitido e
+/// `out_result.drawn` é falso. `size` é a fonte do rótulo.
+pub export fn zyntra_widget_drag_ghost(
+    handle: ?*ZyntraContext,
+    style: ?*const ct.ZyntraDragGhostStyle,
+    size: f32,
+    out_result: ?*ct.ZyntraDragGhostResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    const res = drag_ghost_mod.dragGhost(
+        toCtx(h),
+        st.*,
+        metrics_mod.FontMetrics.withSize(size),
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .drawn = res.drawn,
+        .rect = fromRect(res.rect),
+        .metrics = res.metrics,
+    };
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -4468,5 +4650,186 @@ test "C-ABI containers M116: scroll, popup e modal" {
     try eq(bad, zyntra_widget_scroll_end(handle, .{ .x = 0, .y = 0, .w = 0, .h = 10 }, off, 300, &scs));
     try eq(bad, zyntra_widget_scroll_end(handle, sc_bounds, nan, 300, &scs));
     try eq(bad, zyntra_widget_scroll_end(handle, sc_bounds, off, -1, &scs));
+    try eq(ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI DnD M117: begin, accept, drop, cancel e drag ghost" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+
+    var handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 300, .h = 200 }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    var dgs: ct.ZyntraDragGhostStyle = undefined;
+    try eq(ok, zyntra_style_drag_ghost(0, &dgs));
+    try stdt.testing.expect(dgs.isValid());
+    try eq(bad, zyntra_style_drag_ghost(9, &dgs));
+    try eq(bad, zyntra_style_drag_ghost(0, null));
+    var dgres: ct.ZyntraDragGhostResult = undefined;
+
+    // Sem arraste: nenhum comando e resultado vazio.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    var n_before: usize = 0;
+    var n_after: usize = 0;
+    try eq(ok, zyntra_draw_count(handle, &n_before));
+    try eq(ok, zyntra_widget_drag_ghost(handle, &dgs, 10, &dgres));
+    try stdt.testing.expect(!dgres.drawn);
+    try eq(ct.ZyntraRect{}, dgres.rect);
+    try eq(ct.ZyntraTextMetrics{}, dgres.metrics);
+    try eq(ok, zyntra_draw_count(handle, &n_after));
+    try eq(n_before, n_after);
+    // Inválidos do ghost: handle/estilo/fonte.
+    try eq(bad, zyntra_widget_drag_ghost(null, &dgs, 10, &dgres));
+    try eq(bad, zyntra_widget_drag_ghost(handle, null, 10, &dgres));
+    try eq(bad, zyntra_widget_drag_ghost(handle, &dgs, 0, &dgres));
+    var bad_dgs = dgs;
+    bad_dgs.pad = -1;
+    try eq(bad, zyntra_widget_drag_ghost(handle, &bad_dgs, 10, &dgres));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Inicia o arraste e move: distância 5 (3-4-5), alvo sob o cursor.
+    const src: ct.ZyntraId = 0xD1;
+    const target: ct.ZyntraId = 0xD2;
+    const target_bounds: ct.ZyntraRect = .{ .x = 10, .y = 20, .w = 80, .h = 60 };
+    var data_value: u32 = 42;
+    const data_ptr: *const anyopaque = @ptrCast(&data_value);
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 20, .y = 30 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 20, .y = 30 }));
+    try eq(ok, zyntra_dnd_begin(handle, src, "chip", 4, data_ptr, "chip", 4));
+    var dragging = false;
+    try eq(ok, zyntra_dnd_is_dragging(handle, &dragging));
+    try stdt.testing.expect(dragging);
+
+    var got_src: ct.ZyntraId = 0;
+    try eq(ok, zyntra_dnd_drag_source(handle, &got_src));
+    try eq(src, got_src);
+    var pos: ct.ZyntraVec2 = .{};
+    var origin: ct.ZyntraVec2 = .{};
+    try eq(ok, zyntra_dnd_drag_position(handle, &pos));
+    try eq(@as(f32, 20), pos.x);
+    try eq(@as(f32, 30), pos.y);
+    try eq(ok, zyntra_dnd_drag_origin(handle, &origin));
+    try eq(pos, origin);
+    var dist: f32 = -1;
+    try eq(ok, zyntra_dnd_drag_distance(handle, &dist));
+    try eq(@as(f32, 0), dist);
+
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 23, .y = 34 }));
+    try eq(ok, zyntra_dnd_drag_distance(handle, &dist));
+    try eq(@as(f32, 5), dist);
+    var exceeds = false;
+    try eq(ok, zyntra_dnd_drag_exceeds(handle, 4, &exceeds));
+    try stdt.testing.expect(exceeds);
+    try eq(ok, zyntra_dnd_drag_exceeds(handle, 5, &exceeds));
+    try stdt.testing.expect(!exceeds);
+
+    var accept: ct.ZyntraDndAccept = .none;
+    try eq(ok, zyntra_dnd_accept(handle, target, target_bounds, &accept));
+    try eq(ct.ZyntraDndAccept.hover, accept);
+    var hover: ct.ZyntraId = 0;
+    try eq(ok, zyntra_dnd_hover_target(handle, &hover));
+    try eq(target, hover);
+
+    // Ghost: caixa 48×22.625 sob o cursor + offset 10, rótulo "chip".
+    try eq(ok, zyntra_widget_drag_ghost(handle, &dgs, 10, &dgres));
+    try stdt.testing.expect(dgres.drawn);
+    try eq(@as(f32, 33), dgres.rect.x);
+    try eq(@as(f32, 44), dgres.rect.y);
+    try eq(@as(f32, 48), dgres.rect.w);
+    try stdt.testing.expectApproxEqAbs(@as(f32, 22.625), dgres.rect.h, 0.001);
+    try eq(@as(f32, 24), dgres.metrics.width);
+    try eq(ok, zyntra_draw_count(handle, &n_after));
+    try stdt.testing.expect(n_after >= n_before + 4); // sombra + caixa + borda + texto
+    // `out_result` nulo é válido (só desenha).
+    try eq(ok, zyntra_widget_drag_ghost(handle, &dgs, 10, null));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Release encerra o arraste; o solto é resolvido no begin_frame seguinte.
+    // O alvo precisa ser registrado também neste frame (accept todo frame).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 23, .y = 34 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 23, .y = 34 }));
+    accept = .none;
+    try eq(ok, zyntra_dnd_accept(handle, target, target_bounds, &accept));
+    try eq(ct.ZyntraDndAccept.hover, accept);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    dragging = true;
+    try eq(ok, zyntra_dnd_is_dragging(handle, &dragging));
+    try stdt.testing.expect(!dragging);
+    var drop: ct.ZyntraDndDrop = undefined;
+    try eq(ok, zyntra_dnd_last_drop(handle, &drop));
+    try stdt.testing.expect(drop.present and !drop.cancelled);
+    try eq(target, drop.target);
+    try eq(src, drop.source);
+    try eq(@as(usize, 4), drop.kind.len);
+    try stdt.testing.expectEqualStrings("chip", drop.kind.ptr.?[0..drop.kind.len]);
+    try stdt.testing.expectEqualStrings("chip", drop.label.ptr.?[0..drop.label.len]);
+    try stdt.testing.expect(drop.data == data_ptr);
+    accept = .none;
+    try eq(ok, zyntra_dnd_accept(handle, target, target_bounds, &accept));
+    try eq(ct.ZyntraDndAccept.dropped, accept);
+    accept = .none;
+    try eq(ok, zyntra_dnd_accept(handle, 0xDEAD, target_bounds, &accept));
+    try eq(ct.ZyntraDndAccept.none, accept);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // O solto vale por um frame apenas.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_dnd_last_drop(handle, &drop));
+    try stdt.testing.expect(!drop.present and !drop.cancelled);
+    try eq(@as(ct.ZyntraId, 0), drop.target);
+    try eq(@as(usize, 0), drop.kind.len);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Cancelamento explícito: sem alvo e `cancelled`.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 10, .y = 10 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 10, .y = 10 }));
+    try eq(ok, zyntra_dnd_begin(handle, src, "node", 4, null, null, 0));
+    try eq(ok, zyntra_dnd_is_dragging(handle, &dragging));
+    try stdt.testing.expect(dragging);
+    try eq(ok, zyntra_dnd_cancel(handle));
+    try eq(ok, zyntra_dnd_is_dragging(handle, &dragging));
+    try stdt.testing.expect(!dragging);
+    try eq(ok, zyntra_dnd_last_drop(handle, &drop));
+    try stdt.testing.expect(drop.present and drop.cancelled);
+    try eq(@as(ct.ZyntraId, 0), drop.target);
+    try eq(src, drop.source);
+    try stdt.testing.expectEqualStrings("node", drop.kind.ptr.?[0..drop.kind.len]);
+    try eq(@as(usize, 0), drop.label.len);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Inválidos: handle/id/kind/label/UTF-8/out nulos.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 10, .y = 10 }));
+    try eq(bad, zyntra_dnd_begin(null, src, "k", 1, null, null, 0));
+    try eq(bad, zyntra_dnd_begin(handle, 0, "k", 1, null, null, 0));
+    try eq(bad, zyntra_dnd_begin(handle, src, null, 1, null, null, 0));
+    try eq(bad, zyntra_dnd_begin(handle, src, "k", 0, null, null, 0));
+    try eq(bad, zyntra_dnd_begin(handle, src, "k", 1, null, null, 1));
+    try eq(bad, zyntra_dnd_begin(handle, src, "\xff", 1, null, null, 0));
+    try eq(bad, zyntra_dnd_begin(handle, src, "k", 1, null, "\xff", 1));
+    try eq(bad, zyntra_dnd_cancel(null));
+    try eq(bad, zyntra_dnd_is_dragging(null, &dragging));
+    try eq(bad, zyntra_dnd_is_dragging(handle, null));
+    try eq(bad, zyntra_dnd_accept(null, target, target_bounds, &accept));
+    try eq(bad, zyntra_dnd_accept(handle, target, target_bounds, null));
+    try eq(bad, zyntra_dnd_last_drop(null, &drop));
+    try eq(bad, zyntra_dnd_last_drop(handle, null));
+    try eq(bad, zyntra_dnd_drag_source(null, &got_src));
+    try eq(bad, zyntra_dnd_drag_source(handle, null));
+    try eq(bad, zyntra_dnd_hover_target(null, &hover));
+    try eq(bad, zyntra_dnd_drag_position(null, &pos));
+    try eq(bad, zyntra_dnd_drag_origin(handle, null));
+    try eq(bad, zyntra_dnd_drag_distance(null, &dist));
+    try eq(bad, zyntra_dnd_drag_exceeds(null, 1, &exceeds));
+    try eq(bad, zyntra_dnd_drag_exceeds(handle, 1, null));
     try eq(ok, zyntra_context_end_frame(handle));
 }

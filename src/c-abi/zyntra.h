@@ -983,6 +983,95 @@ ZyntraResult zyntra_widget_modal_titled(ZyntraContext *handle, ZyntraId id,
 
 ZyntraResult zyntra_widget_modal_end(ZyntraContext *handle);
 
+/* ------------------------------------------------------------------ */
+/* Arrastar-e-soltar e drag ghost (M117)                              */
+/* ------------------------------------------------------------------ */
+
+typedef enum ZyntraDndAccept {
+    ZYNTRA_DND_NONE = 0,
+    ZYNTRA_DND_HOVER = 1,
+    ZYNTRA_DND_DROPPED = 2
+} ZyntraDndAccept;
+
+typedef struct ZyntraDragGhostStyle {
+    ZyntraColor bg;
+    ZyntraColor border;
+    float border_width;
+    float radius;
+    ZyntraColor shadow;
+    float shadow_offset;
+    float shadow_blur;
+    ZyntraColor text;
+    float pad;
+    ZyntraVec2 offset;
+    float min_width;
+} ZyntraDragGhostStyle;
+
+/* Solto resolvido no frame. `present == false` quando não houve solto.
+ * `target`/`source` iguais a 0 significam "nenhum". `kind`/`label` apontam
+ * para a memória emprestada passada em zyntra_dnd_begin; `data` é opaco. */
+typedef struct ZyntraDndDrop {
+    bool present;
+    bool cancelled;
+    ZyntraId target;
+    ZyntraId source;
+    ZyntraStr kind;
+    ZyntraStr label;
+    const void *data;
+} ZyntraDndDrop;
+
+typedef struct ZyntraDragGhostResult {
+    bool drawn; /* havia arraste ativo */
+    ZyntraRect rect;
+    ZyntraTextMetrics metrics;
+} ZyntraDragGhostResult;
+
+ZyntraResult zyntra_style_drag_ghost(int32_t theme_kind, ZyntraDragGhostStyle *out_style);
+
+/* Inicia um arraste a partir de `source` (a origem deve já deter a captura
+ * de press). `kind` (não vazio) é o contrato entre origem e alvo; `label`
+ * (opcional) é o rótulo do fantasma. Ambos são EMPRESTADOS e devem
+ * continuar válidos até o solto/cancelamento. `data` é opaco (nunca
+ * dereferenciado; pode ser NULL). Arraste já ativo ⇒ ZYNTRA_INVALID_ARGUMENT. */
+ZyntraResult zyntra_dnd_begin(ZyntraContext *handle, ZyntraId source,
+    const char *kind, size_t kind_len, const void *data,
+    const char *label, size_t label_len);
+
+/* Cancela o arraste ativo (sem alvo). Sem arraste, não tem efeito; o último
+ * resultado permanece até o próximo zyntra_context_begin_frame. */
+ZyntraResult zyntra_dnd_cancel(ZyntraContext *handle);
+
+ZyntraResult zyntra_dnd_is_dragging(ZyntraContext *handle, bool *out_dragging);
+
+/* Registra `target` como alvo candidato neste frame e devolve o verdicto.
+ * Chamar todo frame, mesmo sem arraste (para receber ZYNTRA_DND_DROPPED). */
+ZyntraResult zyntra_dnd_accept(ZyntraContext *handle, ZyntraId target,
+    ZyntraRect bounds, ZyntraDndAccept *out_accept);
+
+/* Solto resolvido neste frame. Sem solto, `present == false` e os demais
+ * campos são zerados. */
+ZyntraResult zyntra_dnd_last_drop(ZyntraContext *handle, ZyntraDndDrop *out_drop);
+
+/* Origem (`0` sem arraste) e alvo sob o cursor (`0` = nenhum). */
+ZyntraResult zyntra_dnd_drag_source(ZyntraContext *handle, ZyntraId *out_source);
+ZyntraResult zyntra_dnd_hover_target(ZyntraContext *handle, ZyntraId *out_target);
+
+/* Posição atual, posição inicial e distância percorrida (0 sem arraste). */
+ZyntraResult zyntra_dnd_drag_position(ZyntraContext *handle, ZyntraVec2 *out_pos);
+ZyntraResult zyntra_dnd_drag_origin(ZyntraContext *handle, ZyntraVec2 *out_pos);
+ZyntraResult zyntra_dnd_drag_distance(ZyntraContext *handle, float *out_distance);
+
+/* `true` quando a distância excede `px`; `px` não-finito/negativo ⇒ false. */
+ZyntraResult zyntra_dnd_drag_exceeds(ZyntraContext *handle, float px,
+    bool *out_exceeds);
+
+/* Desenha o fantasma do arraste ativo sob o cursor (chamar por último, para
+ * ficar por cima). Sem arraste, nenhum comando é emitido e `drawn` é false.
+ * `size` é a fonte do rótulo. `out_result` é opcional. */
+ZyntraResult zyntra_widget_drag_ghost(ZyntraContext *handle,
+    const ZyntraDragGhostStyle *style, float size,
+    ZyntraDragGhostResult *out_result);
+
 #ifdef __cplusplus
 }
 #endif

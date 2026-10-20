@@ -71,6 +71,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   ganhou os frames 63–76 (popup com hover/dispensa, modal com dim/dispensa,
   arraste do modal titulado, scroll com thumb/arraste/End/roda e checagem de
   pixels) e os inválidos dos contêineres.
+- `c-abi`: **arrastar-e-soltar e drag ghost na fronteira C** (M117, aditivo)
+  — `zyntra_dnd_begin` (payload com `kind`/`label` emprestados e `data`
+  opaco), `_cancel`, `_is_dragging`, `_accept` (alvo + verdicto
+  `ZyntraDndAccept`), `_last_drop` (`ZyntraDndDrop`, válido por um frame) e
+  consultas de origem/alvo/posição/distância. `zyntra_widget_drag_ghost`
+  desenha o fantasma do arraste ativo (clampado ao viewport) com
+  `ZyntraDragGhostStyle`/`ZyntraDragGhostResult` e estilo do tema via
+  `zyntra_style_drag_ghost`, com travas de ABI (`DragGhostStyle=48`,
+  `DndDrop=64`, `DragGhostResult=36`, enum `ZyntraDndAccept` 0..2). O
+  consumidor C ganhou os frames 77–83 (arraste com distância, hover,
+  ghost com checagem de pixel, solto no alvo, expiração em um frame,
+  cancelamento e inválidos).
 
 ## [1.34.0] - 2026-10-18
 

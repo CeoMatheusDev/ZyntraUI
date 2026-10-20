@@ -2176,6 +2176,215 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 77-83: DnD + drag ghost (M117) — payload, alvos, solto,
+     * cancelamento e fantasma com checagem de pixel. */
+    int c117_ghost_px = 0, c117_hover = 0, c117_dropped = 0;
+    int c117_cancelled = 0, c117_no_drop = 0;
+    {
+        ZyntraDragGhostStyle c_gs;
+        ZyntraDragGhostResult c_gres;
+        ZyntraDndDrop c_drop;
+        ZyntraDndAccept c_acc;
+
+        _Static_assert(sizeof(ZyntraDragGhostStyle) == 48, "ZyntraDragGhostStyle ABI");
+        _Static_assert(sizeof(ZyntraDndDrop) == 64, "ZyntraDndDrop ABI");
+        _Static_assert(sizeof(ZyntraDragGhostResult) == 36, "ZyntraDragGhostResult ABI");
+
+        CHECK(zyntra_style_drag_ghost(ZYNTRA_THEME_DARK, &c_gs));
+        assert(zyntra_style_drag_ghost(9, &c_gs) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_drag_ghost(0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+        ZyntraFramebuffer *c117fb = NULL;
+        CHECK(zyntra_framebuffer_create(240, 200, &c117fb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 240, 200}));
+        ZyntraThemeColors c117cols;
+        CHECK(zyntra_theme_colors(ZYNTRA_THEME_DARK, &c117cols));
+        ZyntraColor cp = {0, 0, 0, 0};
+
+        const unsigned long long src =
+            (unsigned long long)zyntra_id_from_string("c:dnd-src", 9);
+        const unsigned long long dst =
+            (unsigned long long)zyntra_id_from_string("c:dnd-dst", 9);
+        const ZyntraRect dst_b = {10, 20, 80, 60};
+        int data_value = 42;
+        void *data_ptr = &data_value;
+
+        /* Frame 77: press inicia o arraste e o fantasma segue o cursor. */
+        {
+            bool dragging = false;
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){20, 30}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){20, 30}));
+            CHECK(zyntra_dnd_begin(ctx, src, "chip", 4, data_ptr, "chip", 4));
+            CHECK(zyntra_dnd_is_dragging(ctx, &dragging));
+            assert(dragging);
+            CHECK(zyntra_draw_clear(ctx, c117cols.bg));
+            CHECK(zyntra_widget_drag_ghost(ctx, &c_gs, 10.0f, &c_gres));
+            assert(c_gres.drawn);
+            assert(c_gres.rect.x == 30.0f && c_gres.rect.y == 40.0f);
+            assert(c_gres.rect.w == 48.0f);
+            assert(c_gres.rect.h > 22.62f && c_gres.rect.h < 22.63f);
+            assert(c_gres.metrics.width == 24.0f);
+            CHECK(zyntra_framebuffer_render(c117fb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(c117fb, 40, 45, &cp));
+            c117_ghost_px = (cp.r == c_gs.bg.r && cp.g == c_gs.bg.g &&
+                cp.b == c_gs.bg.b);
+            assert(c117_ghost_px);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 78: mover 3-4-5 e registrar o alvo (hover). */
+        {
+            float dist = -1.0f;
+            bool exceeds = false;
+            ZyntraId hover = 0;
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){23, 34}));
+            CHECK(zyntra_dnd_drag_distance(ctx, &dist));
+            assert(dist == 5.0f);
+            CHECK(zyntra_dnd_drag_exceeds(ctx, 4.0f, &exceeds));
+            assert(exceeds);
+            CHECK(zyntra_dnd_drag_exceeds(ctx, 5.0f, &exceeds));
+            assert(!exceeds);
+            CHECK(zyntra_dnd_accept(ctx, dst, dst_b, &c_acc));
+            assert(c_acc == ZYNTRA_DND_HOVER);
+            CHECK(zyntra_dnd_hover_target(ctx, &hover));
+            assert(hover == dst);
+            c117_hover = (c_acc == ZYNTRA_DND_HOVER);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 79: release; o alvo é registrado de novo neste frame. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){23, 34}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){23, 34}));
+        CHECK(zyntra_dnd_accept(ctx, dst, dst_b, &c_acc));
+        assert(c_acc == ZYNTRA_DND_HOVER);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 80: solto resolvido — alvo, origem, payload e data. */
+        {
+            bool dragging = true;
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_dnd_is_dragging(ctx, &dragging));
+            assert(!dragging);
+            CHECK(zyntra_dnd_last_drop(ctx, &c_drop));
+            assert(c_drop.present && !c_drop.cancelled);
+            assert(c_drop.target == dst && c_drop.source == src);
+            assert(c_drop.kind.len == 4 && memcmp(c_drop.kind.ptr, "chip", 4) == 0);
+            assert(c_drop.label.len == 4 && memcmp(c_drop.label.ptr, "chip", 4) == 0);
+            assert(c_drop.data == data_ptr);
+            CHECK(zyntra_dnd_accept(ctx, dst, dst_b, &c_acc));
+            assert(c_acc == ZYNTRA_DND_DROPPED);
+            c117_dropped = (c_acc == ZYNTRA_DND_DROPPED);
+            CHECK(zyntra_dnd_accept(ctx, 0xDEAD, dst_b, &c_acc));
+            assert(c_acc == ZYNTRA_DND_NONE);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 81: o solto vale por um frame apenas. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_dnd_last_drop(ctx, &c_drop));
+        assert(!c_drop.present && !c_drop.cancelled && c_drop.target == 0);
+        CHECK(zyntra_dnd_accept(ctx, dst, dst_b, &c_acc));
+        assert(c_acc == ZYNTRA_DND_NONE);
+        c117_no_drop = (!c_drop.present && c_acc == ZYNTRA_DND_NONE);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 82: cancelamento explícito (sem alvo). */
+        {
+            bool dragging = false;
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){10, 10}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){10, 10}));
+            CHECK(zyntra_dnd_begin(ctx, src, "node", 4, NULL, NULL, 0));
+            CHECK(zyntra_dnd_is_dragging(ctx, &dragging));
+            assert(dragging);
+            CHECK(zyntra_dnd_cancel(ctx));
+            CHECK(zyntra_dnd_is_dragging(ctx, &dragging));
+            assert(!dragging);
+            CHECK(zyntra_dnd_last_drop(ctx, &c_drop));
+            assert(c_drop.present && c_drop.cancelled && c_drop.target == 0);
+            assert(c_drop.source == src);
+            assert(c_drop.kind.len == 4 && memcmp(c_drop.kind.ptr, "node", 4) == 0);
+            assert(c_drop.label.len == 0);
+            c117_cancelled = c_drop.cancelled;
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 83: inválidos de DnD e ghost. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        {
+            bool dragging = false, exceeds = false;
+            float dist = 0;
+            ZyntraId idout = 0;
+            ZyntraVec2 vout = {0, 0};
+            assert(zyntra_dnd_begin(NULL, src, "k", 1, NULL, NULL, 0)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_begin(ctx, 0, "k", 1, NULL, NULL, 0)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_begin(ctx, src, NULL, 1, NULL, NULL, 0)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_begin(ctx, src, "k", 0, NULL, NULL, 0)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_begin(ctx, src, "k", 1, NULL, NULL, 1)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_begin(ctx, src, "\xff", 1, NULL, NULL, 0)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_begin(ctx, src, "k", 1, NULL, "\xff", 1)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_cancel(NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_is_dragging(NULL, &dragging)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_is_dragging(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_accept(NULL, dst, dst_b, &c_acc)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_accept(ctx, dst, dst_b, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_last_drop(NULL, &c_drop)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_last_drop(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_drag_source(NULL, &idout)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_drag_source(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_hover_target(NULL, &idout)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_drag_position(NULL, &vout)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_drag_origin(ctx, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_drag_distance(NULL, &dist)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_drag_exceeds(NULL, 1.0f, &exceeds)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dnd_drag_exceeds(ctx, 1.0f, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_drag_ghost(NULL, &c_gs, 10.0f, &c_gres)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_drag_ghost(ctx, NULL, 10.0f, &c_gres)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_drag_ghost(ctx, &c_gs, 0.0f, &c_gres)
+                == ZYNTRA_INVALID_ARGUMENT);
+            {
+                ZyntraDragGhostStyle bad = c_gs;
+                bad.pad = -1.0f;
+                assert(zyntra_widget_drag_ghost(ctx, &bad, 10.0f, &c_gres)
+                    == ZYNTRA_INVALID_ARGUMENT);
+            }
+            /* Sem arraste: `drawn` falso e nenhum comando emitido. */
+            size_t before = 0, after = 0;
+            CHECK(zyntra_draw_count(ctx, &before));
+            CHECK(zyntra_widget_drag_ghost(ctx, &c_gs, 10.0f, &c_gres));
+            assert(!c_gres.drawn);
+            CHECK(zyntra_draw_count(ctx, &after));
+            assert(before == after);
+        }
+        CHECK(zyntra_context_end_frame(ctx));
+
+        zyntra_framebuffer_destroy(c117fb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -2234,6 +2443,8 @@ int main(void) {
         c116_px_popup, c116_popup_dismiss, c116_px_modal, c116_modal_dismiss,
         c116_modal_dim, c116_px_scroll0, c116_px_scroll_mid, c116_px_scroll_end,
         c116_px_scroll_wheel);
+    printf("C-ABI dnd ghost=%d hover=%d dropped=%d cancelled=%d no_drop=%d\n",
+        c117_ghost_px, c117_hover, c117_dropped, c117_cancelled, c117_no_drop);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

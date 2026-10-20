@@ -12,6 +12,7 @@ const metrics_mod = @import("../text/metrics.zig");
 const style_mod = @import("../style/style.zig");
 const event_mod = @import("../event/event.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
+const dnd_mod = @import("../dnd/service.zig");
 
 /// Teclas normalizadas na fronteira C (espelha `event.Key`): os valores são
 /// os mesmos da API Zig e estáveis — teclas novas entram depois das atuais.
@@ -141,6 +142,27 @@ pub const ZyntraOrientation = enum(c_int) {
     vertical = 1,
 };
 
+/// Verdicto de um alvo de arrastar-e-soltar (espelha `dnd.AcceptResult`;
+/// mesmos valores).
+pub const ZyntraDndAccept = enum(c_int) {
+    none = 0,
+    hover = 1,
+    dropped = 2,
+};
+
+comptime {
+    // Trava: todo verdicto de DnD da fronteira C espelha nome e valor.
+    @setEvalBranchQuota(10_000);
+    const info = @typeInfo(ZyntraDndAccept).@"enum";
+    for (info.field_names, info.field_values) |name, value| {
+        const zig = std.meta.stringToEnum(dnd_mod.AcceptResult, name) orelse
+            @compileError("ZyntraDndAccept sem par em dnd.AcceptResult: " ++ name);
+        if (@backingInt(zig) != value) {
+            @compileError("ZyntraDndAccept com valor divergente: " ++ name);
+        }
+    }
+}
+
 /// Métricas de texto (reexporta o `extern struct` da API Zig).
 pub const ZyntraTextMetrics = metrics_mod.TextMetrics;
 
@@ -223,6 +245,8 @@ pub const ZyntraTooltipStyle = style_mod.TooltipStyle;
 pub const ZyntraScrollStyle = style_mod.ScrollStyle;
 pub const ZyntraPopupStyle = style_mod.PopupStyle;
 pub const ZyntraModalStyle = style_mod.ModalStyle;
+/// Estilo do fantasma do arraste (M117).
+pub const ZyntraDragGhostStyle = style_mod.DragGhostStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -397,6 +421,28 @@ pub const ZyntraModalDragState = extern struct {
     dy: f32 = 0,
 };
 
+/// Solto resolvido no frame (M117); `present == false` quando não houve
+/// solto. `target`/`source` iguais a 0 significam "nenhum". `kind`/`label`
+/// apontam para a memória passada em `zyntra_dnd_begin` (emprestada) e
+/// `data` é o ponteiro opaco do chamador.
+pub const ZyntraDndDrop = extern struct {
+    present: bool = false,
+    cancelled: bool = false,
+    target: ZyntraId = 0,
+    source: ZyntraId = 0,
+    kind: ZyntraStr = .{},
+    label: ZyntraStr = .{},
+    data: ?*const anyopaque = null,
+};
+
+/// Resultado do fantasma do arraste (M117): `drawn` indica se havia arraste
+/// ativo; `rect`/`metrics` ficam vazios caso contrário.
+pub const ZyntraDragGhostResult = extern struct {
+    drawn: bool = false,
+    rect: ZyntraRect = .{},
+    metrics: ZyntraTextMetrics = .{},
+};
+
 /// Zona de acoplamento de um drop (espelha `dock.DockZone`; mesmos valores).
 pub const ZyntraDockZone = enum(c_int) {
     left = 0,
@@ -525,6 +571,9 @@ comptime {
     if (@sizeOf(ZyntraPopupResult) != 2 or @alignOf(ZyntraPopupResult) != 1) @compileError("ZyntraPopupResult ABI drift");
     if (@sizeOf(ZyntraModalResult) != 3 or @alignOf(ZyntraModalResult) != 1) @compileError("ZyntraModalResult ABI drift");
     if (@sizeOf(ZyntraModalDragState) != 8 or @alignOf(ZyntraModalDragState) != 4) @compileError("ZyntraModalDragState ABI drift");
+    if (@sizeOf(ZyntraDragGhostStyle) != 48 or @alignOf(ZyntraDragGhostStyle) != 4) @compileError("ZyntraDragGhostStyle ABI drift");
+    if (@sizeOf(ZyntraDndDrop) != 64 or @alignOf(ZyntraDndDrop) != 8) @compileError("ZyntraDndDrop ABI drift");
+    if (@sizeOf(ZyntraDragGhostResult) != 36 or @alignOf(ZyntraDragGhostResult) != 4) @compileError("ZyntraDragGhostResult ABI drift");
     if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
         @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
     {
@@ -586,6 +635,10 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 2), @sizeOf(ZyntraPopupResult));
     try stdt.testing.expectEqual(@as(usize, 3), @sizeOf(ZyntraModalResult));
     try stdt.testing.expectEqual(@as(usize, 8), @sizeOf(ZyntraModalDragState));
+    // DnD e drag ghost M117.
+    try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraDragGhostStyle));
+    try stdt.testing.expectEqual(@as(usize, 64), @sizeOf(ZyntraDndDrop));
+    try stdt.testing.expectEqual(@as(usize, 36), @sizeOf(ZyntraDragGhostResult));
     // Docking: espelhos do modelo e do resultado da área interativa.
     try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));
     try stdt.testing.expectEqual(@as(usize, 28), @sizeOf(ZyntraDockPaneInfo));
