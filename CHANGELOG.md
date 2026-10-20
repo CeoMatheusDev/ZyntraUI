@@ -69,6 +69,13 @@ existia mudou de assinatura ou layout.
   comum do texto com atlas/fonte de bitmap), o rasterizador copia o pixel
   direto, sem amostragem bilinear. A cor resultante é idêntica à do
   caminho geral (mesma matemática de tint e mistura).
+- `widgets`: **área de texto com fonte real** (M149, aditivo) —
+  `textAreaAtlas` usa um `FontAtlas`: o caret, a seleção, o clique e a
+  rolagem horizontal seguem os AVANÇOS REAIS dos glifos (fonte
+  proporcional) e cada linha vira um run. O núcleo do `textarea` passou a
+  medir por um `text.layout.Layout` — as variantes com métricas de
+  fallback mantêm o comportamento idêntico (397 testes verdes). Sem
+  quebra suave: as linhas visuais são as linhas lógicas.
 - `text`/`draw`: **fuzz dos módulos novos** (M148, aditivo) — testes de
   fuzz para a composição de IME (pré-edit sempre UTF-8, cursor coerente),
   o layout de texto com atlas (medida/corte/offset coerentes), o run de

@@ -256,7 +256,8 @@ try layout.draw(&ctx.draw, gpa, "Hello", pos, color); // blits per glyph
 
 Editable text follows the same source: `textInputAtlas` measures, places
 the caret, highlights the selection and draws with the atlas advances, so
-what you measure is what you see. `labelAtlasWrapped` breaks long text by
+what you measure is what you see. `textAreaAtlas` does the same for the
+multi-line text area (logical lines, no soft wrap). `labelAtlasWrapped` breaks long text by
 the real glyph widths (not by columns), and `text.wrap.wrapLinesLayout`
 exposes the same breaking to the host. `widgets.text_block` draws
 paragraphs (wrapped, aligned per line) with either source.

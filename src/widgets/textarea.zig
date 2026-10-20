@@ -39,6 +39,9 @@ const id_mod = @import("../core/id.zig");
 const style_mod = @import("../style/style.zig");
 const metrics_mod = @import("../text/metrics.zig");
 const edit = @import("../text/edit.zig");
+const layout_mod = @import("../text/layout.zig");
+const atlas_mod = @import("../text/atlas.zig");
+const image_mod = @import("../draw/image.zig");
 const ime_mod = @import("../text/ime.zig");
 const input = @import("input.zig");
 
@@ -206,6 +209,23 @@ fn colAtX(font: metrics_mod.FontMetrics, line_text: []const u8, x: f32) usize {
     return i;
 }
 
+/// Largura de um trecho (px lógicos): métrica de fallback ou atlas.
+fn advanceOf(source: layout_mod.Source, text: []const u8) f32 {
+    return switch (source) {
+        .metrics => |m| (metrics_mod.measure(text, m) catch metrics_mod.TextMetrics{}).width,
+        .atlas => |a| (a.measure(text) catch 0),
+    };
+}
+
+/// Métricas de fallback do fonte. No caminho atlas (proporcional) as
+/// colunas não se aplicam: o valor é neutro e nunca é usado.
+fn metricsOf(source: layout_mod.Source) metrics_mod.FontMetrics {
+    return switch (source) {
+        .metrics => |m| m,
+        .atlas => metrics_mod.FontMetrics.withSize(16),
+    };
+}
+
 // ---- Quebra suave (M89) ------------------------------------------------
 //
 // O caret e o desenho trabalham por CODPOINT com `advance` uniforme
@@ -346,7 +366,7 @@ pub fn textArea(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextAreaResult {
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null, false, null);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, .{ .metrics = font }, style, void, {}, null, false, null);
 }
 
 /// Área de texto com undo/redo (M88, aditivo): `Ctrl+Z` desfaz, `Ctrl+Y`
@@ -370,7 +390,7 @@ pub fn textAreaHistory(
 ) context_mod.ContextError!TextAreaResult {
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, null, false, null);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, .{ .metrics = font }, style, *TextHistory(S, B), hist, null, false, null);
 }
 
 /// Área de texto completa (M88, aditivo): undo/redo + área de
@@ -396,7 +416,7 @@ pub fn textAreaClipboard(
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
     if (clip.len > clip.buf.len) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, clip, false, null);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, .{ .metrics = font }, style, *TextHistory(S, B), hist, clip, false, null);
 }
 
 /// Área de texto com **quebra suave** (M89, aditivo): linhas longas
@@ -414,7 +434,7 @@ pub fn textAreaWrapped(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextAreaResult {
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null, true, null);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, .{ .metrics = font }, style, void, {}, null, true, null);
 }
 
 /// Quebra suave (M89) + undo/redo: `Ctrl+Z` desfaz, `Ctrl+Y`/
@@ -436,7 +456,7 @@ pub fn textAreaWrappedHistory(
 ) context_mod.ContextError!TextAreaResult {
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, null, true, null);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, .{ .metrics = font }, style, *TextHistory(S, B), hist, null, true, null);
 }
 
 /// Quebra suave (M89) + undo/redo + área de transferência
@@ -460,7 +480,7 @@ pub fn textAreaWrappedClipboard(
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
     if (clip.len > clip.buf.len) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, clip, true, null);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, .{ .metrics = font }, style, *TextHistory(S, B), hist, clip, true, null);
 }
 
 /// Área de texto com composição de IME (M131, aditivo).
@@ -484,7 +504,30 @@ pub fn textAreaIme(
 ) context_mod.ContextError!TextAreaResult {
     if (anchor.* > len.*) return error.InvalidArgument;
     if (comp.len > comp.buf.len) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null, false, comp);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, .{ .metrics = font }, style, void, {}, null, false, comp);
+}
+
+/// Área de texto com fonte real (atlas de glifos) (M149, aditivo).
+///
+/// O caret, a seleção, o clique e a rolagem horizontal usam os AVANÇOS
+/// REAIS dos glifos (fonte proporcional). Sem quebra suave: as linhas
+/// visuais são as linhas lógicas (a quebra por largura real vive no
+/// `widgets.text_block`).
+pub fn textAreaAtlas(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    scroll_y: *f32,
+    atlas: *const atlas_mod.FontAtlas,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextAreaResult {
+    if (anchor.* > len.*) return error.InvalidArgument;
+    if (atlas.glyphs.len == 0) return error.InvalidArgument;
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, .{ .atlas = atlas }, style, void, {}, null, false, null);
 }
 
 fn textAreaInner(
@@ -496,7 +539,7 @@ fn textAreaInner(
     cursor: *usize,
     anchor: *usize,
     scroll_y: *f32,
-    font: metrics_mod.FontMetrics,
+    source: layout_mod.Source,
     style: style_mod.TextInputStyle,
     Hist: type,
     hist: Hist,
@@ -505,7 +548,8 @@ fn textAreaInner(
     comp: ?*Composition,
 ) context_mod.ContextError!TextAreaResult {
     if (id.isNull()) return error.InvalidArgument;
-    if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
+    if (!style.isValid()) return error.InvalidArgument;
+    const layout = layout_mod.Layout.init(source) catch return error.InvalidArgument;
     if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
         !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
     {
@@ -518,7 +562,7 @@ fn textAreaInner(
 
     var res = TextAreaResult{ .len = len.* };
     const fm = input.FrameMouse.scan(ctx.pendingEvents());
-    const line_h = font.lineHeight();
+    const line_h = layout.lineHeight();
     const view_h = @max(0, bounds.h - pad * 2);
     const vis_w = @max(0, bounds.w - pad * 2);
 
@@ -539,14 +583,14 @@ fn textAreaInner(
     // sem quebra (1 linha visual por linha lógica). Sob quebra não há
     // rolagem horizontal. O offset horizontal derivado (mantém o caret
     // visível) só se aplica sem quebra.
-    const wrap_cols: usize = if (wrap) wrapCols(font, vis_w) else 0;
+    const wrap_cols: usize = if (wrap) wrapCols(metricsOf(source), vis_w) else 0;
     const nlines0 = visualCount(buffer, len.*, wrap_cols);
     const xoff: f32 = if (wrap_cols != 0) 0 else blk: {
         const caret_line0 = lineOfOffset(buffer, @min(cursor.*, len.*));
         const caret_ls0 = lineStart(buffer, len.*, caret_line0);
         const caret_le0 = lineEnd(buffer, len.*, caret_line0);
-        const caret_pre_w = (metrics_mod.measure(buffer[caret_ls0..@min(cursor.*, caret_le0)], font) catch metrics_mod.TextMetrics{}).width;
-        const caret_full_w = (metrics_mod.measure(buffer[caret_ls0..caret_le0], font) catch metrics_mod.TextMetrics{}).width;
+        const caret_pre_w = advanceOf(source, buffer[caret_ls0..@min(cursor.*, caret_le0)]);
+        const caret_full_w = advanceOf(source, buffer[caret_ls0..caret_le0]);
         break :blk if (caret_full_w <= vis_w) 0 else std.math.clamp(caret_pre_w - vis_w, 0, caret_full_w - vis_w);
     };
     const text_x = bounds.x + pad - xoff;
@@ -564,7 +608,10 @@ fn textAreaInner(
             if (fm.pressed_pos) |pp| {
                 const vline = lineAtY(pp.y, text_top, line_h, nlines0);
                 const seg = visualLineAt(buffer, len.*, wrap_cols, vline);
-                const col = colAtX(font, buffer[seg.start..seg.end], pp.x - text_x);
+                const col = switch (source) {
+                    .metrics => |m| colAtX(m, buffer[seg.start..seg.end], pp.x - text_x),
+                    .atlas => layout.offsetAtX(buffer[seg.start..seg.end], pp.x - text_x),
+                };
                 const at = @min(seg.start + col, len.*);
                 cursor.* = at;
                 anchor.* = at;
@@ -578,7 +625,10 @@ fn textAreaInner(
         if (ctx.mouse_pos) |mp| {
             const vline = lineAtY(mp.y, text_top, line_h, nlines0);
             const seg = visualLineAt(buffer, len.*, wrap_cols, vline);
-            const col = colAtX(font, buffer[seg.start..seg.end], mp.x - text_x);
+            const col = switch (source) {
+                .metrics => |m| colAtX(m, buffer[seg.start..seg.end], mp.x - text_x),
+                .atlas => layout.offsetAtX(buffer[seg.start..seg.end], mp.x - text_x),
+            };
             cursor.* = @min(seg.start + col, len.*);
             moved = true;
         }
@@ -916,7 +966,7 @@ fn textAreaInner(
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
-    try drawTextAreaContent(ctx, buffer, len.*, cursor.*, anchor.*, res.selected, res.focused, bounds, scroll_y.*, text_top, text_x, line_h, wrap_cols, font, style, comp);
+    try drawTextAreaContent(ctx, buffer, len.*, cursor.*, anchor.*, res.selected, res.focused, bounds, scroll_y.*, text_top, text_x, line_h, wrap_cols, source, style, comp);
     ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = .{}, .null_rect = true } }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
@@ -939,7 +989,7 @@ fn drawTextAreaContent(
     text_x: f32,
     line_h: f32,
     wrap_cols: usize,
-    font: metrics_mod.FontMetrics,
+    source: layout_mod.Source,
     style: style_mod.TextInputStyle,
     comp: ?*Composition,
 ) context_mod.ContextError!void {
@@ -966,12 +1016,12 @@ fn drawTextAreaContent(
             const s = @max(lo, ls);
             const e = @min(hi, le);
             if (s < e) {
-                const m0 = metrics_mod.measure(buffer[ls..s], font) catch return error.InvalidArgument;
-                const m1 = metrics_mod.measure(buffer[ls..e], font) catch return error.InvalidArgument;
+                const m0 = advanceOf(source, buffer[ls..s]);
+                const m1 = advanceOf(source, buffer[ls..e]);
                 ctx.draw.rectFilled(ctx.allocator, .{
-                    .x = text_x + m0.width,
+                    .x = text_x + m0,
                     .y = y,
-                    .w = @max(0, m1.width - m0.width),
+                    .w = @max(0, m1 - m0),
                     .h = line_h,
                 }, style.selection) catch |err| switch (err) {
                     error.OutOfMemory => return error.OutOfMemory,
@@ -981,29 +1031,51 @@ fn drawTextAreaContent(
         }
 
         if (le > ls) {
-            ctx.pushText(
-                .{ .x = text_x, .y = y },
-                style.text,
-                font,
-                buffer[ls..le],
-            ) catch |err| switch (err) {
-                error.OutOfMemory => return error.OutOfMemory,
-                error.InvalidCommand => return error.InvalidCommand,
-                error.InvalidUtf8 => return error.InvalidArgument,
-                error.InvalidMetrics => return error.InvalidArgument,
-            };
+            switch (source) {
+                .metrics => |m| {
+                    ctx.pushText(
+                        .{ .x = text_x, .y = y },
+                        style.text,
+                        m,
+                        buffer[ls..le],
+                    ) catch |err| switch (err) {
+                        error.OutOfMemory => return error.OutOfMemory,
+                        error.InvalidCommand => return error.InvalidCommand,
+                        error.InvalidUtf8 => return error.InvalidArgument,
+                        error.InvalidMetrics => return error.InvalidArgument,
+                    };
+                },
+                .atlas => |a| {
+                    // A linha de base fica na ascente do atlas.
+                    const baseline = types.Vec2.init(text_x, y + a.ascent());
+                    atlas_mod.drawRun(&ctx.draw, ctx.allocator, a, buffer[ls..le], baseline, style.text) catch |err| switch (err) {
+                        error.OutOfMemory => return error.OutOfMemory,
+                        error.InvalidUtf8 => return error.InvalidArgument,
+                        error.InvalidMetrics => return error.InvalidArgument,
+                        error.InvalidGlyph => return error.InvalidArgument,
+                        error.DuplicateGlyph => return error.InvalidArgument,
+                        error.AtlasFull => return error.InvalidArgument,
+                        error.InvalidCommand => return error.InvalidCommand,
+                    };
+                },
+            }
         }
     }
 
     if (focused and vis_w > 0) {
         const vp = visualPosOf(buffer, len, wrap_cols, @min(cursor, len));
-        // `advance` é uniforme: a coluna visual (codepoints) dá o x exato.
-        var cx = text_x + @as(f32, @floatFromInt(vp.col)) * font.advance;
+        // No fallback o `advance` é uniforme: a coluna visual (codepoints)
+        // dá o x exato. Com atlas, o x vem do AVANÇO REAL do prefixo.
+        var cx = switch (source) {
+            .metrics => |m| text_x + @as(f32, @floatFromInt(vp.col)) * m.advance,
+            .atlas => text_x + advanceOf(source, buffer[vp.start..@min(cursor, len)]),
+        };
         const cy = text_top + @as(f32, @floatFromInt(vp.index)) * line_h - scroll_y;
         // Pré-edit do IME (M131): desenhado na posição do caret, com
         // sublinhado; durante a composição o caret fica dentro dele.
         if (comp) |c| {
             if (c.active and c.len > 0) {
+                const font = metricsOf(source);
                 const pre = c.preedit();
                 const m_pre = metrics_mod.measure(pre, font) catch return error.InvalidArgument;
                 const m_cur = metrics_mod.measure(pre[0..c.cursor], font) catch return error.InvalidArgument;
@@ -1991,5 +2063,108 @@ test "textAreaIme compõe, desenha o pré-edit e confirma (M131)" {
     try stdt.testing.expectEqual(@as(usize, 2), cursor);
     try stdt.testing.expect(!comp.active);
     try stdt.testing.expect(!comp.committed);
+    ctx.endFrame();
+}
+
+test "textAreaAtlas usa os avanços reais do atlas (M149)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 60);
+    const id = id_mod.Id.fromString("test:ta-atlas");
+
+    // 'A' = 5, 'B' = 3 ⇒ "AB" mede 8 (o fallback monospace daria 12).
+    var b = atlas_mod.Builder.init(32, 32, 1);
+    defer b.deinit(gpa);
+    _ = try b.addGlyph(gpa, 'A', 4, 8, .{ .advance = 5, .bearing_y = -8, .height = 8 });
+    _ = try b.addGlyph(gpa, 'B', 4, 8, .{ .advance = 3, .bearing_y = -8, .height = 8 });
+    var bytes: [32 * 32 * 4]u8 = undefined;
+    for (&bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = try image_mod.Image.init(32, 32, &bytes);
+    var atlas = try b.finish(gpa, img);
+    defer atlas.deinit(gpa);
+
+    var buf: [32]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+
+    // Digita "AB": a edição é independente da fonte.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{
+        .button = .left,
+        .pressed = true,
+        .pos = types.Vec2.init(6, 10),
+    } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'B' } });
+    const r = try textAreaAtlas(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &atlas, style);
+    try stdt.testing.expect(r.focused and r.changed);
+    try stdt.testing.expectEqual(@as(usize, 2), len);
+    try stdt.testing.expectEqualStrings("AB", buf[0..len]);
+
+    // A linha vira um run de glifos (um comando).
+    var runs: usize = 0;
+    var texts: usize = 0;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .glyph_run) runs += 1;
+        if (cmd == .text) texts += 1;
+    }
+    try stdt.testing.expectEqual(@as(usize, 1), runs);
+    try stdt.testing.expectEqual(@as(usize, 0), texts);
+    ctx.endFrame();
+
+    // O caret fica no fim do texto: x = 4 (padding) + 8 (avanços reais).
+    ctx.beginFrame();
+    _ = try textAreaAtlas(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &atlas, style);
+    var caret_x: f32 = -1;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .line) caret_x = cmd.line.p0.x;
+    }
+    try stdt.testing.expectEqual(@as(f32, 4 + 8), caret_x);
+    ctx.endFrame();
+
+    // Clique: o caret vai para o byte 1 (x=6 cai em "B": A ocupa 0..5).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{
+        .button = .left,
+        .pressed = true,
+        .pos = types.Vec2.init(4 + 6, 10),
+    } });
+    _ = try textAreaAtlas(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &atlas, style);
+    try stdt.testing.expectEqual(@as(usize, 1), cursor);
+    ctx.endFrame();
+
+    // Contratos: atlas vazio e id nulo.
+    ctx.beginFrame();
+    var empty_atlas = atlas;
+    empty_atlas.glyphs = &.{};
+    try stdt.testing.expectError(error.InvalidArgument, textAreaAtlas(
+        &ctx,
+        id,
+        bounds,
+        &buf,
+        &len,
+        &cursor,
+        &anchor,
+        &scroll,
+        &empty_atlas,
+        style,
+    ));
+    try stdt.testing.expectError(error.InvalidArgument, textAreaAtlas(
+        &ctx,
+        .null,
+        bounds,
+        &buf,
+        &len,
+        &cursor,
+        &anchor,
+        &scroll,
+        &atlas,
+        style,
+    ));
     ctx.endFrame();
 }
