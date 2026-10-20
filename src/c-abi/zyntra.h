@@ -85,6 +85,19 @@ ZyntraResult zyntra_context_begin_frame(ZyntraContext *handle);
 ZyntraResult zyntra_context_end_frame(ZyntraContext *handle);
 ZyntraResult zyntra_context_frame_index(ZyntraContext *handle, uint64_t *out_index);
 ZyntraResult zyntra_context_set_viewport(ZyntraContext *handle, ZyntraRect viewport);
+/* Escala DPI: pixels de dispositivo por pixel lógico (1 = 100%). */
+ZyntraResult zyntra_context_set_scale(ZyntraContext *handle, float factor);
+ZyntraResult zyntra_context_get_scale(ZyntraContext *handle, float *out_factor);
+ZyntraResult zyntra_context_set_device_viewport(ZyntraContext *handle,
+    ZyntraRect device_rect);
+/* Mouse em pixels de DISPOSITIVO (convertido pela escala vigente). */
+ZyntraResult zyntra_context_push_device_mouse_move(ZyntraContext *handle,
+    ZyntraVec2 pos);
+ZyntraResult zyntra_context_push_device_mouse_button(ZyntraContext *handle,
+    uint8_t button, bool pressed, ZyntraVec2 pos);
+ZyntraResult zyntra_context_push_device_mouse_wheel(ZyntraContext *handle,
+    float dx, float dy, ZyntraVec2 pos);
+
 ZyntraResult zyntra_context_push_mouse_move(ZyntraContext *handle, ZyntraVec2 pos);
 ZyntraResult zyntra_context_push_mouse_button(ZyntraContext *handle, uint8_t button, bool pressed, ZyntraVec2 pos);
 /* Roda: `dx`/`dy` em unidades de linha (o widget multiplica pela velocidade).
@@ -147,6 +160,15 @@ ZyntraResult zyntra_draw_rect_outline(ZyntraContext *handle, ZyntraRect rect, Zy
 ZyntraResult zyntra_draw_line(ZyntraContext *handle, ZyntraVec2 p0, ZyntraVec2 p1,
     ZyntraColor color, float thickness);
 /* Reta tracejada: dash_len px de traço alternando com gap_len px de vazio. */
+/* Imagem RGBA8: pixels emprestados, `stride` em bytes, `tint` modula. */
+ZyntraResult zyntra_draw_image(ZyntraContext *handle, ZyntraRect rect,
+    const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t stride,
+    ZyntraColor tint);
+ZyntraResult zyntra_draw_image_region(ZyntraContext *handle, ZyntraRect rect,
+    const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t stride,
+    uint32_t src_x, uint32_t src_y, uint32_t src_w, uint32_t src_h,
+    ZyntraColor tint);
+
 ZyntraResult zyntra_draw_line_dashed(ZyntraContext *handle, ZyntraVec2 p0, ZyntraVec2 p1,
     ZyntraColor color, float thickness, float dash_len, float gap_len);
 ZyntraResult zyntra_draw_circle_filled(ZyntraContext *handle, ZyntraVec2 center, float radius,

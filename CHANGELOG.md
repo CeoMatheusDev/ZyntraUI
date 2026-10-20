@@ -58,6 +58,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   geometria pura: o chamador passa os itens e recebe um rect por filho no
   slice de saída (sem alocação e sem estado global).
 
+- `c-abi`: **imagem e escala DPI na fronteira C** (M129, aditivo) —
+  `zyntra_draw_image`/`zyntra_draw_image_region` desenham imagens RGBA8
+  (pixels emprestados, `stride` explícito) com `tint` e recorte na origem
+  (sprites/atlas); `zyntra_context_set_scale`/`_get_scale` controlam a
+  escala DPI (pixels de dispositivo por pixel lógico),
+  `zyntra_context_set_device_viewport` converte o viewport e
+  `zyntra_context_push_device_mouse_move`/`_mouse_button`/`_mouse_wheel`
+  enfileiram entrada em pixels de dispositivo. O consumidor C ganhou os
+  frames de imagem (com checagem de pixel no framebuffer) e de escala.
+
 ## [1.35.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a fronteira C avança de forma substancial e

@@ -3451,6 +3451,77 @@ int main(void) {
         c122_color = (ac.r == 10 && ac.a == 40);
     }
 
+    /* Imagem RGBA8 e escala DPI (M129). */
+    int c129_image = 0, c129_dpi = 0;
+    {
+        const uint8_t pixels[16] = {
+            255, 0, 0, 255, 0, 255, 0, 255,
+            0, 0, 255, 255, 255, 255, 255, 255,
+        };
+        const ZyntraColor white = {255, 255, 255, 255};
+
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_image(ctx, (ZyntraRect){0, 0, 2, 2}, pixels, 2, 2, 8,
+            white));
+        CHECK(zyntra_draw_image_region(ctx, (ZyntraRect){4, 4, 1, 1}, pixels, 2,
+            2, 8, 1, 1, 1, 1, white));
+        size_t n_draw = 0;
+        CHECK(zyntra_draw_count(ctx, &n_draw));
+        assert(n_draw == 2);
+        assert(zyntra_draw_image(ctx, (ZyntraRect){0, 0, 2, 2}, NULL, 2, 2, 8,
+            white) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_draw_image(ctx, (ZyntraRect){0, 0, 2, 2}, pixels, 0, 2, 8,
+            white) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_draw_image(ctx, (ZyntraRect){0, 0, 2, 2}, pixels, 2, 2, 4,
+            white) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_draw_image_region(ctx, (ZyntraRect){0, 0, 1, 1}, pixels,
+            2, 2, 8, 2, 0, 1, 1, white) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_draw_image(NULL, (ZyntraRect){0, 0, 2, 2}, pixels, 2, 2, 8,
+            white) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_draw_count(ctx, &n_draw));
+        assert(n_draw == 2);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* A imagem chega ao rasterizador com o pixel exato. */
+        ZyntraFramebuffer *fbimg = NULL;
+        CHECK(zyntra_framebuffer_create(4, 4, &fbimg));
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_image(ctx, (ZyntraRect){0, 0, 2, 2}, pixels, 2, 2, 8,
+            white));
+        CHECK(zyntra_framebuffer_render(fbimg, ctx, NULL));
+        ZyntraColor px = {0, 0, 0, 0};
+        CHECK(zyntra_framebuffer_pixel(fbimg, 0, 0, &px));
+        assert(px.r == 255 && px.g == 0 && px.b == 0);
+        CHECK(zyntra_framebuffer_pixel(fbimg, 1, 0, &px));
+        assert(px.g == 255);
+        CHECK(zyntra_context_end_frame(ctx));
+        zyntra_framebuffer_destroy(fbimg);
+        c129_image = (px.g == 255);
+
+        /* Escala DPI: fator, viewport de dispositivo e mouse em device px. */
+        CHECK(zyntra_context_set_scale(ctx, 2.0f));
+        float factor = 0.0f;
+        CHECK(zyntra_context_get_scale(ctx, &factor));
+        assert(factor == 2.0f);
+        assert(zyntra_context_set_scale(ctx, 0.0f) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_context_set_scale(ctx, -1.0f) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_context_get_scale(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_context_get_scale(ctx, &factor));
+        assert(factor == 2.0f);
+        CHECK(zyntra_context_set_device_viewport(ctx,
+            (ZyntraRect){0, 0, 400, 400}));
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_device_mouse_move(ctx, (ZyntraVec2){100, 50}));
+        CHECK(zyntra_context_push_device_mouse_button(ctx, 0, true,
+            (ZyntraVec2){20, 30}));
+        CHECK(zyntra_context_push_device_mouse_wheel(ctx, 0.0f, -2.0f,
+            (ZyntraVec2){10, 10}));
+        assert(zyntra_context_push_device_mouse_button(ctx, 9, true,
+            (ZyntraVec2){0, 0}) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_context_end_frame(ctx));
+        c129_dpi = (factor == 2.0f);
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -3524,6 +3595,7 @@ int main(void) {
         c121_choice, c121_scroll);
     printf("C-ABI anim ease=%d tween=%d timer=%d color=%d\n",
         c122_ease, c122_tween, c122_timer, c122_color);
+    printf("C-ABI imagem px=%d dpi=%d\n", c129_image, c129_dpi);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

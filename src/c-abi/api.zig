@@ -60,6 +60,9 @@ const timeline_mod = @import("../timeline/view.zig");
 const inspector_view_mod = @import("../widgets/inspector_view.zig");
 const inspector_mod = @import("../inspector/view.zig");
 const anim_mod = @import("../anim/anim.zig");
+const commands_mod = @import("../draw/commands.zig");
+const image_mod = @import("../draw/image.zig");
+const scale_mod = @import("../core/scale.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -108,6 +111,72 @@ fn fromRect(r: types_mod.Rect) ct.ZyntraRect {
 
 fn cStr(s: []const u8) ct.ZyntraStr {
     return .{ .ptr = if (s.len == 0) null else s.ptr, .len = s.len };
+}
+
+/// Desenha uma imagem RGBA8 (pixels emprestados do chamador) em `rect`.
+/// `stride` é a distância em bytes entre linhas; `tint` modula RGBA.
+/// Os pixels precisam viver até o backend consumir o frame.
+pub export fn zyntra_draw_image(
+    handle: ?*ZyntraContext,
+    rect: ct.ZyntraRect,
+    pixels: ?[*]const u8,
+    width: u32,
+    height: u32,
+    stride: u32,
+    tint: ct.ZyntraColor,
+) callconv(.c) ct.ZyntraResult {
+    return drawImageRegion(handle, rect, pixels, width, height, stride, 0, 0, width, height, tint);
+}
+
+/// Desenha uma região inteira da imagem (sprite/atlas) em `rect`.
+pub export fn zyntra_draw_image_region(
+    handle: ?*ZyntraContext,
+    rect: ct.ZyntraRect,
+    pixels: ?[*]const u8,
+    width: u32,
+    height: u32,
+    stride: u32,
+    src_x: u32,
+    src_y: u32,
+    src_w: u32,
+    src_h: u32,
+    tint: ct.ZyntraColor,
+) callconv(.c) ct.ZyntraResult {
+    return drawImageRegion(handle, rect, pixels, width, height, stride, src_x, src_y, src_w, src_h, tint);
+}
+
+fn drawImageRegion(
+    handle: ?*ZyntraContext,
+    rect: ct.ZyntraRect,
+    pixels: ?[*]const u8,
+    width: u32,
+    height: u32,
+    stride: u32,
+    src_x: u32,
+    src_y: u32,
+    src_w: u32,
+    src_h: u32,
+    tint: ct.ZyntraColor,
+) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const px = pixels orelse return .invalid_argument;
+    if (width == 0 or height == 0) return .invalid_argument;
+    const row_bytes = @as(u64, width) * image_mod.bytes_per_pixel;
+    if (row_bytes > std.math.maxInt(u32)) return .invalid_argument;
+    if (@as(u64, stride) < row_bytes) return .invalid_argument;
+    const region = image_mod.Region.init(src_x, src_y, src_w, src_h);
+    if (!region.isValidFor(width, height)) return .invalid_argument;
+    const ctx = toCtx(h);
+    const cmd = commands_mod.DrawCommand{ .image = .{
+        .rect = toRect(rect),
+        .src = region,
+        .pixels = px,
+        .width = width,
+        .height = height,
+        .stride = stride,
+        .tint = toColor(tint),
+    } };
+    return pushDraw(ctx.draw.push(ctx.allocator, cmd));
 }
 
 /// Erros possíveis ao enfileirar um comando na `DrawList`.
@@ -549,6 +618,93 @@ pub export fn zyntra_context_frame_index(handle: ?*ZyntraContext, out_index: ?*u
 pub export fn zyntra_context_set_viewport(handle: ?*ZyntraContext, viewport: ct.ZyntraRect) callconv(.c) ct.ZyntraResult {
     const h = checkHandle(handle) catch return .invalid_argument;
     toCtx(h).setViewport(.{ .x = viewport.x, .y = viewport.y, .w = viewport.w, .h = viewport.h }) catch |err| {
+        return mapErr(err);
+    };
+    return .ok;
+}
+
+/// Define a escala DPI da superfície: pixels de dispositivo por pixel
+/// lógico (1 = 100%, 2 = 200%). Fator precisa ser finito e > 0.
+pub export fn zyntra_context_set_scale(handle: ?*ZyntraContext, factor: f32) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    if (!std.math.isFinite(factor) or factor <= 0) return .invalid_argument;
+    toCtx(h).setScale(.{ .factor = factor }) catch |err| {
+        return mapErr(err);
+    };
+    return .ok;
+}
+
+/// Lê a escala DPI vigente.
+pub export fn zyntra_context_get_scale(handle: ?*ZyntraContext, out_factor: ?*f32) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_factor orelse return .invalid_argument;
+    out.* = toCtx(h).scale.factor;
+    return .ok;
+}
+
+/// Define o viewport a partir de um rect em pixels de DISPOSITIVO
+/// (convertido para pixels lógicos pela escala vigente).
+pub export fn zyntra_context_set_device_viewport(
+    handle: ?*ZyntraContext,
+    device_rect: ct.ZyntraRect,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    toCtx(h).setDeviceViewport(toRect(device_rect)) catch |err| {
+        return mapErr(err);
+    };
+    return .ok;
+}
+
+/// Movimento do mouse em pixels de DISPOSITIVO (convertido para
+/// lógicos pela escala vigente).
+pub export fn zyntra_context_push_device_mouse_move(
+    handle: ?*ZyntraContext,
+    pos: ct.ZyntraVec2,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    toCtx(h).pushDeviceEvent(.{ .mouse_move = .{ .pos = toVec2(pos) } }) catch |err| {
+        return mapErr(err);
+    };
+    return .ok;
+}
+
+/// Botão do mouse em pixels de DISPOSITIVO.
+pub export fn zyntra_context_push_device_mouse_button(
+    handle: ?*ZyntraContext,
+    button: u8,
+    pressed: bool,
+    pos: ct.ZyntraVec2,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const btn: event_mod.MouseButton = switch (button) {
+        0 => .left,
+        1 => .right,
+        2 => .middle,
+        else => return .invalid_argument,
+    };
+    toCtx(h).pushDeviceEvent(.{ .mouse_button = .{
+        .button = btn,
+        .pressed = pressed,
+        .pos = toVec2(pos),
+    } }) catch |err| {
+        return mapErr(err);
+    };
+    return .ok;
+}
+
+/// Roda do mouse em pixels de DISPOSITIVO.
+pub export fn zyntra_context_push_device_mouse_wheel(
+    handle: ?*ZyntraContext,
+    dx: f32,
+    dy: f32,
+    pos: ct.ZyntraVec2,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    toCtx(h).pushDeviceEvent(.{ .mouse_wheel = .{
+        .dx = dx,
+        .dy = dy,
+        .pos = toVec2(pos),
+    } }) catch |err| {
         return mapErr(err);
     };
     return .ok;
@@ -6741,4 +6897,129 @@ test "C-ABI animação M122: easing, tween, timer e cor" {
     try eq(@as(u8, 10), col.r);
     try eq(@as(u8, 40), col.a);
     try eq(bad, zyntra_anim_lerp_color(.{}, .{}, 0.5, null));
+}
+
+test "C-ABI M129: imagem RGBA8 e escala DPI" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(ok, zyntra_context_create(.{
+        .x = 0,
+        .y = 0,
+        .w = 200,
+        .h = 200,
+    }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    // Imagem 2x2: vermelho, verde / azul, branco.
+    const pixels = [16]u8{
+        255, 0, 0,   255, 0,   255, 0,   255,
+        0,   0, 255, 255, 255, 255, 255, 255,
+    };
+    const white = ct.ZyntraColor{ .r = 255, .g = 255, .b = 255, .a = 255 };
+
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_draw_image(
+        handle,
+        .{ .x = 0, .y = 0, .w = 2, .h = 2 },
+        &pixels,
+        2,
+        2,
+        8,
+        white,
+    ));
+    // Região de origem (sprite).
+    try stdt.testing.expectEqual(ok, zyntra_draw_image_region(
+        handle,
+        .{ .x = 4, .y = 4, .w = 1, .h = 1 },
+        &pixels,
+        2,
+        2,
+        8,
+        1,
+        1,
+        1,
+        1,
+        white,
+    ));
+    var n_draw: usize = 0;
+    try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expectEqual(@as(usize, 2), n_draw);
+
+    // Inválidos: pixels nulos, dimensões zero, stride curto, região fora.
+    try stdt.testing.expectEqual(bad, zyntra_draw_image(handle, .{}, null, 2, 2, 8, white));
+    try stdt.testing.expectEqual(bad, zyntra_draw_image(handle, .{}, &pixels, 0, 2, 8, white));
+    try stdt.testing.expectEqual(bad, zyntra_draw_image(handle, .{}, &pixels, 2, 2, 4, white));
+    try stdt.testing.expectEqual(bad, zyntra_draw_image_region(handle, .{}, &pixels, 2, 2, 8, 2, 0, 1, 1, white));
+    try stdt.testing.expectEqual(bad, zyntra_draw_image_region(handle, .{}, &pixels, 2, 2, 8, 0, 0, 0, 1, white));
+    // Handle nulo nunca crasha.
+    try stdt.testing.expectEqual(bad, zyntra_draw_image(null, .{}, &pixels, 2, 2, 8, white));
+    // A contagem não mudou com as rejeições.
+    try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expectEqual(@as(usize, 2), n_draw);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // A imagem chega ao rasterizador (pixel exato).
+    var fb: ?*ZyntraFramebuffer = null;
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_create(4, 4, &fb));
+    defer zyntra_framebuffer_destroy(fb);
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_draw_image(
+        handle,
+        .{ .x = 0, .y = 0, .w = 2, .h = 2 },
+        &pixels,
+        2,
+        2,
+        8,
+        white,
+    ));
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_render(fb, handle, null));
+    var px: ct.ZyntraColor = .{};
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_pixel(fb, 0, 0, &px));
+    try stdt.testing.expectEqual(@as(u8, 255), px.r);
+    try stdt.testing.expectEqual(@as(u8, 0), px.g);
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_pixel(fb, 1, 0, &px));
+    try stdt.testing.expectEqual(@as(u8, 255), px.g);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // Escala DPI: fator, viewport e mouse em pixels de dispositivo.
+    try stdt.testing.expectEqual(ok, zyntra_context_set_scale(handle, 2.0));
+    var factor: f32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_context_get_scale(handle, &factor));
+    try stdt.testing.expectEqual(@as(f32, 2.0), factor);
+    try stdt.testing.expectEqual(bad, zyntra_context_set_scale(handle, 0));
+    try stdt.testing.expectEqual(bad, zyntra_context_set_scale(handle, std.math.nan(f32)));
+    try stdt.testing.expectEqual(bad, zyntra_context_get_scale(handle, null));
+    // A escala inválida não alterou a vigente.
+    try stdt.testing.expectEqual(ok, zyntra_context_get_scale(handle, &factor));
+    try stdt.testing.expectEqual(@as(f32, 2.0), factor);
+    try stdt.testing.expectEqual(ok, zyntra_context_set_device_viewport(handle, .{
+        .x = 0,
+        .y = 0,
+        .w = 400,
+        .h = 400,
+    }));
+
+    // Mouse em pixels de dispositivo vira posição lógica: (100,50) ⇒ (50,25),
+    // que cai dentro do botão (0,0,100,30).
+    var bstyle: ct.ZyntraButtonStyle = undefined;
+    try stdt.testing.expectEqual(ok, zyntra_style_button(0, &bstyle));
+    var bres: ct.ZyntraButtonResult = .{};
+    const bid = zyntra_id_from_string("m129:btn", 7);
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_context_push_device_mouse_move(handle, .{ .x = 100, .y = 50 }));
+    try stdt.testing.expectEqual(ok, zyntra_widget_button(handle, bid, .{
+        .x = 0,
+        .y = 0,
+        .w = 100,
+        .h = 30,
+    }, &bstyle, &bres));
+    try stdt.testing.expect(bres.hovered);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // Botão inválido é recusado.
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(bad, zyntra_context_push_device_mouse_button(handle, 9, true, .{}));
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
 }

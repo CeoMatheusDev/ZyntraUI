@@ -824,6 +824,37 @@ zyntra_anim_lerp_color((ZyntraColor){0, 0, 0, 255},
   desconhecido, tween/timer inválido (duração ≤ 0/não-finita, `from`/`to`
   não-finitos, `elapsed` não-finito) ou `out_*` nulo.
 
+### Décimo quinto lote (M129): imagem RGBA8 e escala DPI
+
+```c
+const uint8_t pixels[16] = {255,0,0,255, 0,255,0,255,
+                             0,0,255,255, 255,255,255,255};
+zyntra_draw_image(ctx, (ZyntraRect){0, 0, 32, 32}, pixels, 2, 2, 8,
+    (ZyntraColor){255, 255, 255, 255});
+/* Sprite/atlas: recorta a região de origem (pixels inteiros). */
+zyntra_draw_image_region(ctx, (ZyntraRect){0, 0, 16, 16}, pixels, 2, 2, 8,
+    1, 0, 1, 1, (ZyntraColor){255, 255, 255, 255});
+```
+
+* Imagem RGBA8 não-premultiplicada, row-major: `pixels` é **emprestado**
+  (não copiado) e precisa viver até o backend consumir o frame; `stride` é
+  a distância em bytes entre linhas; `tint` modula RGBA (branco opaco =
+  identidade). O backend de referência amostra com bilinear em alfa
+  pré-multiplicado, respeitando clip e culling.
+* `zyntra_draw_image_region` recorta na **origem** (região inteira de
+  pixels) — o mesmo mecanismo de sprites e atlas de glifos.
+* Escala DPI: `zyntra_context_set_scale(ctx, factor)` define pixels de
+  dispositivo por pixel lógico (1 = 100%, 2 = 200%);
+  `zyntra_context_get_scale` devolve o fator vigente;
+  `zyntra_context_set_device_viewport` converte um rect de dispositivo
+  para o viewport lógico. `zyntra_context_push_device_mouse_move`/
+  `_mouse_button`/`_mouse_wheel` enfileiram entrada em pixels de
+  dispositivo, convertida para pixels lógicos.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle nulo, `pixels` nulo,
+  `width`/`height` zero, `stride` menor que `width * 4`, região de
+  origem fora da imagem, fator de escala não-finito/≤ 0, ponteiro de
+  saída nulo e botão de mouse desconhecido.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -895,6 +926,8 @@ zyntra_anim_lerp_color((ZyntraColor){0, 0, 0, 255},
   `ZyntraInspectorKind` (0..4, mesmos valores de `inspector.Kind`).
 * M122: também travados `ZyntraTween=16`, `ZyntraAnimTimer=12` e o enum
   `ZyntraEase` (0..6, mesmos valores de `anim.Ease`).
+* M129: sem novos structs — a imagem e a escala DPI usam só parâmetros
+  escalares e o buffer do chamador (nenhuma trava de layout nova).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -915,5 +948,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..." + "C-ABI inspector ..." + "C-ABI anim ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..." + "C-ABI inspector ..." + "C-ABI anim ..." + "C-ABI imagem ..."
 ```
