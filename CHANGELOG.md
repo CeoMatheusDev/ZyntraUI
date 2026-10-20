@@ -5,6 +5,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.36.0] - 2026-10-20
+
+MINOR estável, 100% compatível: a base de UI ganha **imagens** (RGBA8 nos
+draw commands + widget com modos de ajuste), **atlas de glifos**, **escala
+DPI**, **composição de IME** (campo e área de texto) e **layout flex**; a
+fronteira C acompanha o essencial (imagem, escala DPI, IME). Nada que já
+existia mudou de assinatura ou layout.
+
 ### Adicionado
 
 - `draw`: **imagens RGBA8 nos draw commands** (M123, aditivo) — novo tipo
