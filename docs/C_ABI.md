@@ -1041,6 +1041,34 @@ zyntra_draw_svg_path(ctx, (const uint8_t *)svg, (uint32_t)strlen(svg),
   espessura negativa ou não-finita, modo desconhecido e path SVG
   inválido.
 
+### Vinteésimo lote (M163): ícone vetorial
+
+```c
+/* A caixa do path SVG: o app encaixa o ícone no rect. */
+float x, y, w, h;
+zyntra_svg_path_bounds((const uint8_t *)"M 0 0 L 10 0 L 10 10 Z", 21,
+    &x, &y, &w, &h);
+
+/* Desenha o ícone já escalado/deslocado (fator 2, offset (4,4)). */
+zyntra_draw_svg_path_transformed(ctx, (const uint8_t *)svg, svg_len,
+    (ZyntraColor){200, 120, 240, 255}, 0.0f, 0, 1, 0,
+    2.0f, 4.0f, 4.0f);
+```
+
+* `zyntra_svg_path_bounds` devolve a caixa (bbox) do path SVG — com ela
+  o app calcula o mesmo encaixe do modo `contain` da API Zig
+  (`widgets.icon.fitTransform`): escala = `min(rect.w / w,
+  rect.h / h)` e o deslocamento centraliza o ícone.
+* `zyntra_draw_svg_path_transformed` desenha o path já transformado
+  (escala uniforme + deslocamento) — é o caminho que o widget de ícone
+  usa por baixo.
+* O path SVG é analisado e achatado a CADA chamada (a fronteira C não
+  tem cache do app): para muitos ícones, o app guarda o path já
+  transformado ou usa `zyntra_draw_path` com os pontos prontos.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: ponteiros nulos, `svg_len` zero,
+  path SVG inválido, fator não-positivo ou não-finito e deslocamento
+  não-finito.
+
 ## Ownership de atlas e fontes de bitmap
 
 * `ZyntraFontAtlas` é um handle **opaco**: a imagem do atlas e os seus
@@ -1221,6 +1249,7 @@ zyntra_draw_rect_outline
 zyntra_draw_rect_rounded
 zyntra_draw_rect_shadow
 zyntra_draw_svg_path
+zyntra_draw_svg_path_transformed
 zyntra_draw_text
 ```
 
@@ -1421,6 +1450,12 @@ zyntra_tween_value_at
 
 ```c
 zyntra_popup_place
+```
+
+### Caminhos vetoriais (SVG)
+
+```c
+zyntra_svg_path_bounds
 ```
 
 ### Outros

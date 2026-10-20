@@ -801,6 +801,49 @@ pub const DrawList = struct {
         } });
     }
 
+    /// Enfileira um caminho vetorial TRANSFORMADO (escala uniforme +
+    /// deslocamento): os pontos são transformados na cópia.
+    ///
+    /// É o que o widget de ícone usa para caber o caminho no rect.
+    pub fn pathTransformed(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        flat: path_mod.Flat,
+        color: types.Color,
+        thickness: f32,
+        rule: path_mod.FillRule,
+        join: path_mod.StrokeJoin,
+        cap: path_mod.StrokeCap,
+        factor: f32,
+        dx: f32,
+        dy: f32,
+    ) !void {
+        if (!std.math.isFinite(thickness) or thickness < 0) return error.InvalidCommand;
+        if (!std.math.isFinite(factor) or factor <= 0) return error.InvalidCommand;
+        if (!std.math.isFinite(dx) or !std.math.isFinite(dy)) return error.InvalidCommand;
+        for (flat.points) |p| {
+            if (!std.math.isFinite(p.x) or !std.math.isFinite(p.y)) return error.InvalidCommand;
+        }
+        const ptrs = try self.allocPath(gpa, flat.points, flat.contours, dx, dy, factor);
+        try self.push(gpa, .{ .path = .{
+            .points = ptrs.points,
+            .contours = ptrs.contours,
+            .point_count = @intCast(flat.points.len),
+            .contour_count = @intCast(flat.contours.len),
+            .color = color,
+            .thickness = thickness,
+            .rule = rule,
+            .join = join,
+            .cap = cap,
+            .bounds = .{
+                .x = flat.bounds().x * factor + dx,
+                .y = flat.bounds().y * factor + dy,
+                .w = flat.bounds().w * factor,
+                .h = flat.bounds().h * factor,
+            },
+        } });
+    }
+
     /// Pontos e contornos de um comando de caminho (vazio se não for).
     pub fn pathOf(self: *const Self, cmd: DrawCommand) path_mod.Flat {
         _ = self;

@@ -96,6 +96,7 @@ pub const window = struct {
 };
 
 pub const widgets = struct {
+    pub const icon = @import("widgets/icon.zig");
     pub const button = @import("widgets/button.zig");
     pub const checkbox = @import("widgets/checkbox.zig");
     pub const label = @import("widgets/label.zig");
@@ -357,6 +358,7 @@ test {
     _ = @import("draw/image.zig");
     _ = @import("draw/path.zig");
     _ = @import("draw/svg.zig");
+    _ = @import("widgets/icon.zig");
     _ = @import("software/path_fill.zig");
     _ = @import("draw/stats.zig");
     _ = @import("layout/layout.zig");

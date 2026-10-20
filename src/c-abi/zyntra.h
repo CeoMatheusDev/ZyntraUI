@@ -333,6 +333,17 @@ ZyntraResult zyntra_draw_svg_path(ZyntraContext *ctx, const uint8_t *svg,
     uint32_t svg_len, ZyntraColor color, float thickness, int32_t rule,
     int32_t join, int32_t cap);
 
+/* Desenha um path SVG TRANSFORMADO (escala uniforme `factor` +
+ * deslocamento (`dx`, `dy`)) — o app encaixa o ícone no rect. */
+ZyntraResult zyntra_draw_svg_path_transformed(ZyntraContext *ctx,
+    const uint8_t *svg, uint32_t svg_len, ZyntraColor color, float thickness,
+    int32_t rule, int32_t join, int32_t cap, float factor, float dx, float dy);
+
+/* A caixa (bbox) do path SVG: o app usa para encaixar o ícone no rect
+ * (a mesma conta do modo `contain`). */
+ZyntraResult zyntra_svg_path_bounds(const uint8_t *svg, uint32_t svg_len,
+    float *out_x, float *out_y, float *out_w, float *out_h);
+
 /* Widgets (M107): primeira superfície C. Os estilos são os mesmos `extern
  * struct` da API Zig (uma definição só por widget; as travas de layout em
  * src/c-abi/types.zig falham o build se mudarem). `ZyntraId` é o `u64`

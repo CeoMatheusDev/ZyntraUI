@@ -85,13 +85,25 @@ pub fn main() !void {
     const hole = fb.get(140, 60);
     std.debug.assert(hole[0] < 40);
 
-    // 4) Um ícone desenhado com curvas entra na UI.
+    // 4) Um ícone (path SVG) entra na UI pelo WIDGET de ícone: o cache
+    //    analisa o SVG uma vez e o widget encaixa o caminho no rect.
     var ctx = try zyntra_ui.Context.init(allocator, .{
         .viewport = zyntra_ui.Rect.init(0, 0, WIDTH, HEIGHT),
     });
     defer ctx.deinit();
     ctx.beginFrame();
 
+    var icons = zyntra_ui.widgets.icon.Cache.init(allocator);
+    defer icons.deinit();
+    const star = (try icons.get(icon_svg)).?;
+    try zyntra_ui.widgets.icon.drawIcon(
+        &ctx,
+        zyntra_ui.Rect.init(4, 4, 48, 48),
+        star,
+        .{ .fit = .contain, .color = zyntra_ui.Color.rgb(120, 220, 160) },
+    );
+
+    // Um ícone de curvas (círculo + retângulo arredondado).
     var icon_segs: [64]zyntra_ui.PathSegment = undefined;
     var icon = zyntra_ui.PathBuilder.init(&icon_segs);
     try icon.circle(.{ .x = 24, .y = 24 }, 18);
@@ -99,22 +111,24 @@ pub fn main() !void {
     var icon_points: [256]zyntra_ui.Vec2 = undefined;
     var icon_contours: [16]zyntra_ui.PathContourRange = undefined;
     const icon_flat = try zyntra_ui.draw.path.flatten(icon.segments(), 0.2, &icon_points, &icon_contours);
-    try ctx.draw.path(
-        allocator,
+    try zyntra_ui.widgets.icon.drawIcon(
+        &ctx,
+        zyntra_ui.Rect.init(60, 4, 48, 48),
         icon_flat,
-        zyntra_ui.Color.rgb(120, 220, 160),
-        0,
-        .nonzero,
-        .round,
-        .butt,
+        .{ .fit = .contain, .color = zyntra_ui.Color.rgb(120, 220, 160) },
     );
     const cmds = ctx.drawCommands().len;
     ctx.endFrame();
 
     std.debug.print(
-        "paths segments={d} points={d} contours={d} lit={d} drawn={d} cmds={d}\n",
-        .{ builder.len, flattened.pointCount(), flattened.contourCount(), lit, stats.drawn, cmds },
+        "paths segments={d} points={d} contours={d} lit={d} drawn={d} cmds={d} cached={d}\n",
+        .{
+            builder.len, flattened.pointCount(), flattened.contourCount(),
+            lit,         stats.drawn,            cmds,
+            icons.count,
+        },
     );
+    std.debug.assert(cmds == 2);
 }
 
 /// Conta os pixels que não são o fundo (o fundo é preto).

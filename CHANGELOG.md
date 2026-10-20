@@ -5,6 +5,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `widgets`/`c-abi`: **ícone vetorial** (M162–M163, aditivo) — o novo
+  `widgets.icon` desenha um caminho (já achatado ou vindo de um path
+  SVG) dentro de um rect, com modo de ajuste (contain/cover/stretch/
+  none) e cor; o `widgets.icon.Cache` guarda o caminho achatado de um
+  path SVG indexado pelo texto (o app possui o cache: o SVG é analisado
+  uma vez, não a cada frame). A fronteira C ganha
+  `zyntra_svg_path_bounds` (a caixa do path SVG) e
+  `zyntra_draw_svg_path_transformed` (o desenho com escala e
+  deslocamento). O exemplo `examples/paths.zig` usa o widget de ícone.
+
 ## [1.41.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a ZyntraUI ganha **caminhos vetoriais** —

@@ -37,12 +37,12 @@ Rather than tying UI logic to a window system or GPU API, ZyntraUI keeps those c
 
 ## Widgets
 
-ZyntraUI provides **33 widget modules**, organized around common interface needs (some modules expose more than one entry point, such as `label`/wrapped label or `separator`/labeled separator):
+ZyntraUI provides **34 widget modules**, organized around common interface needs (some modules expose more than one entry point, such as `label`/wrapped label or `separator`/labeled separator):
 
 | Category | Widgets |
 | --- | --- |
 | Input & selection | Button, checkbox, radio, switch, slider, text input, textarea, combo |
-| Views & navigation | Label, wrapped label, text block, image, list view, tree view, table, tab bar, scroll, splitter, menu, popup, modal, tooltip, node graph, timeline, property inspector |
+| Views & navigation | Label, wrapped label, text block, image, vector icon, list view, tree view, table, tab bar, scroll, splitter, menu, popup, modal, tooltip, node graph, timeline, property inspector |
 | Feedback | Progress, spinner, drag ghost |
 | Composition | Separator, labeled separator, toolbar, status bar, group box, panel, dock view |
 
