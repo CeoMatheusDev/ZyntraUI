@@ -5,6 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.37.0] - 2026-10-20
+
+MINOR estável, 100% compatível: a UI ganha **fonte real** — um atlas de
+glifos passa a ser a fonte dos widgets de texto (layout de texto, rótulo
+simples e multilinha, campo de texto editável e quebra de linha pela
+largura real dos glifos) — e a fronteira C acompanha com o handle
+`ZyntraFontAtlas`. Nada que já existia mudou de assinatura ou layout.
+
+### Adicionado
+
 - `text`: **layout de texto com fonte real ou fallback** (M132, aditivo) —
   `text.layout.Layout` mede e desenha com a MESMA fonte: as métricas de
   fallback (monospace) ou um `FontAtlas` (avanços reais, fonte
@@ -54,6 +64,7 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `zyntra_widget_label_atlas` (cada glifo vira um blit da sua região). O
   consumidor C ganhou o frame do atlas (medição + texto visível no
   framebuffer).
+
 
 ## [1.36.0] - 2026-10-20
 
