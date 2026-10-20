@@ -59,6 +59,7 @@ const timeline_view_mod = @import("../widgets/timeline_view.zig");
 const timeline_mod = @import("../timeline/view.zig");
 const inspector_view_mod = @import("../widgets/inspector_view.zig");
 const inspector_mod = @import("../inspector/view.zig");
+const anim_mod = @import("../anim/anim.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -3620,6 +3621,158 @@ pub export fn zyntra_widget_inspector_view(
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Animação: easing, tween, timer e cor (M122)
+// ---------------------------------------------------------------------------
+
+fn easeFromC(ease: i32) ?anim_mod.Ease {
+    return switch (ease) {
+        0 => .linear,
+        1 => .quad_in,
+        2 => .quad_out,
+        3 => .quad_in_out,
+        4 => .cubic_in,
+        5 => .cubic_out,
+        6 => .cubic_in_out,
+        else => null,
+    };
+}
+
+fn tweenFromC(t: ct.ZyntraTween) ?anim_mod.Tween {
+    const ease = easeFromC(t.ease) orelse return null;
+    const tw = anim_mod.Tween.init(t.from, t.to, t.duration, ease) catch return null;
+    return tw;
+}
+
+fn animTimerValid(t: ct.ZyntraAnimTimer) bool {
+    return std.math.isFinite(t.duration) and t.duration > 0 and
+        std.math.isFinite(t.elapsed);
+}
+
+/// Aplica uma curva de easing (0..1; entradas saturadas).
+pub export fn zyntra_ease_apply(
+    ease: i32,
+    t: f32,
+    out_value: ?*f32,
+) callconv(.c) ct.ZyntraResult {
+    const out = out_value orelse return .invalid_argument;
+    const e = easeFromC(ease) orelse return .invalid_argument;
+    out.* = e.apply(t);
+    return .ok;
+}
+
+/// Inicializa um tween (`duration` > 0 e finita; `ease` conhecido).
+pub export fn zyntra_tween_init(
+    out_tween: ?*ct.ZyntraTween,
+    from: f32,
+    to: f32,
+    duration: f32,
+    ease: i32,
+) callconv(.c) ct.ZyntraResult {
+    const out = out_tween orelse return .invalid_argument;
+    const e = easeFromC(ease) orelse return .invalid_argument;
+    const tw = anim_mod.Tween.init(from, to, duration, e) catch return .invalid_argument;
+    out.* = .{ .from = tw.from, .to = tw.to, .duration = tw.duration, .ease = ease };
+    return .ok;
+}
+
+/// Valor do tween em `elapsed` segundos (tempo saturado).
+pub export fn zyntra_tween_value_at(
+    tween: ?*const ct.ZyntraTween,
+    elapsed: f32,
+    out_value: ?*f32,
+) callconv(.c) ct.ZyntraResult {
+    const tw_c = tween orelse return .invalid_argument;
+    const out = out_value orelse return .invalid_argument;
+    const tw = tweenFromC(tw_c.*) orelse return .invalid_argument;
+    out.* = tw.valueAt(elapsed);
+    return .ok;
+}
+
+/// Indica se o tween terminou em `elapsed` segundos.
+pub export fn zyntra_tween_done_at(
+    tween: ?*const ct.ZyntraTween,
+    elapsed: f32,
+    out_done: ?*bool,
+) callconv(.c) ct.ZyntraResult {
+    const tw_c = tween orelse return .invalid_argument;
+    const out = out_done orelse return .invalid_argument;
+    const tw = tweenFromC(tw_c.*) orelse return .invalid_argument;
+    out.* = tw.doneAt(elapsed);
+    return .ok;
+}
+
+/// Inicializa um cronômetro (`duration` > 0 e finita).
+pub export fn zyntra_anim_timer_init(
+    out_timer: ?*ct.ZyntraAnimTimer,
+    duration: f32,
+    looping: bool,
+) callconv(.c) ct.ZyntraResult {
+    const out = out_timer orelse return .invalid_argument;
+    const tm = anim_mod.AnimTimer.init(duration, looping) catch return .invalid_argument;
+    out.* = .{ .duration = tm.duration, .elapsed = tm.elapsed, .looping = tm.looping };
+    return .ok;
+}
+
+/// Zera o tempo decorrido do cronômetro.
+pub export fn zyntra_anim_timer_reset(timer: ?*ct.ZyntraAnimTimer) callconv(.c) ct.ZyntraResult {
+    const t = timer orelse return .invalid_argument;
+    if (!animTimerValid(t.*)) return .invalid_argument;
+    t.elapsed = 0;
+    return .ok;
+}
+
+/// Avança o cronômetro; `dt` negativo/não-finito é ignorado (como na API Zig).
+pub export fn zyntra_anim_timer_tick(
+    timer: ?*ct.ZyntraAnimTimer,
+    dt: f32,
+) callconv(.c) ct.ZyntraResult {
+    const t = timer orelse return .invalid_argument;
+    if (!animTimerValid(t.*)) return .invalid_argument;
+    var tm = anim_mod.AnimTimer{ .duration = t.duration, .elapsed = t.elapsed, .looping = t.looping };
+    tm.tick(dt);
+    t.elapsed = tm.elapsed;
+    return .ok;
+}
+
+/// Progresso 0..1 (saturado quando não-looping).
+pub export fn zyntra_anim_timer_progress(
+    timer: ?*const ct.ZyntraAnimTimer,
+    out_progress: ?*f32,
+) callconv(.c) ct.ZyntraResult {
+    const t = timer orelse return .invalid_argument;
+    const out = out_progress orelse return .invalid_argument;
+    if (!animTimerValid(t.*)) return .invalid_argument;
+    const tm = anim_mod.AnimTimer{ .duration = t.duration, .elapsed = t.elapsed, .looping = t.looping };
+    out.* = tm.progress();
+    return .ok;
+}
+
+/// Indica se o cronômetro (não-looping) terminou.
+pub export fn zyntra_anim_timer_done(
+    timer: ?*const ct.ZyntraAnimTimer,
+    out_done: ?*bool,
+) callconv(.c) ct.ZyntraResult {
+    const t = timer orelse return .invalid_argument;
+    const out = out_done orelse return .invalid_argument;
+    if (!animTimerValid(t.*)) return .invalid_argument;
+    const tm = anim_mod.AnimTimer{ .duration = t.duration, .elapsed = t.elapsed, .looping = t.looping };
+    out.* = tm.done();
+    return .ok;
+}
+
+/// Interpola duas cores por canal (`t` saturado, alfa incluído).
+pub export fn zyntra_anim_lerp_color(
+    a: ct.ZyntraColor,
+    b: ct.ZyntraColor,
+    t: f32,
+    out_color: ?*ct.ZyntraColor,
+) callconv(.c) ct.ZyntraResult {
+    const out = out_color orelse return .invalid_argument;
+    out.* = fromColor(anim_mod.lerpColor(toColor(a), toColor(b), t));
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -6477,4 +6630,115 @@ test "C-ABI inspector M121: bool, inteiro, real, escolha e rolagem" {
     // Conjunto vazio e `out_result` nulo são válidos.
     try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, null, 0, &state, &options, &style, 10, null));
     try eq(ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI animação M122: easing, tween, timer e cor" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    const nan = std.math.nan(f32);
+
+    var v: f32 = -1;
+    try eq(ok, zyntra_ease_apply(0, 0.5, &v));
+    try eq(@as(f32, 0.5), v);
+    try eq(ok, zyntra_ease_apply(2, 0.5, &v));
+    try eq(@as(f32, 0.75), v);
+    try eq(ok, zyntra_ease_apply(5, 0.5, &v));
+    try eq(@as(f32, 0.875), v);
+    try eq(ok, zyntra_ease_apply(0, nan, &v));
+    try eq(@as(f32, 0), v);
+    try eq(ok, zyntra_ease_apply(0, 9, &v));
+    try eq(@as(f32, 1), v);
+    try eq(bad, zyntra_ease_apply(9, 0.5, &v));
+    try eq(bad, zyntra_ease_apply(0, 0.5, null));
+
+    var tw: ct.ZyntraTween = undefined;
+    try eq(ok, zyntra_tween_init(&tw, 0, 100, 2, 0));
+    try eq(@as(f32, 0), tw.from);
+    try eq(@as(f32, 100), tw.to);
+    try eq(@as(f32, 2), tw.duration);
+    try eq(@as(i32, 0), tw.ease);
+    try eq(ok, zyntra_tween_value_at(&tw, 1, &v));
+    try eq(@as(f32, 50), v);
+    try eq(ok, zyntra_tween_value_at(&tw, 3, &v));
+    try eq(@as(f32, 100), v);
+    try eq(ok, zyntra_tween_value_at(&tw, -1, &v));
+    try eq(@as(f32, 0), v);
+    var done = true;
+    try eq(ok, zyntra_tween_done_at(&tw, 1.9, &done));
+    try stdt.testing.expect(!done);
+    try eq(ok, zyntra_tween_done_at(&tw, 2, &done));
+    try stdt.testing.expect(done);
+    try eq(bad, zyntra_tween_init(null, 0, 1, 1, 0));
+    try eq(bad, zyntra_tween_init(&tw, 0, 1, 0, 0));
+    try eq(bad, zyntra_tween_init(&tw, nan, 1, 1, 0));
+    try eq(bad, zyntra_tween_init(&tw, 0, 1, 1, 9));
+    try eq(bad, zyntra_tween_value_at(null, 0, &v));
+    try eq(bad, zyntra_tween_value_at(&tw, 0, null));
+    try eq(bad, zyntra_tween_done_at(null, 0, &done));
+    try eq(bad, zyntra_tween_done_at(&tw, 0, null));
+    var bad_tw = tw;
+    bad_tw.duration = 0;
+    try eq(bad, zyntra_tween_value_at(&bad_tw, 0, &v));
+    bad_tw = tw;
+    bad_tw.ease = 9;
+    try eq(bad, zyntra_tween_value_at(&bad_tw, 0, &v));
+
+    var tm: ct.ZyntraAnimTimer = undefined;
+    try eq(ok, zyntra_anim_timer_init(&tm, 1, false));
+    try eq(@as(f32, 1), tm.duration);
+    try eq(@as(f32, 0), tm.elapsed);
+    try stdt.testing.expect(!tm.looping);
+    try eq(ok, zyntra_anim_timer_tick(&tm, 0.5));
+    try eq(@as(f32, 0.5), tm.elapsed);
+    try eq(ok, zyntra_anim_timer_progress(&tm, &v));
+    try eq(@as(f32, 0.5), v);
+    try eq(ok, zyntra_anim_timer_done(&tm, &done));
+    try stdt.testing.expect(!done);
+    try eq(ok, zyntra_anim_timer_tick(&tm, -1));
+    try eq(@as(f32, 0.5), tm.elapsed);
+    try eq(ok, zyntra_anim_timer_tick(&tm, nan));
+    try eq(@as(f32, 0.5), tm.elapsed);
+    try eq(ok, zyntra_anim_timer_tick(&tm, 0.7));
+    try eq(ok, zyntra_anim_timer_progress(&tm, &v));
+    try eq(@as(f32, 1), v);
+    try eq(ok, zyntra_anim_timer_done(&tm, &done));
+    try stdt.testing.expect(done);
+    try eq(ok, zyntra_anim_timer_reset(&tm));
+    try eq(@as(f32, 0), tm.elapsed);
+    try eq(bad, zyntra_anim_timer_init(null, 1, false));
+    try eq(bad, zyntra_anim_timer_init(&tm, 0, false));
+    try eq(bad, zyntra_anim_timer_init(&tm, nan, true));
+    try eq(bad, zyntra_anim_timer_tick(null, 1));
+    try eq(bad, zyntra_anim_timer_reset(null));
+    try eq(bad, zyntra_anim_timer_progress(null, &v));
+    try eq(bad, zyntra_anim_timer_progress(&tm, null));
+    try eq(bad, zyntra_anim_timer_done(null, &done));
+    try eq(bad, zyntra_anim_timer_done(&tm, null));
+    var bad_tm = tm;
+    bad_tm.elapsed = nan;
+    try eq(bad, zyntra_anim_timer_tick(&bad_tm, 1));
+    try eq(bad, zyntra_anim_timer_progress(&bad_tm, &v));
+    try eq(bad, zyntra_anim_timer_done(&bad_tm, &done));
+    try eq(bad, zyntra_anim_timer_reset(&bad_tm));
+
+    var loop: ct.ZyntraAnimTimer = undefined;
+    try eq(ok, zyntra_anim_timer_init(&loop, 1, true));
+    try eq(ok, zyntra_anim_timer_tick(&loop, 2.5));
+    try eq(ok, zyntra_anim_timer_progress(&loop, &v));
+    try stdt.testing.expectApproxEqAbs(@as(f32, 0.5), v, 0.0001);
+    try eq(ok, zyntra_anim_timer_done(&loop, &done));
+    try stdt.testing.expect(!done);
+
+    var col: ct.ZyntraColor = undefined;
+    try eq(ok, zyntra_anim_lerp_color(.{ .r = 0, .g = 0, .b = 0, .a = 255 }, .{ .r = 255, .g = 255, .b = 255, .a = 255 }, 0.5, &col));
+    try eq(@as(u8, 128), col.r);
+    try eq(@as(u8, 128), col.g);
+    try eq(@as(u8, 128), col.b);
+    try eq(@as(u8, 255), col.a);
+    try eq(ok, zyntra_anim_lerp_color(.{ .r = 10, .g = 20, .b = 30, .a = 40 }, .{ .r = 200, .g = 210, .b = 220, .a = 230 }, 0, &col));
+    try eq(@as(u8, 10), col.r);
+    try eq(@as(u8, 40), col.a);
+    try eq(bad, zyntra_anim_lerp_color(.{}, .{}, 0.5, null));
 }

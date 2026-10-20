@@ -1463,6 +1463,53 @@ ZyntraResult zyntra_widget_inspector_view(ZyntraContext *handle, ZyntraId id,
     const ZyntraInspectorStyle *style, float size,
     ZyntraInspectorViewResult *out_result);
 
+/* ------------------------------------------------------------------ */
+/* Animação: easing, tween, timer e cor (M122)                        */
+/* ------------------------------------------------------------------ */
+
+typedef enum ZyntraEase {
+    ZYNTRA_EASE_LINEAR = 0,
+    ZYNTRA_EASE_QUAD_IN = 1,
+    ZYNTRA_EASE_QUAD_OUT = 2,
+    ZYNTRA_EASE_QUAD_IN_OUT = 3,
+    ZYNTRA_EASE_CUBIC_IN = 4,
+    ZYNTRA_EASE_CUBIC_OUT = 5,
+    ZYNTRA_EASE_CUBIC_IN_OUT = 6
+} ZyntraEase;
+
+/* `ease` usa ZYNTRA_EASE_* (int32_t). */
+typedef struct ZyntraTween {
+    float from;
+    float to;
+    float duration;
+    int32_t ease;
+} ZyntraTween;
+
+/* Cronômetro avançado pelo chamador (`tick`). */
+typedef struct ZyntraAnimTimer {
+    float duration;
+    float elapsed;
+    bool looping;
+} ZyntraAnimTimer;
+
+ZyntraResult zyntra_ease_apply(int32_t ease, float t, float *out_value);
+ZyntraResult zyntra_tween_init(ZyntraTween *out_tween, float from, float to,
+    float duration, int32_t ease);
+ZyntraResult zyntra_tween_value_at(const ZyntraTween *tween, float elapsed,
+    float *out_value);
+ZyntraResult zyntra_tween_done_at(const ZyntraTween *tween, float elapsed,
+    bool *out_done);
+ZyntraResult zyntra_anim_timer_init(ZyntraAnimTimer *out_timer, float duration,
+    bool looping);
+ZyntraResult zyntra_anim_timer_reset(ZyntraAnimTimer *timer);
+ZyntraResult zyntra_anim_timer_tick(ZyntraAnimTimer *timer, float dt);
+ZyntraResult zyntra_anim_timer_progress(const ZyntraAnimTimer *timer,
+    float *out_progress);
+ZyntraResult zyntra_anim_timer_done(const ZyntraAnimTimer *timer,
+    bool *out_done);
+ZyntraResult zyntra_anim_lerp_color(ZyntraColor a, ZyntraColor b, float t,
+    ZyntraColor *out_color);
+
 #ifdef __cplusplus
 }
 #endif

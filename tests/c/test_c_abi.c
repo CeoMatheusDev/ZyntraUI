@@ -3329,6 +3329,128 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Animação (M122): easing, tween, timer e cor. */
+    int c122_ease = 0, c122_tween = 0, c122_timer = 0, c122_color = 0;
+    {
+        _Static_assert(sizeof(ZyntraTween) == 16, "ZyntraTween ABI");
+        _Static_assert(sizeof(ZyntraAnimTimer) == 12, "ZyntraAnimTimer ABI");
+
+        float av = -1.0f;
+        bool adone = true;
+        CHECK(zyntra_ease_apply(ZYNTRA_EASE_LINEAR, 0.5f, &av));
+        assert(av == 0.5f);
+        CHECK(zyntra_ease_apply(ZYNTRA_EASE_QUAD_OUT, 0.5f, &av));
+        assert(av == 0.75f);
+        CHECK(zyntra_ease_apply(ZYNTRA_EASE_CUBIC_OUT, 0.5f, &av));
+        assert(av == 0.875f);
+        CHECK(zyntra_ease_apply(ZYNTRA_EASE_LINEAR, NAN, &av));
+        assert(av == 0.0f);
+        CHECK(zyntra_ease_apply(ZYNTRA_EASE_LINEAR, 9.0f, &av));
+        assert(av == 1.0f);
+        assert(zyntra_ease_apply(9, 0.5f, &av) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_ease_apply(ZYNTRA_EASE_LINEAR, 0.5f, NULL)
+            == ZYNTRA_INVALID_ARGUMENT);
+        c122_ease = (av == 1.0f);
+
+        ZyntraTween tw;
+        CHECK(zyntra_tween_init(&tw, 0.0f, 100.0f, 2.0f, ZYNTRA_EASE_LINEAR));
+        assert(tw.from == 0.0f && tw.to == 100.0f && tw.duration == 2.0f);
+        assert(tw.ease == ZYNTRA_EASE_LINEAR);
+        CHECK(zyntra_tween_value_at(&tw, 1.0f, &av));
+        assert(av == 50.0f);
+        CHECK(zyntra_tween_value_at(&tw, 3.0f, &av));
+        assert(av == 100.0f);
+        CHECK(zyntra_tween_value_at(&tw, -1.0f, &av));
+        assert(av == 0.0f);
+        CHECK(zyntra_tween_done_at(&tw, 1.9f, &adone));
+        assert(!adone);
+        CHECK(zyntra_tween_done_at(&tw, 2.0f, &adone));
+        assert(adone);
+        assert(zyntra_tween_init(NULL, 0, 1, 1, 0) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_tween_init(&tw, 0, 1, 0, 0) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_tween_init(&tw, NAN, 1, 1, 0) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_tween_init(&tw, 0, 1, 1, 9) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_tween_value_at(NULL, 0, &av) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_tween_value_at(&tw, 0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_tween_done_at(NULL, 0, &adone) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_tween_done_at(&tw, 0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        ZyntraTween bad_tw = tw;
+        bad_tw.duration = 0.0f;
+        assert(zyntra_tween_value_at(&bad_tw, 0, &av)
+            == ZYNTRA_INVALID_ARGUMENT);
+        bad_tw = tw;
+        bad_tw.ease = 9;
+        assert(zyntra_tween_value_at(&bad_tw, 0, &av)
+            == ZYNTRA_INVALID_ARGUMENT);
+        c122_tween = (tw.to == 100.0f && adone);
+
+        ZyntraAnimTimer tm;
+        CHECK(zyntra_anim_timer_init(&tm, 1.0f, false));
+        assert(tm.duration == 1.0f && tm.elapsed == 0.0f && !tm.looping);
+        CHECK(zyntra_anim_timer_tick(&tm, 0.5f));
+        assert(tm.elapsed == 0.5f);
+        CHECK(zyntra_anim_timer_progress(&tm, &av));
+        assert(av == 0.5f);
+        CHECK(zyntra_anim_timer_done(&tm, &adone));
+        assert(!adone);
+        CHECK(zyntra_anim_timer_tick(&tm, -1.0f));
+        assert(tm.elapsed == 0.5f);
+        CHECK(zyntra_anim_timer_tick(&tm, NAN));
+        assert(tm.elapsed == 0.5f);
+        CHECK(zyntra_anim_timer_tick(&tm, 0.7f));
+        CHECK(zyntra_anim_timer_progress(&tm, &av));
+        assert(av == 1.0f);
+        CHECK(zyntra_anim_timer_done(&tm, &adone));
+        assert(adone);
+        CHECK(zyntra_anim_timer_reset(&tm));
+        assert(tm.elapsed == 0.0f);
+        assert(zyntra_anim_timer_init(NULL, 1, false)
+            == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_init(&tm, 0, false)
+            == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_init(&tm, NAN, true)
+            == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_tick(NULL, 1) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_reset(NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_progress(NULL, &av)
+            == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_progress(&tm, NULL)
+            == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_done(NULL, &adone)
+            == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_done(&tm, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        ZyntraAnimTimer bad_tm = tm;
+        bad_tm.elapsed = NAN;
+        assert(zyntra_anim_timer_tick(&bad_tm, 1) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_progress(&bad_tm, &av)
+            == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_done(&bad_tm, &adone)
+            == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_anim_timer_reset(&bad_tm) == ZYNTRA_INVALID_ARGUMENT);
+
+        ZyntraAnimTimer loop;
+        CHECK(zyntra_anim_timer_init(&loop, 1.0f, true));
+        CHECK(zyntra_anim_timer_tick(&loop, 2.5f));
+        CHECK(zyntra_anim_timer_progress(&loop, &av));
+        assert(av > 0.4999f && av < 0.5001f);
+        CHECK(zyntra_anim_timer_done(&loop, &adone));
+        assert(!adone);
+        c122_timer = (av > 0.4999f && av < 0.5001f);
+
+        ZyntraColor ac;
+        CHECK(zyntra_anim_lerp_color(
+            (ZyntraColor){0, 0, 0, 255}, (ZyntraColor){255, 255, 255, 255},
+            0.5f, &ac));
+        assert(ac.r == 128 && ac.g == 128 && ac.b == 128 && ac.a == 255);
+        CHECK(zyntra_anim_lerp_color(
+            (ZyntraColor){10, 20, 30, 40}, (ZyntraColor){200, 210, 220, 230},
+            0.0f, &ac));
+        assert(ac.r == 10 && ac.a == 40);
+        assert(zyntra_anim_lerp_color((ZyntraColor){0},
+            (ZyntraColor){0}, 0.5f, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        c122_color = (ac.r == 10 && ac.a == 40);
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -3400,6 +3522,8 @@ int main(void) {
     printf("C-ABI inspector px=%d hover=%d bool=%d int=%d real=%d choice=%d"
         " scroll=%d\n", c121_px, c121_hover, c121_bool, c121_int, c121_real,
         c121_choice, c121_scroll);
+    printf("C-ABI anim ease=%d tween=%d timer=%d color=%d\n",
+        c122_ease, c122_tween, c122_timer, c122_color);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

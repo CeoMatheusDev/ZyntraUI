@@ -15,6 +15,7 @@ const dock_layout_mod = @import("../dock/layout.zig");
 const dnd_mod = @import("../dnd/service.zig");
 const timeline_view_mod = @import("../widgets/timeline_view.zig");
 const inspector_mod = @import("../inspector/view.zig");
+const anim_mod = @import("../anim/anim.zig");
 
 /// Teclas normalizadas na fronteira C (espelha `event.Key`): os valores são
 /// os mesmos da API Zig e estáveis — teclas novas entram depois das atuais.
@@ -204,6 +205,29 @@ comptime {
             @compileError("ZyntraInspectorKind sem par em inspector.Kind: " ++ name);
         if (@backingInt(zig) != value) {
             @compileError("ZyntraInspectorKind com valor divergente: " ++ name);
+        }
+    }
+}
+
+/// Curvas de easing (M122; espelha `anim.Ease`, mesmos nomes/valores).
+pub const ZyntraEase = enum(c_int) {
+    linear = 0,
+    quad_in = 1,
+    quad_out = 2,
+    quad_in_out = 3,
+    cubic_in = 4,
+    cubic_out = 5,
+    cubic_in_out = 6,
+};
+
+comptime {
+    @setEvalBranchQuota(10_000);
+    const info = @typeInfo(ZyntraEase).@"enum";
+    for (info.field_names, info.field_values) |name, value| {
+        const zig = std.meta.stringToEnum(anim_mod.Ease, name) orelse
+            @compileError("ZyntraEase sem par em anim.Ease: " ++ name);
+        if (@backingInt(zig) != value) {
+            @compileError("ZyntraEase com valor divergente: " ++ name);
         }
     }
 }
@@ -704,6 +728,21 @@ pub const ZyntraInspectorViewResult = extern struct {
     scrolled: bool = false,
 };
 
+/// Tween puro (M122). `ease` usa `ZYNTRA_EASE_*` como `int32_t`.
+pub const ZyntraTween = extern struct {
+    from: f32 = 0,
+    to: f32 = 1,
+    duration: f32 = 1,
+    ease: i32 = 0,
+};
+
+/// Cronômetro de animação (M122), avançado pelo chamador.
+pub const ZyntraAnimTimer = extern struct {
+    duration: f32 = 1,
+    elapsed: f32 = 0,
+    looping: bool = false,
+};
+
 /// Zona de acoplamento de um drop (espelha `dock.DockZone`; mesmos valores).
 pub const ZyntraDockZone = enum(c_int) {
     left = 0,
@@ -858,6 +897,8 @@ comptime {
     if (@sizeOf(ZyntraInspectorViewState) != 32 or @alignOf(ZyntraInspectorViewState) != 8) @compileError("ZyntraInspectorViewState ABI drift");
     if (@sizeOf(ZyntraInspectorViewOptions) != 20 or @alignOf(ZyntraInspectorViewOptions) != 4) @compileError("ZyntraInspectorViewOptions ABI drift");
     if (@sizeOf(ZyntraInspectorViewResult) != 48 or @alignOf(ZyntraInspectorViewResult) != 8) @compileError("ZyntraInspectorViewResult ABI drift");
+    if (@sizeOf(ZyntraTween) != 16 or @alignOf(ZyntraTween) != 4) @compileError("ZyntraTween ABI drift");
+    if (@sizeOf(ZyntraAnimTimer) != 12 or @alignOf(ZyntraAnimTimer) != 4) @compileError("ZyntraAnimTimer ABI drift");
     if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
         @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
     {
@@ -950,6 +991,9 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraInspectorViewState));
     try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraInspectorViewOptions));
     try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraInspectorViewResult));
+    // Animação M122.
+    try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraTween));
+    try stdt.testing.expectEqual(@as(usize, 12), @sizeOf(ZyntraAnimTimer));
     // Docking: espelhos do modelo e do resultado da área interativa.
     try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));
     try stdt.testing.expectEqual(@as(usize, 28), @sizeOf(ZyntraDockPaneInfo));

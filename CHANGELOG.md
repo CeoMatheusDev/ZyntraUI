@@ -136,6 +136,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `InspectorViewResult=48` e o enum `ZyntraInspectorKind` (0..4). O
   consumidor C ganhou os frames 106–119 (pixel da linha, hover, booleano,
   arrastes de inteiro/real, escolha, rolagem e inválidos).
+- `c-abi`: **animação na fronteira C** (M122, aditivo) — helpers puros para
+  easing (`zyntra_ease_apply`), tween (`zyntra_tween_init`/`_value_at`/
+  `_done_at`), cronômetro (`zyntra_anim_timer_init`/`_reset`/`_tick`/
+  `_progress`/`_done`) e interpolação RGBA (`zyntra_anim_lerp_color`). O
+  chamador dita o tempo; `ZyntraTween`/`ZyntraAnimTimer` são structs
+  copiáveis e o enum `ZyntraEase` espelha `anim.Ease` (0..6). Entradas
+  inválidas (duração/valores não-finitos, ease desconhecido, ponteiros
+  nulos) são recusadas, e `tick` ignora `dt` negativo/não-finito como a API
+  Zig. Travas de ABI: `Tween=16`, `AnimTimer=12` e `ZyntraEase`.
 
 ## [1.34.0] - 2026-10-18
 

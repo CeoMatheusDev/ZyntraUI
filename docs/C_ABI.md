@@ -790,6 +790,40 @@ zyntra_widget_inspector_view(ctx, id, bounds, props, 4,
   `scroll_step >= 0`, `coarse_factor >= 1`, `0 < fine_factor <= 1`) e fonte
   (`size`) ≤ 0/não-finita.
 
+### Décimo quarto lote (M122): animação (easing, tween, timer e cor)
+
+```c
+float v;
+zyntra_ease_apply(ZYNTRA_EASE_QUAD_OUT, 0.5f, &v);   /* v = 0.75 */
+
+ZyntraTween tw;
+zyntra_tween_init(&tw, 0.0f, 100.0f, 2.0f, ZYNTRA_EASE_LINEAR);
+zyntra_tween_value_at(&tw, 1.0f, &v);                /* v = 50 */
+
+ZyntraAnimTimer tm;
+zyntra_anim_timer_init(&tm, 1.0f, false);
+zyntra_anim_timer_tick(&tm, 0.25f);
+zyntra_anim_timer_progress(&tm, &v);                 /* v = 0.25 */
+
+ZyntraColor c;
+zyntra_anim_lerp_color((ZyntraColor){0, 0, 0, 255},
+    (ZyntraColor){255, 255, 255, 255}, 0.5f, &c);    /* cinza 128 */
+```
+
+* Helpers puros, sem alocação/estado global: o chamador dita o tempo. O enum
+  `ZyntraEase` espelha `anim.Ease` (0..6); timers guardam apenas
+  `duration`/`elapsed`/`looping`.
+* `zyntra_ease_apply` satura a entrada em 0..1 (NaN ⇒ 0). `zyntra_tween_*`
+  validam o struct (`from`/`to`/`duration` finitos, `duration > 0`, `ease`
+  conhecido); `elapsed` é saturado. `zyntra_anim_timer_tick` ignora `dt`
+  negativo/não-finito, como a API Zig; `progress` satura em 0..1 e `done`
+  ignora loop.
+* `zyntra_anim_lerp_color` interpola RGBA por canal com `t` saturado e
+  arredondamento para o `u8` mais próximo.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: ponteiros de saída nulos, `ease`
+  desconhecido, tween/timer inválido (duração ≤ 0/não-finita, `from`/`to`
+  não-finitos, `elapsed` não-finito) ou `out_*` nulo.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -859,6 +893,8 @@ zyntra_widget_inspector_view(ctx, id, bounds, props, 4,
   `ZyntraInspectorProperty=88`, `ZyntraInspectorViewState=32`,
   `ZyntraInspectorViewOptions=20`, `ZyntraInspectorViewResult=48` e o enum
   `ZyntraInspectorKind` (0..4, mesmos valores de `inspector.Kind`).
+* M122: também travados `ZyntraTween=16`, `ZyntraAnimTimer=12` e o enum
+  `ZyntraEase` (0..6, mesmos valores de `anim.Ease`).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -879,5 +915,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..." + "C-ABI inspector ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..." + "C-ABI inspector ..." + "C-ABI anim ..."
 ```
