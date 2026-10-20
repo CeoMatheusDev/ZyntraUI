@@ -120,6 +120,22 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `TimelineViewResult=64` e o enum `ZyntraTimelineDragMode` (0..3). O
   consumidor C ganhou os frames 96–105 (pixel da trilha, hover, seleção,
   arraste com write-back, release, scrub, zoom e inválidos).
+- `c-abi`: **inspector de propriedades na fronteira C** (M121, aditivo) —
+  `zyntra_widget_inspector_view` desenha e edita
+  `ZyntraInspectorProperty[]` com valores tipados apontando para a memória
+  do chamador (`bool`/`int64_t`/`float`), texto somente-leitura e escolha
+  com índice do chamador. Booleanos alternam no press, escolhas avançam,
+  inteiros/reais arrastam com passo por pixel e clamp, e a roda rola a
+  lista. `ZyntraInspectorViewOptions`/`ZyntraInspectorViewResult` reportam
+  linha ativa/hover/arraste, mudança de valor e rolagem; estado e opções
+  têm inicializadores (`zyntra_inspector_view_state_init`/
+  `_options_default`) e o estilo vem do tema via `zyntra_style_inspector`.
+  Travas de ABI: `InspectorStyle=72`, `InspectorRange=8`,
+  `InspectorChoice=24`, `InspectorProperty=88`,
+  `InspectorViewState=32`, `InspectorViewOptions=20`,
+  `InspectorViewResult=48` e o enum `ZyntraInspectorKind` (0..4). O
+  consumidor C ganhou os frames 106–119 (pixel da linha, hover, booleano,
+  arrastes de inteiro/real, escolha, rolagem e inválidos).
 
 ## [1.34.0] - 2026-10-18
 

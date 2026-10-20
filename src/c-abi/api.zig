@@ -57,6 +57,8 @@ const graph_view_mod = @import("../widgets/graph_view.zig");
 const graph_mod = @import("../graph/view.zig");
 const timeline_view_mod = @import("../widgets/timeline_view.zig");
 const timeline_mod = @import("../timeline/view.zig");
+const inspector_view_mod = @import("../widgets/inspector_view.zig");
+const inspector_mod = @import("../inspector/view.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -3395,6 +3397,229 @@ pub export fn zyntra_widget_timeline_view(
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Inspector: propriedades tipadas, edição e rolagem (M121)
+// ---------------------------------------------------------------------------
+
+/// Buffers temporários do inspector: propriedades convertidas e rótulos de
+/// escolha achatados. Os valores ficam na memória do chamador (ponteiros).
+const InspectorArgs = struct {
+    properties: []inspector_mod.Property,
+    choice_options: [][]const u8,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *InspectorArgs) void {
+        self.allocator.free(self.properties);
+        self.allocator.free(self.choice_options);
+    }
+};
+
+fn inspectorKindFromC(kind: i32) ?inspector_mod.Kind {
+    return switch (kind) {
+        0 => .boolean,
+        1 => .integer,
+        2 => .real,
+        3 => .text,
+        4 => .choice,
+        else => null,
+    };
+}
+
+/// Fatia UTF-8 emprestada; `len == 0` aceita ponteiro nulo.
+fn inspectorStr(s: ct.ZyntraStr) ?[]const u8 {
+    if (s.len == 0) return &.{};
+    const p = s.ptr orelse return null;
+    return p[0..s.len];
+}
+
+fn inspectorValuePtr(comptime T: type, p: ?*anyopaque) !*T {
+    const q = p orelse return error.InvalidArgument;
+    if (@intFromPtr(q) % @alignOf(T) != 0) return error.InvalidArgument;
+    return @ptrCast(@alignCast(q));
+}
+
+/// Converte props C em props Zig; nomes/textos/rótulos ficam emprestados só
+/// durante a chamada e os valores continuam apontando para a memória C.
+fn inspectorArgsOf(
+    allocator: std.mem.Allocator,
+    c_props: ?[*]ct.ZyntraInspectorProperty,
+    props_len: usize,
+) !InspectorArgs {
+    if (props_len > 0 and c_props == null) return error.InvalidArgument;
+
+    var total_options: usize = 0;
+    if (props_len > 0) {
+        for (c_props.?[0..props_len]) |cp| {
+            _ = inspectorKindFromC(cp.kind) orelse return error.InvalidArgument;
+            if (cp.kind == @backingInt(ct.ZyntraInspectorKind.choice)) {
+                if (cp.choice.options == null or cp.choice.options_len == 0 or cp.choice.index == null) {
+                    return error.InvalidArgument;
+                }
+                total_options = std.math.add(usize, total_options, cp.choice.options_len) catch
+                    return error.InvalidArgument;
+            }
+        }
+    }
+
+    const properties = try allocator.alloc(inspector_mod.Property, props_len);
+    errdefer allocator.free(properties);
+    const choice_options = try allocator.alloc([]const u8, total_options);
+    errdefer allocator.free(choice_options);
+
+    var offset: usize = 0;
+    if (props_len > 0) {
+        for (c_props.?[0..props_len], 0..) |cp, i| {
+            const kind = inspectorKindFromC(cp.kind) orelse return error.InvalidArgument;
+            const name = inspectorStr(cp.name) orelse return error.InvalidArgument;
+            const value: inspector_mod.Value = switch (kind) {
+                .boolean => .{ .boolean = try inspectorValuePtr(bool, cp.value) },
+                .integer => .{ .integer = try inspectorValuePtr(i64, cp.value) },
+                .real => .{ .real = try inspectorValuePtr(f32, cp.value) },
+                .text => .{ .text = inspectorStr(cp.text) orelse return error.InvalidArgument },
+                .choice => blk: {
+                    const idxp = cp.choice.index.?;
+                    if (@intFromPtr(idxp) % @alignOf(u32) != 0) return error.InvalidArgument;
+                    const idx: *u32 = @ptrCast(@alignCast(idxp));
+                    const opt_count = cp.choice.options_len;
+                    const opts_ptr = cp.choice.options.?;
+                    if (@intFromPtr(opts_ptr) % @alignOf(ct.ZyntraStr) != 0) {
+                        return error.InvalidArgument;
+                    }
+                    const slice = choice_options[offset .. offset + opt_count];
+                    for (opts_ptr[0..opt_count], 0..) |s, k| {
+                        slice[k] = inspectorStr(s) orelse return error.InvalidArgument;
+                    }
+                    offset += opt_count;
+                    break :blk .{ .choice = .{ .index = idx, .options = slice } };
+                },
+            };
+            properties[i] = .{
+                .name = name,
+                .value = value,
+                .readonly = cp.readonly,
+                .step = if (cp.has_step) cp.step else null,
+                .decimals = if (cp.has_decimals) cp.decimals else null,
+                .range = if (cp.has_range) .{ .min = cp.range.min, .max = cp.range.max } else null,
+            };
+        }
+    }
+
+    return .{
+        .properties = properties,
+        .choice_options = choice_options,
+        .allocator = allocator,
+    };
+}
+
+/// Índice C (-1 = nenhum) → `?usize`.
+fn inspectorIndex(v: i64) ?usize {
+    if (v < 0) return null;
+    return std.math.cast(usize, v) orelse null;
+}
+
+fn inspectorIndexOut(v: ?usize) i64 {
+    return if (v) |x| @intCast(x) else -1;
+}
+
+fn inspectorViewStateFromC(s: ct.ZyntraInspectorViewState) inspector_view_mod.InspectorViewState {
+    return .{
+        .active = inspectorIndex(s.active),
+        .scroll = s.scroll,
+        .dragging = inspectorIndex(s.dragging),
+        .drag_anchor = s.drag_anchor,
+        .drag_x = s.drag_x,
+    };
+}
+
+fn inspectorViewStateToC(s: *const inspector_view_mod.InspectorViewState) ct.ZyntraInspectorViewState {
+    return .{
+        .active = inspectorIndexOut(s.active),
+        .scroll = s.scroll,
+        .dragging = inspectorIndexOut(s.dragging),
+        .drag_anchor = s.drag_anchor,
+        .drag_x = s.drag_x,
+    };
+}
+
+/// Estilo de inspector do tema embutido.
+pub export fn zyntra_style_inspector(kind: i32, out_style: ?*ct.ZyntraInspectorStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.inspectorStyle();
+    return .ok;
+}
+
+/// Inicializa o estado do inspector (nenhuma linha ativa/arraste, rolagem 0).
+pub export fn zyntra_inspector_view_state_init(out_state: ?*ct.ZyntraInspectorViewState) callconv(.c) ct.ZyntraResult {
+    const out = out_state orelse return .invalid_argument;
+    out.* = .{};
+    return .ok;
+}
+
+/// Preenche as opções de edição com os padrões da API Zig.
+pub export fn zyntra_inspector_view_options_default(out_options: ?*ct.ZyntraInspectorViewOptions) callconv(.c) ct.ZyntraResult {
+    const out = out_options orelse return .invalid_argument;
+    out.* = .{};
+    return .ok;
+}
+
+/// Desenha e edita propriedades. Os valores são ponteiros para a memória do
+/// chamador (o widget lê/escreve por ali); nomes, textos e rótulos de escolha
+/// são emprestados só na chamada. `state` é retido entre frames.
+pub export fn zyntra_widget_inspector_view(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    properties: ?[*]ct.ZyntraInspectorProperty,
+    properties_len: usize,
+    state: ?*ct.ZyntraInspectorViewState,
+    options: ?*const ct.ZyntraInspectorViewOptions,
+    style: ?*const ct.ZyntraInspectorStyle,
+    size: f32,
+    out_result: ?*ct.ZyntraInspectorViewResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st_c = state orelse return .invalid_argument;
+    const opts_c = options orelse return .invalid_argument;
+    const sty = style orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+
+    const ctx = toCtx(h);
+    var args = inspectorArgsOf(ctx.allocator, properties, properties_len) catch |err| return mapWidgetErr(err);
+    defer args.deinit();
+
+    const opts = inspector_view_mod.InspectorViewOptions{
+        .step = opts_c.step,
+        .decimals = opts_c.decimals,
+        .scroll_step = opts_c.scroll_step,
+        .coarse_factor = opts_c.coarse_factor,
+        .fine_factor = opts_c.fine_factor,
+    };
+    var st = inspectorViewStateFromC(st_c.*);
+    const outcome = inspector_view_mod.inspectorView(
+        ctx,
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        args.properties,
+        &st,
+        opts,
+        sty.*,
+        metrics_mod.FontMetrics.withSize(size),
+    );
+    st_c.* = inspectorViewStateToC(&st);
+    const res = outcome catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .hovered = inspectorIndexOut(res.hovered),
+        .active = inspectorIndexOut(res.active),
+        .active_changed = res.active_changed,
+        .changed = inspectorIndexOut(res.changed),
+        .dragging = inspectorIndexOut(res.dragging),
+        .scroll_delta = res.scroll_delta,
+        .scrolled = res.scrolled,
+    };
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -6018,5 +6243,238 @@ test "C-ABI timeline M120: hover, chave, scrub, zoom e write-back" {
 
     // Conjunto vazio e `out_result` nulo são válidos.
     try eq(ok, zyntra_widget_timeline_view(handle, 0x7101, bounds, null, 0, &state, &options, &style, 10, null));
+    try eq(ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI inspector M121: bool, inteiro, real, escolha e rolagem" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    const nan = std.math.nan(f32);
+
+    var handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 260, .h = 160 }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    var style: ct.ZyntraInspectorStyle = undefined;
+    var state: ct.ZyntraInspectorViewState = undefined;
+    var options: ct.ZyntraInspectorViewOptions = undefined;
+    try eq(ok, zyntra_style_inspector(0, &style));
+    try stdt.testing.expect(style.isValid());
+    try eq(bad, zyntra_style_inspector(9, &style));
+    try eq(bad, zyntra_style_inspector(0, null));
+    try eq(ok, zyntra_inspector_view_state_init(&state));
+    try eq(@as(i64, -1), state.active);
+    try eq(@as(i64, -1), state.dragging);
+    try eq(@as(f32, 0), state.scroll);
+    try eq(ok, zyntra_inspector_view_options_default(&options));
+    try stdt.testing.expectEqual(ct.ZyntraInspectorViewOptions{}, options);
+    try eq(bad, zyntra_inspector_view_state_init(null));
+    try eq(bad, zyntra_inspector_view_options_default(null));
+
+    var c_bool = false;
+    var c_integer: i64 = 10;
+    var c_real: f32 = 1.5;
+    var c_choice: u32 = 0;
+    var c_extra: i64 = 0;
+    const c_opts = [_]ct.ZyntraStr{
+        .{ .ptr = "One", .len = 3 },
+        .{ .ptr = "Two", .len = 3 },
+    };
+    var props = [_]ct.ZyntraInspectorProperty{
+        .{ .name = .{ .ptr = "A", .len = 1 }, .kind = 0, .value = &c_bool },
+        .{ .name = .{ .ptr = "B", .len = 1 }, .kind = 1, .value = &c_integer },
+        .{ .name = .{ .ptr = "C", .len = 1 }, .kind = 2, .value = &c_real },
+        .{ .name = .{ .ptr = "D", .len = 1 }, .kind = 3, .readonly = true, .text = .{ .ptr = "read", .len = 4 } },
+        .{ .name = .{ .ptr = "E", .len = 1 }, .kind = 4, .choice = .{ .index = @ptrCast(&c_choice), .options = @ptrCast(&c_opts), .options_len = c_opts.len } },
+        .{ .name = .{ .ptr = "F", .len = 1 }, .kind = 1, .value = &c_extra },
+    };
+    const bounds = ct.ZyntraRect{ .x = 0, .y = 0, .w = 260, .h = 120 };
+    var res: ct.ZyntraInspectorViewResult = undefined;
+    var n_draw: usize = 0;
+
+    // Frame 1: desenho.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, -1), res.hovered);
+    try eq(@as(i64, -1), res.active);
+    try eq(@as(i64, -1), res.changed);
+    try eq(@as(i64, -1), res.dragging);
+    try eq(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expect(n_draw > 0);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 2: hover na linha 1.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 150, .y = 30 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, 1), res.hovered);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 3: press na linha 0 alterna o booleano.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 30, .y = 10 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 30, .y = 10 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try stdt.testing.expect(c_bool);
+    try eq(@as(i64, 0), res.active);
+    try stdt.testing.expect(res.active_changed);
+    try eq(@as(i64, 0), res.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 4: release.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 30, .y = 10 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 30, .y = 10 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, -1), res.dragging);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 5: press na linha 1 inicia o arraste do inteiro.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 150, .y = 30 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 150, .y = 30 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, 1), res.active);
+    try eq(@as(i64, 1), res.dragging);
+    try eq(@as(f32, 10), state.drag_anchor);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 6: dx=+10 ⇒ inteiro 10 → 20 (passo 1).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 160, .y = 30 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, 20), c_integer);
+    try eq(@as(i64, 1), res.changed);
+    try eq(@as(i64, 1), res.dragging);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 7: release.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 160, .y = 30 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 160, .y = 30 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, -1), res.dragging);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 8: press na linha 2 inicia o arraste do real.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 150, .y = 60 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 150, .y = 60 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, 2), res.dragging);
+    try eq(@as(f32, 1.5), state.drag_anchor);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 9: dx=+5, passo 0.01 ⇒ 1.5 → 1.55.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 155, .y = 60 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try stdt.testing.expectApproxEqAbs(@as(f32, 1.55), c_real, 0.0001);
+    try eq(@as(i64, 2), res.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 10: release.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 155, .y = 60 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 155, .y = 60 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, -1), res.dragging);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 11: press na escolha (linha 4) avança para a opção 1.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 150, .y = 110 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 150, .y = 110 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(@as(u32, 1), c_choice);
+    try eq(@as(i64, 4), res.active);
+    try eq(@as(i64, 4), res.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 12: release.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 150, .y = 110 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 150, .y = 110 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 13: roda rola 24 px (6 linhas × 24 − 120).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 150, .y = 60 }));
+    try eq(ok, zyntra_context_push_mouse_wheel(handle, 0, -1, .{ .x = 150, .y = 60 }));
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try stdt.testing.expect(res.scrolled);
+    try eq(@as(f32, 24), state.scroll);
+    try eq(@as(f32, 24), res.scroll_delta);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Inválidos.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(bad, zyntra_widget_inspector_view(null, 0x7201, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_inspector_view(handle, 0, bounds, &props, props.len, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, null, 1, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, null, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, null, &style, 10, &res));
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, null, 10, &res));
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, 0, &res));
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &options, &style, nan, &res));
+
+    var bad_props = props;
+    bad_props[0].name = .{ .ptr = null, .len = 1 };
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &bad_props, bad_props.len, &state, &options, &style, 10, &res));
+    bad_props = props;
+    bad_props[0].kind = 9;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &bad_props, bad_props.len, &state, &options, &style, 10, &res));
+    bad_props = props;
+    bad_props[0].value = null;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &bad_props, bad_props.len, &state, &options, &style, 10, &res));
+    bad_props = props;
+    bad_props[3].text = .{ .ptr = null, .len = 1 };
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &bad_props, bad_props.len, &state, &options, &style, 10, &res));
+    bad_props = props;
+    bad_props[4].choice.options = null;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &bad_props, bad_props.len, &state, &options, &style, 10, &res));
+    bad_props = props;
+    bad_props[4].choice.options_len = 0;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &bad_props, bad_props.len, &state, &options, &style, 10, &res));
+    bad_props = props;
+    bad_props[4].choice.index = null;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &bad_props, bad_props.len, &state, &options, &style, 10, &res));
+    bad_props = props;
+    bad_props[2].has_step = true;
+    bad_props[2].step = 0;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &bad_props, bad_props.len, &state, &options, &style, 10, &res));
+    bad_props = props;
+    bad_props[2].has_decimals = true;
+    bad_props[2].decimals = 7;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &bad_props, bad_props.len, &state, &options, &style, 10, &res));
+    bad_props = props;
+    bad_props[1].has_range = true;
+    bad_props[1].range = .{ .min = nan, .max = 1 };
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &bad_props, bad_props.len, &state, &options, &style, 10, &res));
+
+    var bad_state = state;
+    bad_state.scroll = nan;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &bad_state, &options, &style, 10, &res));
+    var bad_options = options;
+    bad_options.step = 0;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &bad_options, &style, 10, &res));
+    bad_options = options;
+    bad_options.decimals = 7;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &bad_options, &style, 10, &res));
+    bad_options = options;
+    bad_options.scroll_step = -1;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &bad_options, &style, 10, &res));
+    bad_options = options;
+    bad_options.coarse_factor = 0.5;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &bad_options, &style, 10, &res));
+    bad_options = options;
+    bad_options.fine_factor = 0;
+    try eq(bad, zyntra_widget_inspector_view(handle, 0x7201, bounds, &props, props.len, &state, &bad_options, &style, 10, &res));
+
+    // Conjunto vazio e `out_result` nulo são válidos.
+    try eq(ok, zyntra_widget_inspector_view(handle, 0x7201, bounds, null, 0, &state, &options, &style, 10, null));
     try eq(ok, zyntra_context_end_frame(handle));
 }

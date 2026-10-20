@@ -1355,6 +1355,114 @@ ZyntraResult zyntra_widget_timeline_view(ZyntraContext *handle, ZyntraId id,
     const ZyntraTimelineStyle *style, float size,
     ZyntraTimelineViewResult *out_result);
 
+/* ------------------------------------------------------------------ */
+/* Inspector de propriedades (M121)                                   */
+/* ------------------------------------------------------------------ */
+
+typedef struct ZyntraInspectorStyle {
+    ZyntraColor bg;
+    ZyntraColor row_bg;
+    ZyntraColor row_alt;
+    ZyntraColor row_active;
+    ZyntraColor editor_bg;
+    ZyntraColor separator;
+    ZyntraColor name;
+    float name_width;
+    float name_pad;
+    float value_pad;
+    float row_height;
+    ZyntraColor value;
+    ZyntraColor value_readonly;
+    float check_size;
+    ZyntraColor check_bg;
+    ZyntraColor check_border;
+    float check_border_width;
+    ZyntraColor check_mark;
+} ZyntraInspectorStyle;
+
+typedef enum ZyntraInspectorKind {
+    ZYNTRA_INSPECTOR_BOOLEAN = 0,
+    ZYNTRA_INSPECTOR_INTEGER = 1,
+    ZYNTRA_INSPECTOR_REAL = 2,
+    ZYNTRA_INSPECTOR_TEXT = 3,
+    ZYNTRA_INSPECTOR_CHOICE = 4
+} ZyntraInspectorKind;
+
+typedef struct ZyntraInspectorRange {
+    float min;
+    float max;
+} ZyntraInspectorRange;
+
+/* `options_len > 0`; `options` e os bytes valem só na chamada. */
+typedef struct ZyntraInspectorChoice {
+    uint32_t *index;
+    const ZyntraStr *options;
+    size_t options_len;
+} ZyntraInspectorChoice;
+
+/* `kind` usa ZYNTRA_INSPECTOR_* (int32_t). `value` aponta para bool/int64_t/
+ * float conforme o tipo; `text` é emprestado só na chamada. `has_step`,
+ * `has_decimals` e `has_range` habilitam os campos correspondentes. */
+typedef struct ZyntraInspectorProperty {
+    ZyntraStr name;
+    int32_t kind;
+    bool readonly;
+    bool has_step;
+    bool has_decimals;
+    bool has_range;
+    void *value;
+    ZyntraStr text;
+    ZyntraInspectorChoice choice;
+    float step;
+    uint32_t decimals;
+    ZyntraInspectorRange range;
+} ZyntraInspectorProperty;
+
+/* Estado retido entre frames. Índices -1 = nenhum. Inicie com
+ * zyntra_inspector_view_state_init. */
+typedef struct ZyntraInspectorViewState {
+    int64_t active;
+    float scroll;
+    int64_t dragging;
+    float drag_anchor;
+    float drag_x;
+} ZyntraInspectorViewState;
+
+/* Inicie com zyntra_inspector_view_options_default. */
+typedef struct ZyntraInspectorViewOptions {
+    float step;
+    uint32_t decimals;
+    float scroll_step;
+    float coarse_factor;
+    float fine_factor;
+} ZyntraInspectorViewOptions;
+
+typedef struct ZyntraInspectorViewResult {
+    int64_t hovered;        /* -1 = nenhum */
+    int64_t active;         /* -1 = nenhum */
+    bool active_changed;
+    int64_t changed;        /* -1 = nenhum */
+    int64_t dragging;       /* -1 = nenhum */
+    float scroll_delta;
+    bool scrolled;
+} ZyntraInspectorViewResult;
+
+ZyntraResult zyntra_style_inspector(int32_t theme_kind,
+    ZyntraInspectorStyle *out_style);
+ZyntraResult zyntra_inspector_view_state_init(ZyntraInspectorViewState *out_state);
+ZyntraResult zyntra_inspector_view_options_default(
+    ZyntraInspectorViewOptions *out_options);
+
+/* Desenha e edita. Valores são ponteiros para a memória do chamador (lidos e
+ * escritos); nomes/textos/rótulos são emprestados só na chamada. `out_result`
+ * é opcional. */
+ZyntraResult zyntra_widget_inspector_view(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, ZyntraInspectorProperty *properties,
+    size_t properties_len, ZyntraInspectorViewState *state,
+    const ZyntraInspectorViewOptions *options,
+    const ZyntraInspectorStyle *style, float size,
+    ZyntraInspectorViewResult *out_result);
+
 #ifdef __cplusplus
 }
 #endif

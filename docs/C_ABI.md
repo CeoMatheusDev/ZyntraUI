@@ -725,6 +725,71 @@ zyntra_widget_timeline_view(ctx, id, bounds, tracks, 1,
   (`0 < min_pps <= max_pps`, `zoom_step > 0`, `key_hit_px >= 0`) e fonte
   (`size`) ≤ 0/não-finita.
 
+### Décimo terceiro lote (M121): inspector de propriedades
+
+```c
+ZyntraInspectorStyle is;
+zyntra_style_inspector(ZYNTRA_THEME_DARK, &is);
+
+ZyntraInspectorViewState state;
+zyntra_inspector_view_state_init(&state);   /* nada ativo, scroll 0 */
+
+ZyntraInspectorViewOptions opt;
+zyntra_inspector_view_options_default(&opt);
+
+bool visible = true;
+int64_t count = 3;
+float scale = 1.5f;
+uint32_t mode = 0;
+ZyntraStr modes[2] = {{"Fast", 4}, {"Slow", 4}};
+
+ZyntraInspectorProperty props[4] = {
+    {.name = {"Visible", 7}, .kind = ZYNTRA_INSPECTOR_BOOLEAN,
+     .value = &visible},
+    {.name = {"Count", 5}, .kind = ZYNTRA_INSPECTOR_INTEGER,
+     .value = &count},
+    {.name = {"Scale", 5}, .kind = ZYNTRA_INSPECTOR_REAL,
+     .value = &scale},
+    {.name = {"Mode", 4}, .kind = ZYNTRA_INSPECTOR_CHOICE,
+     .choice = {.index = &mode, .options = modes, .options_len = 2}},
+};
+
+ZyntraInspectorViewResult res;
+zyntra_widget_inspector_view(ctx, id, bounds, props, 4,
+    &state, &opt, &is, 10, &res);
+```
+
+* `ZyntraInspectorProperty.kind` usa `ZYNTRA_INSPECTOR_*` como `int32_t`.
+  Para booleano/inteiro/real, `value` aponta para `bool`/`int64_t`/`float` na
+  memória do chamador — o widget lê e **escreve** por ali. `text` e
+  `choice.options` são emprestados só durante a chamada; `choice.index`
+  aponta para a memória do chamador. `name` vazio ⇒ sem texto.
+* `has_step`/`step`, `has_decimals`/`decimals` e `has_range`/`range`
+  habilitam os campos opcionais (mesmas regras de `Property`: passo > 0,
+  decimais ≤ 6, faixa aplicada só quando `min < max`). `readonly` bloqueia
+  edição, mas a linha ainda pode ser ativada/rolada.
+* `ZyntraInspectorViewState` pertence ao chamador e é retido entre frames:
+  linha ativa, `scroll`, arraste transiente (`dragging`/`drag_anchor`/
+  `drag_x`). **Inicie com `zyntra_inspector_view_state_init`** — índices
+  opcionais usam `-1`.
+* Interação: press ativa a linha; booleano alterna, escolha avança uma opção,
+  inteiro/real arrastam horizontalmente com passo por pixel e clamp; roda
+  rola verticalmente; setas, Shift/Alt (grosso/fino), Espaço/Enter e Tab
+  seguem o comportamento da API Zig.
+* `ZyntraInspectorViewResult` reporta `hovered`/`active`/`changed`/
+  `dragging` (`-1` = nenhum), `active_changed`, `scroll_delta` e `scrolled`.
+  `out_result` é opcional.
+* Memória: as propriedades são convertidas e os rótulos de escolha achatados
+  num buffer temporário no alocador do `Context`; nenhum nome/valor é
+  copiado. Falha de alocação ⇒ `ZYNTRA_OUT_OF_MEMORY`.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle/id/estado/opções/estilo nulos,
+  geometria sem área ou não-finita, `kind` desconhecido, ponteiro de valor
+  nulo/desalinhado, nome/texto com ponteiro nulo e `len > 0`, escolha sem
+  opções/índice, propriedade inválida (passo/decimais/faixa), `scroll`
+  não-finito, opções inválidas (`step > 0`, `decimals <= 6`,
+  `scroll_step >= 0`, `coarse_factor >= 1`, `0 < fine_factor <= 1`) e fonte
+  (`size`) ≤ 0/não-finita.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -789,6 +854,11 @@ zyntra_widget_timeline_view(ctx, id, bounds, tracks, 1,
   `ZyntraTimelineViewState=64`, `ZyntraTimelineViewOptions=20`,
   `ZyntraTimelineViewResult=64` e o enum `ZyntraTimelineDragMode` (0..3,
   mesmos valores de `timeline_view.TimelineDragMode`).
+* M121: também travados `ZyntraInspectorStyle=72`,
+  `ZyntraInspectorRange=8`, `ZyntraInspectorChoice=24`,
+  `ZyntraInspectorProperty=88`, `ZyntraInspectorViewState=32`,
+  `ZyntraInspectorViewOptions=20`, `ZyntraInspectorViewResult=48` e o enum
+  `ZyntraInspectorKind` (0..4, mesmos valores de `inspector.Kind`).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -809,5 +879,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..." + "C-ABI inspector ..."
 ```

@@ -14,6 +14,7 @@ const event_mod = @import("../event/event.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dnd_mod = @import("../dnd/service.zig");
 const timeline_view_mod = @import("../widgets/timeline_view.zig");
+const inspector_mod = @import("../inspector/view.zig");
 
 /// Teclas normalizadas na fronteira C (espelha `event.Key`): os valores são
 /// os mesmos da API Zig e estáveis — teclas novas entram depois das atuais.
@@ -185,6 +186,28 @@ comptime {
     }
 }
 
+/// Tipo de valor/editor do inspector (M121). O campo `kind` da propriedade C
+/// usa estes valores como `int32_t`.
+pub const ZyntraInspectorKind = enum(c_int) {
+    boolean = 0,
+    integer = 1,
+    real = 2,
+    text = 3,
+    choice = 4,
+};
+
+comptime {
+    @setEvalBranchQuota(10_000);
+    const info = @typeInfo(ZyntraInspectorKind).@"enum";
+    for (info.field_names, info.field_values) |name, value| {
+        const zig = std.meta.stringToEnum(inspector_mod.Kind, name) orelse
+            @compileError("ZyntraInspectorKind sem par em inspector.Kind: " ++ name);
+        if (@backingInt(zig) != value) {
+            @compileError("ZyntraInspectorKind com valor divergente: " ++ name);
+        }
+    }
+}
+
 /// Métricas de texto (reexporta o `extern struct` da API Zig).
 pub const ZyntraTextMetrics = metrics_mod.TextMetrics;
 
@@ -276,6 +299,8 @@ pub const ZyntraStatusBarStyle = style_mod.StatusBarStyle;
 pub const ZyntraGraphStyle = style_mod.GraphStyle;
 /// Estilo da timeline (M120).
 pub const ZyntraTimelineStyle = style_mod.TimelineStyle;
+/// Estilo do inspector de propriedades (M121).
+pub const ZyntraInspectorStyle = style_mod.InspectorStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -616,6 +641,69 @@ pub const ZyntraTimelineViewResult = extern struct {
     changed: bool = false,
 };
 
+/// Faixa de clamp de uma propriedade numérica (M121).
+pub const ZyntraInspectorRange = extern struct {
+    min: f32 = 0,
+    max: f32 = 1,
+};
+
+/// Editor de escolha do inspector (M121): índice do chamador + rótulos
+/// emprestados só durante a chamada (`options_len > 0`).
+pub const ZyntraInspectorChoice = extern struct {
+    index: ?[*]u32 = null,
+    options: ?[*]const ZyntraStr = null,
+    options_len: usize = 0,
+};
+
+/// Propriedade do inspector (M121). `value` aponta para memória do chamador
+/// (`bool*`, `int64_t*` ou `float*` conforme `kind`); `text` é emprestado só
+/// na chamada. `kind` usa `ZYNTRA_INSPECTOR_*` como `int32_t`.
+pub const ZyntraInspectorProperty = extern struct {
+    name: ZyntraStr = .{},
+    kind: i32 = 0,
+    readonly: bool = false,
+    has_step: bool = false,
+    has_decimals: bool = false,
+    has_range: bool = false,
+    value: ?*anyopaque = null,
+    text: ZyntraStr = .{},
+    choice: ZyntraInspectorChoice = .{},
+    step: f32 = 0,
+    decimals: u32 = 0,
+    range: ZyntraInspectorRange = .{},
+};
+
+/// Estado do inspector (M121), do chamador e retido entre frames. Índices
+/// opcionais usam -1. Inicie com `zyntra_inspector_view_state_init`.
+pub const ZyntraInspectorViewState = extern struct {
+    active: i64 = -1,
+    scroll: f32 = 0,
+    dragging: i64 = -1,
+    drag_anchor: f32 = 0,
+    drag_x: f32 = 0,
+};
+
+/// Opções de edição do inspector (M121). Inicie com
+/// `zyntra_inspector_view_options_default`.
+pub const ZyntraInspectorViewOptions = extern struct {
+    step: f32 = 0.01,
+    decimals: u32 = 3,
+    scroll_step: f32 = 24,
+    coarse_factor: f32 = 10,
+    fine_factor: f32 = 0.1,
+};
+
+/// Resultado do frame do inspector (M121). Índices -1 significam "nenhum".
+pub const ZyntraInspectorViewResult = extern struct {
+    hovered: i64 = -1,
+    active: i64 = -1,
+    active_changed: bool = false,
+    changed: i64 = -1,
+    dragging: i64 = -1,
+    scroll_delta: f32 = 0,
+    scrolled: bool = false,
+};
+
 /// Zona de acoplamento de um drop (espelha `dock.DockZone`; mesmos valores).
 pub const ZyntraDockZone = enum(c_int) {
     left = 0,
@@ -763,6 +851,13 @@ comptime {
     if (@sizeOf(ZyntraTimelineViewState) != 64 or @alignOf(ZyntraTimelineViewState) != 8) @compileError("ZyntraTimelineViewState ABI drift");
     if (@sizeOf(ZyntraTimelineViewOptions) != 20 or @alignOf(ZyntraTimelineViewOptions) != 4) @compileError("ZyntraTimelineViewOptions ABI drift");
     if (@sizeOf(ZyntraTimelineViewResult) != 64 or @alignOf(ZyntraTimelineViewResult) != 8) @compileError("ZyntraTimelineViewResult ABI drift");
+    if (@sizeOf(ZyntraInspectorStyle) != 72 or @alignOf(ZyntraInspectorStyle) != 4) @compileError("ZyntraInspectorStyle ABI drift");
+    if (@sizeOf(ZyntraInspectorRange) != 8 or @alignOf(ZyntraInspectorRange) != 4) @compileError("ZyntraInspectorRange ABI drift");
+    if (@sizeOf(ZyntraInspectorChoice) != 24 or @alignOf(ZyntraInspectorChoice) != 8) @compileError("ZyntraInspectorChoice ABI drift");
+    if (@sizeOf(ZyntraInspectorProperty) != 88 or @alignOf(ZyntraInspectorProperty) != 8) @compileError("ZyntraInspectorProperty ABI drift");
+    if (@sizeOf(ZyntraInspectorViewState) != 32 or @alignOf(ZyntraInspectorViewState) != 8) @compileError("ZyntraInspectorViewState ABI drift");
+    if (@sizeOf(ZyntraInspectorViewOptions) != 20 or @alignOf(ZyntraInspectorViewOptions) != 4) @compileError("ZyntraInspectorViewOptions ABI drift");
+    if (@sizeOf(ZyntraInspectorViewResult) != 48 or @alignOf(ZyntraInspectorViewResult) != 8) @compileError("ZyntraInspectorViewResult ABI drift");
     if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
         @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
     {
@@ -847,6 +942,14 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 64), @sizeOf(ZyntraTimelineViewState));
     try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraTimelineViewOptions));
     try stdt.testing.expectEqual(@as(usize, 64), @sizeOf(ZyntraTimelineViewResult));
+    // Inspector M121.
+    try stdt.testing.expectEqual(@as(usize, 72), @sizeOf(ZyntraInspectorStyle));
+    try stdt.testing.expectEqual(@as(usize, 8), @sizeOf(ZyntraInspectorRange));
+    try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraInspectorChoice));
+    try stdt.testing.expectEqual(@as(usize, 88), @sizeOf(ZyntraInspectorProperty));
+    try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraInspectorViewState));
+    try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraInspectorViewOptions));
+    try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraInspectorViewResult));
     // Docking: espelhos do modelo e do resultado da área interativa.
     try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));
     try stdt.testing.expectEqual(@as(usize, 28), @sizeOf(ZyntraDockPaneInfo));

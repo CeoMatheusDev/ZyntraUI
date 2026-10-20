@@ -3016,6 +3016,319 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 106-119: inspector (M121) — pixel, hover, bool, arraste de
+     * inteiro/real, escolha, rolagem e inválidos. */
+    int c121_px = 0, c121_hover = 0, c121_bool = 0, c121_int = 0;
+    int c121_real = 0, c121_choice = 0, c121_scroll = 0;
+    {
+        ZyntraInspectorStyle c_is;
+        ZyntraInspectorViewState c_istate;
+        ZyntraInspectorViewOptions c_iopt;
+        ZyntraInspectorViewResult c_ires;
+        bool c_bool = false;
+        int64_t c_integer = 10;
+        float c_real = 1.5f;
+        uint32_t c_choice = 0;
+        int64_t c_extra = 0;
+        ZyntraStr c_opts[2] = {{"One", 3}, {"Two", 3}};
+        ZyntraInspectorProperty c_props[6] = {
+            {.name = {"A", 1}, .kind = ZYNTRA_INSPECTOR_BOOLEAN, .value = &c_bool},
+            {.name = {"B", 1}, .kind = ZYNTRA_INSPECTOR_INTEGER, .value = &c_integer},
+            {.name = {"C", 1}, .kind = ZYNTRA_INSPECTOR_REAL, .value = &c_real},
+            {.name = {"D", 1}, .kind = ZYNTRA_INSPECTOR_TEXT, .readonly = true,
+                .text = {"read", 4}},
+            {.name = {"E", 1}, .kind = ZYNTRA_INSPECTOR_CHOICE,
+                .choice = {.index = &c_choice, .options = c_opts,
+                    .options_len = 2}},
+            {.name = {"F", 1}, .kind = ZYNTRA_INSPECTOR_INTEGER, .value = &c_extra},
+        };
+
+        _Static_assert(sizeof(ZyntraInspectorStyle) == 72,
+            "ZyntraInspectorStyle ABI");
+        _Static_assert(sizeof(ZyntraInspectorRange) == 8,
+            "ZyntraInspectorRange ABI");
+        _Static_assert(sizeof(ZyntraInspectorChoice) == 24,
+            "ZyntraInspectorChoice ABI");
+        _Static_assert(sizeof(ZyntraInspectorProperty) == 88,
+            "ZyntraInspectorProperty ABI");
+        _Static_assert(sizeof(ZyntraInspectorViewState) == 32,
+            "ZyntraInspectorViewState ABI");
+        _Static_assert(sizeof(ZyntraInspectorViewOptions) == 20,
+            "ZyntraInspectorViewOptions ABI");
+        _Static_assert(sizeof(ZyntraInspectorViewResult) == 48,
+            "ZyntraInspectorViewResult ABI");
+
+        CHECK(zyntra_style_inspector(ZYNTRA_THEME_DARK, &c_is));
+        assert(zyntra_style_inspector(9, &c_is) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_inspector(0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_inspector_view_state_init(&c_istate));
+        assert(c_istate.active == -1 && c_istate.dragging == -1);
+        assert(c_istate.scroll == 0.0f);
+        CHECK(zyntra_inspector_view_options_default(&c_iopt));
+        assert(c_iopt.step == 0.01f && c_iopt.decimals == 3);
+        assert(c_iopt.scroll_step == 24.0f && c_iopt.coarse_factor == 10.0f);
+        assert(zyntra_inspector_view_state_init(NULL)
+            == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_inspector_view_options_default(NULL)
+            == ZYNTRA_INVALID_ARGUMENT);
+
+        ZyntraFramebuffer *c121fb = NULL;
+        CHECK(zyntra_framebuffer_create(260, 160, &c121fb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 260, 160}));
+        ZyntraThemeColors c121cols;
+        CHECK(zyntra_theme_colors(ZYNTRA_THEME_DARK, &c121cols));
+        ZyntraColor ip = {0, 0, 0, 0};
+        const ZyntraRect c121b = {0, 0, 260, 120};
+        const ZyntraId c121id = zyntra_id_from_string("c:inspector", 12);
+
+        /* Frame 106: desenho e pixel do fundo da primeira linha. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, c121cols.bg));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){400, 400}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_ires.hovered == -1 && c_ires.active == -1);
+        assert(c_ires.changed == -1 && c_ires.dragging == -1);
+        CHECK(zyntra_framebuffer_render(c121fb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(c121fb, 10, 10, &ip));
+        c121_px = (ip.r == c_is.row_bg.r && ip.g == c_is.row_bg.g &&
+            ip.b == c_is.row_bg.b);
+        assert(c121_px);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 107: hover na linha 1. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){150, 30}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_ires.hovered == 1);
+        c121_hover = (c_ires.hovered == 1);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 108: press na linha 0 alterna o booleano. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){30, 10}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){30, 10}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_bool && c_ires.active == 0 && c_ires.active_changed);
+        assert(c_ires.changed == 0);
+        c121_bool = (c_bool && c_ires.changed == 0);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 109: release. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){30, 10}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){30, 10}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_ires.dragging == -1);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 110: press na linha 1 inicia o arraste do inteiro. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){150, 30}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){150, 30}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_ires.active == 1 && c_ires.dragging == 1);
+        assert(c_istate.drag_anchor == 10.0f);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 111: dx=+10 ⇒ inteiro 10 → 20. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){160, 30}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_integer == 20 && c_ires.changed == 1);
+        assert(c_ires.dragging == 1);
+        c121_int = (c_integer == 20 && c_ires.changed == 1);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 112: release. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){160, 30}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){160, 30}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_ires.dragging == -1);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 113: press na linha 2 inicia o arraste do real. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){150, 60}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){150, 60}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_ires.dragging == 2 && c_istate.drag_anchor == 1.5f);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 114: dx=+5, passo 0.01 ⇒ 1.5 → 1.55. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){155, 60}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_real > 1.5499f && c_real < 1.5501f);
+        assert(c_ires.changed == 2);
+        c121_real = (c_real > 1.5499f && c_real < 1.5501f);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 115: release. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){155, 60}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){155, 60}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_ires.dragging == -1);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 116: press na escolha (linha 4) avança para a opção 1. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){150, 110}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){150, 110}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_choice == 1 && c_ires.active == 4 && c_ires.changed == 4);
+        c121_choice = (c_choice == 1 && c_ires.changed == 4);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 117: release. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){150, 110}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){150, 110}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 118: roda (dy=-1) rola 24 px. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){150, 60}));
+        CHECK(zyntra_context_push_mouse_wheel(ctx, 0, -1, (ZyntraVec2){150, 60}));
+        CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+            c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f, &c_ires));
+        assert(c_ires.scrolled && c_istate.scroll == 24.0f);
+        assert(c_ires.scroll_delta == 24.0f);
+        c121_scroll = (c_ires.scrolled && c_istate.scroll == 24.0f);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 119: inválidos e conjunto vazio. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        {
+            ZyntraInspectorProperty bad_p = c_props[0];
+            ZyntraInspectorViewState ibad = c_istate;
+            ZyntraInspectorViewOptions iobad = c_iopt;
+            assert(zyntra_widget_inspector_view(NULL, c121id, c121b,
+                c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_inspector_view(ctx, 0, c121b,
+                c_props, 6, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                NULL, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                c_props, 6, NULL, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                c_props, 6, &c_istate, NULL, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                c_props, 6, &c_istate, &c_iopt, NULL, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                c_props, 6, &c_istate, &c_iopt, &c_is, 0.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            bad_p.name.ptr = NULL;
+            bad_p.name.len = 1;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                &bad_p, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            bad_p = c_props[0];
+            bad_p.kind = 9;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                &bad_p, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            bad_p = c_props[0];
+            bad_p.value = NULL;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                &bad_p, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            bad_p = c_props[3];
+            bad_p.text = (ZyntraStr){NULL, 1};
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                &bad_p, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            bad_p = c_props[4];
+            bad_p.choice.options = NULL;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                &bad_p, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            bad_p = c_props[4];
+            bad_p.choice.options_len = 0;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                &bad_p, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            bad_p = c_props[4];
+            bad_p.choice.index = NULL;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                &bad_p, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            bad_p = c_props[2];
+            bad_p.has_step = true;
+            bad_p.step = 0.0f;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                &bad_p, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            bad_p = c_props[2];
+            bad_p.has_decimals = true;
+            bad_p.decimals = 7;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                &bad_p, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            bad_p = c_props[1];
+            bad_p.has_range = true;
+            bad_p.range = (ZyntraInspectorRange){NAN, 1.0f};
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                &bad_p, 1, &c_istate, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            ibad.scroll = NAN;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                c_props, 6, &ibad, &c_iopt, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            iobad.step = 0.0f;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                c_props, 6, &c_istate, &iobad, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            iobad = c_iopt;
+            iobad.decimals = 7;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                c_props, 6, &c_istate, &iobad, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            iobad = c_iopt;
+            iobad.scroll_step = -1.0f;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                c_props, 6, &c_istate, &iobad, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            iobad = c_iopt;
+            iobad.coarse_factor = 0.5f;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                c_props, 6, &c_istate, &iobad, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            iobad = c_iopt;
+            iobad.fine_factor = 0.0f;
+            assert(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                c_props, 6, &c_istate, &iobad, &c_is, 10.0f,
+                &c_ires) == ZYNTRA_INVALID_ARGUMENT);
+            /* Conjunto vazio e `out_result` nulo são válidos. */
+            CHECK(zyntra_widget_inspector_view(ctx, c121id, c121b,
+                NULL, 0, &c_istate, &c_iopt, &c_is, 10.0f, NULL));
+        }
+        CHECK(zyntra_context_end_frame(ctx));
+
+        zyntra_framebuffer_destroy(c121fb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -3084,6 +3397,9 @@ int main(void) {
         c119_zoom);
     printf("C-ABI timeline px=%d hover=%d key=%d write=%d scrub=%d zoom=%d\n",
         c120_px, c120_hover, c120_key, c120_writeback, c120_scrub, c120_zoom);
+    printf("C-ABI inspector px=%d hover=%d bool=%d int=%d real=%d choice=%d"
+        " scroll=%d\n", c121_px, c121_hover, c121_bool, c121_int, c121_real,
+        c121_choice, c121_scroll);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }
