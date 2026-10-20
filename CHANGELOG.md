@@ -7,6 +7,23 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `c-abi`: **docking na fronteira C** (M113, aditivo) — handle opaco
+  `ZyntraDock` sobre o modelo `DockLayout`, com ciclo
+  `zyntra_dock_create`/`_destroy`/`_init`, construção da árvore
+  (`zyntra_dock_split`, `_set_ratio`, `_add_tab`, `_set_active_tab`,
+  `_remove_pane`) e consultas em pré-ordem (`zyntra_dock_group`,
+  `_panes`, `_splits`). O widget `zyntra_widget_dock_view` desenha
+  fundo/divisórias, trata o arraste das divisórias (ratio recalculado no
+  mesmo frame) e o drop de painéis, devolvendo `ZyntraDockViewResult`
+  (`pane_count`/`split_count`, `changed`, `hovered`/`dragging`, e
+  `has_drop`/`has_dropped` com a zona/rect do realce). `zyntra_style_dock`
+  traz o estilo do tema embutido. Novos tipos com trava de ABI:
+  `ZyntraDockGroup=10`, `ZyntraDockPaneInfo=28`, `ZyntraDockSplitInfo=40`,
+  `ZyntraDockDrop=24`, `ZyntraDockViewResult=88`, `ZyntraDockStyle=36` e o
+  enum `ZyntraDockZone` (0..4, espelho de `dock.DockZone`). O consumidor C
+  ganhou os frames 40–46 (modelo, hover/arraste da divisória com checagem
+  de pixel, e drop de painel com realce translúcido) mais a verificação de
+  que o release acopla os painéis como abas.
 - `draw`: **primitivas de desenho moderno** (M114, aditivo) — a `DrawList`
   ganhou `rect_gradient_radial` (gradiente radial: `color0` no centro,
   `color1` na borda), `rect_gradient_conic` (gradiente cônico por ângulo,

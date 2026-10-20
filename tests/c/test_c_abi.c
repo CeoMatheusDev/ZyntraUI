@@ -1211,6 +1211,279 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 40-46: docking (M113) — modelo, divisória arrastável, drop de
+     * painel (realce translúcido) e checagem de pixel pelo rasterizador. */
+    ZyntraDock *dock = NULL;
+    ZyntraDockStyle ds;
+    size_t d_panes = 0, d_splits_n = 0;
+    int d_hovered = 0, d_dragging = 0, d_changed = 0;
+    int d_px_idle = 0, d_px_hover = 0, d_px_drag = 0, d_px_drop = 0;
+    int d_has_drop = 0, d_has_dropped = 0, d_dropped_tabs = 0;
+    unsigned long long d_id = 0;
+    {
+        _Static_assert(sizeof(ZyntraDockGroup) == 10, "ZyntraDockGroup ABI");
+        _Static_assert(sizeof(ZyntraDockPaneInfo) == 28, "ZyntraDockPaneInfo ABI");
+        _Static_assert(sizeof(ZyntraDockSplitInfo) == 40, "ZyntraDockSplitInfo ABI");
+        _Static_assert(sizeof(ZyntraDockDrop) == 24, "ZyntraDockDrop ABI");
+        _Static_assert(sizeof(ZyntraDockViewResult) == 88, "ZyntraDockViewResult ABI");
+        _Static_assert(sizeof(ZyntraDockStyle) == 36, "ZyntraDockStyle ABI");
+        _Static_assert(ZYNTRA_DOCK_MAX_PANES == 16, "ZYNTRA_DOCK_MAX_PANES");
+        _Static_assert(ZYNTRA_DOCK_MAX_TABS == 4, "ZYNTRA_DOCK_MAX_TABS");
+
+        /* Ciclo de vida, estilo do tema e argumentos nulos. */
+        assert(zyntra_dock_create(7, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_dock_create(7, &dock));
+        assert(dock != NULL);
+        assert(zyntra_dock_init(NULL, 0) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_dock_set_ratio(NULL, 0, 0.5f) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_style_dock(ZYNTRA_THEME_DARK, &ds));
+        assert(zyntra_style_dock(9, &ds) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_dock(ZYNTRA_THEME_DARK, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(ds.divider == 6.0f && ds.border.a == 0 && ds.bg.a == 255);
+
+        const ZyntraRect dbounds = {0, 0, 400, 300};
+        ZyntraDockPaneInfo dpane[ZYNTRA_DOCK_MAX_PANES];
+        ZyntraDockSplitInfo dsplit[ZYNTRA_DOCK_MAX_PANES];
+        ZyntraDockGroup dgrp;
+        uint8_t dleaf = 0;
+
+        /* Layout único (create com painel 7): 1 grupo e nenhum split. */
+        CHECK(zyntra_dock_panes(dock, dbounds, 6.0f, dpane, ZYNTRA_DOCK_MAX_PANES, &d_panes));
+        assert(d_panes == 1 && dpane[0].node == 0);
+        assert(dpane[0].group.count == 1 && dpane[0].group.active == 0);
+        assert(dpane[0].group.panes[0] == 7);
+        CHECK(zyntra_dock_splits(dock, dbounds, 6.0f, dsplit, ZYNTRA_DOCK_MAX_PANES, &d_splits_n));
+        assert(d_splits_n == 0);
+
+        /* Split horizontal 0.5 ⇒ duas folhas com a divisória no meio. */
+        CHECK(zyntra_dock_split(dock, 0, ZYNTRA_HORIZONTAL, 0.5f, 9, &dleaf));
+        CHECK(zyntra_dock_panes(dock, dbounds, 6.0f, dpane, ZYNTRA_DOCK_MAX_PANES, &d_panes));
+        assert(d_panes == 2);
+        assert(dpane[0].group.panes[0] == 7 && dpane[1].group.panes[0] == 9);
+        assert(dpane[0].rect.y == 0.0f && dpane[0].rect.h == 147.0f);
+        assert(dpane[1].rect.y == 153.0f && dpane[1].rect.h == 147.0f);
+        CHECK(zyntra_dock_splits(dock, dbounds, 6.0f, dsplit, ZYNTRA_DOCK_MAX_PANES, &d_splits_n));
+        assert(d_splits_n == 1 && dsplit[0].node == 0 && dsplit[0].orientation == ZYNTRA_HORIZONTAL);
+        assert(dsplit[0].ratio == 0.5f);
+
+        /* Abas: o grupo do painel 9 recebe uma aba, ativa e remove. */
+        CHECK(zyntra_dock_group(dock, dleaf, &dgrp));
+        assert(dgrp.count == 1 && dgrp.panes[0] == 9);
+        {
+            bool added = false, set = false, removed = false;
+            CHECK(zyntra_dock_add_tab(dock, dleaf, 13, &added));
+            assert(added);
+            CHECK(zyntra_dock_set_active_tab(dock, dleaf, 1, &set));
+            assert(set);
+            CHECK(zyntra_dock_group(dock, dleaf, &dgrp));
+            assert(dgrp.count == 2 && dgrp.active == 1);
+            assert(dgrp.panes[0] == 9 && dgrp.panes[1] == 13);
+            CHECK(zyntra_dock_remove_pane(dock, 13, &removed));
+            assert(removed);
+            CHECK(zyntra_dock_group(dock, dleaf, &dgrp));
+            assert(dgrp.count == 1);
+        }
+
+        /* Segment vertical na folha do painel 9 ⇒ 3 grupos e 2 splits (base
+         * das checagens de buffer pequeno logo abaixo). */
+        CHECK(zyntra_dock_split(dock, dleaf, ZYNTRA_VERTICAL, 0.5f, 11, &dleaf));
+        CHECK(zyntra_dock_panes(dock, dbounds, 6.0f, dpane, ZYNTRA_DOCK_MAX_PANES, &d_panes));
+        assert(d_panes == 3);
+        CHECK(zyntra_dock_splits(dock, dbounds, 6.0f, dsplit, ZYNTRA_DOCK_MAX_PANES, &d_splits_n));
+        assert(d_splits_n == 2 && dsplit[1].orientation == ZYNTRA_VERTICAL);
+
+        /* Inválidos: folha inexistente, orientação fora da faixa, out nulo,
+         * buffer pequeno e out_count nulo. */
+        assert(zyntra_dock_split(dock, 99, ZYNTRA_HORIZONTAL, 0.5f, 1, &dleaf) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_dock_split(dock, 0, 9, 0.5f, 1, &dleaf) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_dock_split(dock, 0, ZYNTRA_HORIZONTAL, 0.5f, 1, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        {
+            ZyntraDockPaneInfo one[1];
+            ZyntraDockSplitInfo ones[1];
+            assert(zyntra_dock_panes(dock, dbounds, 6.0f, one, 1, &d_panes) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_dock_splits(dock, dbounds, 6.0f, ones, 1, &d_splits_n) == ZYNTRA_INVALID_ARGUMENT);
+        }
+        assert(zyntra_dock_panes(dock, dbounds, 6.0f, NULL, 0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_dock_panes(dock, dbounds, 6.0f, NULL, 0, &d_panes));
+        assert(d_panes == 3); /* só a contagem: out nulo + out_len 0 */
+        assert(zyntra_dock_group(dock, 99, &dgrp) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_dock_group(dock, 0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_dock_add_tab(NULL, 0, 1, NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+        /* set_ratio ajusta o split raiz e a geometria acompanha. */
+        CHECK(zyntra_dock_set_ratio(dock, 0, 0.75f));
+        CHECK(zyntra_dock_splits(dock, dbounds, 6.0f, dsplit, ZYNTRA_DOCK_MAX_PANES, &d_splits_n));
+        assert(dsplit[0].ratio == 0.75f);
+
+        /* Widget: fundo + divisória, hover, arraste e drop de painel. */
+        ZyntraFramebuffer *dfb = NULL;
+        CHECK(zyntra_framebuffer_create(240, 200, &dfb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 240, 200}));
+        const ZyntraRect wbounds = {0, 0, 240, 200};
+        d_id = (unsigned long long)zyntra_id_from_string("c:dock", 6);
+        assert(d_id != 0);
+
+        /* Refaz o layout em 2 painéis para o widget (240x200, divisória 6). */
+        CHECK(zyntra_dock_init(dock, 7));
+        CHECK(zyntra_dock_split(dock, 0, ZYNTRA_HORIZONTAL, 0.5f, 9, &dleaf));
+
+        ZyntraDockViewResult dres;
+        ZyntraColor dpx = {0, 0, 0, 0};
+
+        /* Frame 40: frio — fundo da área e divisória em repouso. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){236, 196}));
+        CHECK(zyntra_draw_clear(ctx, ds.bg));
+        CHECK(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -1, 0.25f, &ds, &dres));
+        assert(dres.pane_count == 2 && dres.split_count == 1 && !dres.changed);
+        assert(dres.hovered == -1 && dres.dragging == -1);
+        assert(!dres.has_drop && !dres.has_dropped);
+        CHECK(zyntra_framebuffer_render(dfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(dfb, 120, 50, &dpx)); /* dentro do painel 0 */
+        assert(dpx.r == ds.bg.r && dpx.g == ds.bg.g && dpx.b == ds.bg.b);
+        CHECK(zyntra_framebuffer_pixel(dfb, 120, 100, &dpx)); /* divisória */
+        d_px_idle = (dpx.r == ds.divider_idle.r && dpx.g == ds.divider_idle.g);
+        assert(d_px_idle);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 41: hover na faixa (y ∈ [97,103)) realça a divisória. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){120, 100}));
+        CHECK(zyntra_draw_clear(ctx, ds.bg));
+        CHECK(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -1, 0.25f, &ds, &dres));
+        assert(dres.hovered == 0 && !dres.changed);
+        d_hovered = (int)dres.hovered;
+        CHECK(zyntra_framebuffer_render(dfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(dfb, 120, 100, &dpx));
+        d_px_hover = (dpx.r == ds.divider_hover.r && dpx.g == ds.divider_hover.g);
+        assert(d_px_hover);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 42: press na faixa captura (cor de arraste, sem mudança). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){120, 100}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){120, 100}));
+        CHECK(zyntra_draw_clear(ctx, ds.bg));
+        CHECK(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -1, 0.25f, &ds, &dres));
+        assert(dres.dragging == 0 && !dres.changed);
+        d_dragging = (int)dres.dragging;
+        CHECK(zyntra_framebuffer_render(dfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(dfb, 120, 100, &dpx));
+        d_px_drag = (dpx.r == ds.divider_drag.r && dpx.g == ds.divider_drag.g);
+        assert(d_px_drag);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 43: arrasta para y=140 ⇒ ratio 0.7 recalculado no frame. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){120, 140}));
+        CHECK(zyntra_draw_clear(ctx, ds.bg));
+        CHECK(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -1, 0.25f, &ds, &dres));
+        assert(dres.dragging == 0 && dres.changed);
+        d_changed = dres.changed;
+        CHECK(zyntra_dock_splits(dock, wbounds, ds.divider, dsplit, ZYNTRA_DOCK_MAX_PANES, &d_splits_n));
+        assert(dsplit[0].ratio > 0.69f && dsplit[0].ratio < 0.71f);
+        CHECK(zyntra_framebuffer_render(dfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(dfb, 120, 140, &dpx)); /* nova faixa */
+        assert(dpx.r == ds.divider_drag.r);
+        CHECK(zyntra_framebuffer_pixel(dfb, 120, 100, &dpx)); /* saiu da faixa */
+        assert(dpx.r == ds.bg.r);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 44: release encerra o arraste (sem mudança de geometria). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){120, 140}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){120, 140}));
+        CHECK(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -1, 0.25f, &ds, &dres));
+        assert(dres.dragging == -1 && !dres.changed);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frames 45-46: drop do painel 9 sobre o 7 (centro) ⇒ prévia com
+         * realce translúcido; no release os dois viram um grupo de abas. */
+        CHECK(zyntra_dock_init(dock, 7));
+        CHECK(zyntra_dock_split(dock, 0, ZYNTRA_HORIZONTAL, 0.5f, 9, &dleaf));
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){120, 50}));
+        CHECK(zyntra_draw_clear(ctx, ds.bg));
+        CHECK(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            9, 0.25f, &ds, &dres));
+        assert(dres.has_drop && !dres.has_dropped);
+        assert(dres.drop.pane == 9 && dres.drop.target == 7);
+        assert(dres.drop.zone == ZYNTRA_DOCK_ZONE_CENTER);
+        d_has_drop = dres.has_drop;
+        CHECK(zyntra_framebuffer_render(dfb, ctx, NULL));
+        /* Realce = drop_preview (a=80) sobre o fundo, no blend do raster. */
+        {
+            unsigned sa = ds.drop_preview.a, ia = 255u - sa;
+            int er = (ds.drop_preview.r * sa + ds.bg.r * ia + 127) / 255;
+            int eg = (ds.drop_preview.g * sa + ds.bg.g * ia + 127) / 255;
+            int eb = (ds.drop_preview.b * sa + ds.bg.b * ia + 127) / 255;
+            CHECK(zyntra_framebuffer_pixel(dfb, 120, 50, &dpx));
+            d_px_drop = (dpx.r == er && dpx.g == eg && dpx.b == eb);
+            assert(d_px_drop);
+        }
+        CHECK(zyntra_context_end_frame(ctx));
+
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){120, 50}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){120, 50}));
+        CHECK(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            9, 0.25f, &ds, &dres));
+        assert(dres.has_dropped && dres.changed && dres.pane_count == 1);
+        d_has_dropped = dres.has_dropped;
+        CHECK(zyntra_dock_group(dock, dpane[0].node, &dgrp));
+        assert(dgrp.count == 2 && dgrp.active == 1);
+        assert(dgrp.panes[0] == 7 && dgrp.panes[1] == 9);
+        d_dropped_tabs = (dgrp.count == 2);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Inválidos do widget: dock nulo, estilo nulo/inválido, buffer
+         * pequeno, dragging fora da faixa e edge_frac fora de [0,0.5]. */
+        CHECK(zyntra_dock_init(dock, 7));
+        CHECK(zyntra_dock_split(dock, 0, ZYNTRA_HORIZONTAL, 0.5f, 9, &dleaf));
+        CHECK(zyntra_context_begin_frame(ctx));
+        assert(zyntra_widget_dock_view(NULL, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -1, 0.25f, &ds, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_dock_view(ctx, d_id, wbounds, NULL, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -1, 0.25f, &ds, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -1, 0.25f, NULL, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_dock_view(ctx, 0, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -1, 0.25f, &ds, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, 0,
+            -1, 0.25f, &ds, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, NULL, 5,
+            -1, 0.25f, &ds, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -2, 0.25f, &ds, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            70000, 0.25f, &ds, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+            -1, 0.9f, &ds, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        {
+            ZyntraDockStyle bad_ds = ds;
+            bad_ds.divider = -1.0f;
+            assert(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, dpane, ZYNTRA_DOCK_MAX_PANES,
+                -1, 0.25f, &bad_ds, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        }
+        {
+            ZyntraDockPaneInfo tiny1[1];
+            assert(zyntra_widget_dock_view(ctx, d_id, wbounds, dock, tiny1, 1,
+                -1, 0.25f, &ds, &dres) == ZYNTRA_INVALID_ARGUMENT);
+        }
+        CHECK(zyntra_context_end_frame(ctx));
+
+        zyntra_framebuffer_destroy(dfb);
+        zyntra_dock_destroy(dock);
+        dock = NULL;
+        zyntra_dock_destroy(NULL); /* no-op */
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -1254,6 +1527,11 @@ int main(void) {
         " px_bg=%d px_focus=%d ta=%zu ta_ok=%d\n",
         x_ti_len, x_ti_cursor, x_sel, x_over, x_sub, x_focus_escape,
         x_px_bg, x_px_focus, x_ta_len, x_ta_ok);
+    printf("C-ABI dock panes=%zu splits=%zu hovered=%d dragging=%d changed=%d"
+        " drop=%d dropped=%d tabs=%d px=%d/%d/%d/%d id=%llu\n",
+        d_panes, d_splits_n, d_hovered, d_dragging, d_changed,
+        d_has_drop, d_has_dropped, d_dropped_tabs,
+        d_px_idle, d_px_hover, d_px_drag, d_px_drop, d_id);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

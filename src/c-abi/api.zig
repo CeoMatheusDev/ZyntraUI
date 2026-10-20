@@ -40,6 +40,8 @@ const table_mod = @import("../widgets/table.zig");
 const tree_mod = @import("../widgets/tree_view.zig");
 const text_input_mod = @import("../widgets/text_input.zig");
 const textarea_mod = @import("../widgets/textarea.zig");
+const dock_layout_mod = @import("../dock/layout.zig");
+const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
 
 /// Handle opaco. O layout real (`Context`) nunca é exposto.
@@ -80,6 +82,10 @@ fn fromColor(c: types_mod.Color) ct.ZyntraColor {
     return .{ .r = c.r, .g = c.g, .b = c.b, .a = c.a };
 }
 
+fn fromRect(r: types_mod.Rect) ct.ZyntraRect {
+    return .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
+}
+
 /// Erros possíveis ao enfileirar um comando na `DrawList`.
 const DrawError = error{ OutOfMemory, InvalidCommand, InvalidUtf8, InvalidMetrics };
 
@@ -114,12 +120,314 @@ pub export fn zyntra_version_prerelease() callconv(.c) [*:0]const u8 {
 }
 
 // ---------------------------------------------------------------------------
-// Docking System C-API function declarations (M113)
+// Docking: modelo, consultas e área interativa (M113)
 // ---------------------------------------------------------------------------
-pub extern fn zyntra_dock_create(layout: c_int, out: *?void) callconv(.c) ct.ZyntraResult;
-pub extern fn zyntra_dock_destroy(handle: ?*void) callconv(.c) void;
-pub extern fn zyntra_dock_zone(zone: c_int) callconv(.c) ct.ZyntraDockZone;
-pub extern fn zyntra_dock_style(style: *ct.ZyntraDockStyle) callconv(.c) void;
+// O layout de docking (`dock.layout.DockLayout`) é um array fixo de nós; a
+// fronteira C o expõe como um handle opaco alocado no `page_allocator`
+// interno (como `ZyntraFramebuffer`). O chamador cria com `zyntra_dock_create`
+// e destrói com `zyntra_dock_destroy` exatamente uma vez; todos os mutadores e
+// consultas operam sobre esse handle. Nada é exposto do layout interno.
+
+/// Handle opaco do layout de docking. Nunca desreferenciar, copiar o struct
+/// interno (não existe na fronteira) ou liberar com `free`.
+pub const ZyntraDock = opaque {};
+
+const Dock = dock_layout_mod.DockLayout;
+
+fn toDock(h: *ZyntraDock) *Dock {
+    return @ptrCast(@alignCast(h));
+}
+
+fn checkDock(h: ?*ZyntraDock) !*ZyntraDock {
+    return h orelse error.InvalidArgument;
+}
+
+/// Orientação de um split a partir do valor de `ZyntraOrientation`
+/// (`ZYNTRA_HORIZONTAL`/`ZYNTRA_VERTICAL`); fora da faixa ⇒ `null`.
+fn toDockOrientation(v: i32) ?dock_layout_mod.DockOrientation {
+    const o = std.enums.fromInt(ct.ZyntraOrientation, v) orelse return null;
+    return switch (o) {
+        .horizontal => .horizontal,
+        .vertical => .vertical,
+    };
+}
+
+fn fromDockZone(z: dock_layout_mod.DockZone) ct.ZyntraDockZone {
+    return switch (z) {
+        .left => .left,
+        .right => .right,
+        .top => .top,
+        .bottom => .bottom,
+        .center => .center,
+    };
+}
+
+fn fromDockGroup(g: dock_layout_mod.DockGroup) ct.ZyntraDockGroup {
+    var out: ct.ZyntraDockGroup = .{};
+    @memcpy(&out.panes, &g.panes);
+    out.count = g.count;
+    out.active = g.active;
+    return out;
+}
+
+fn fromDockDrop(d: dock_view_mod.DockDrop) ct.ZyntraDockDrop {
+    return .{
+        .pane = d.pane,
+        .target = d.target,
+        .zone = fromDockZone(d.zone),
+        .rect = fromRect(d.rect),
+    };
+}
+
+/// Cria um layout de docking com um único painel (`pane`) no `page_allocator`
+/// interno. `out` não pode ser nulo.
+pub export fn zyntra_dock_create(
+    pane: u16,
+    out: ?*?*ZyntraDock,
+) callconv(.c) ct.ZyntraResult {
+    const o = out orelse return .invalid_argument;
+    const gpa = std.heap.page_allocator;
+    const dock = gpa.create(Dock) catch return .out_of_memory;
+    dock.* = .{};
+    dock_layout_mod.dockInit(dock, pane);
+    o.* = @ptrCast(dock);
+    return .ok;
+}
+
+/// Destrói o layout de docking (NULL é seguro).
+pub export fn zyntra_dock_destroy(handle: ?*ZyntraDock) callconv(.c) void {
+    const h = handle orelse return;
+    std.heap.page_allocator.destroy(toDock(h));
+}
+
+/// Reinicia o layout como um único painel `pane`.
+pub export fn zyntra_dock_init(handle: ?*ZyntraDock, pane: u16) callconv(.c) ct.ZyntraResult {
+    const h = checkDock(handle) catch return .invalid_argument;
+    dock_layout_mod.dockInit(toDock(h), pane);
+    return .ok;
+}
+
+/// Divide a folha `leaf` em dois lados: o grupo original fica em um lado e
+/// `pane` no outro, com `orientation` (`ZYNTRA_HORIZONTAL`/`_VERTICAL`) e
+/// `ratio` em [0,1] (clampado). `out_leaf` recebe o índice da folha nova.
+/// Folha inválida ou capacidade esgotada ⇒ `ZYNTRA_INVALID_ARGUMENT`.
+pub export fn zyntra_dock_split(
+    handle: ?*ZyntraDock,
+    leaf: u8,
+    orientation: i32,
+    ratio: f32,
+    pane: u16,
+    out_leaf: ?*u8,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkDock(handle) catch return .invalid_argument;
+    const o = out_leaf orelse return .invalid_argument;
+    const orient = toDockOrientation(orientation) orelse return .invalid_argument;
+    const idx = dock_layout_mod.dockSplit(toDock(h), leaf, orient, ratio, pane) catch return .invalid_argument;
+    o.* = @intCast(idx);
+    return .ok;
+}
+
+/// Ajusta a proporção do split `node` (clampada; no-op se não for split).
+pub export fn zyntra_dock_set_ratio(
+    handle: ?*ZyntraDock,
+    node: u8,
+    ratio: f32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkDock(handle) catch return .invalid_argument;
+    dock_layout_mod.dockSetRatio(toDock(h), node, ratio);
+    return .ok;
+}
+
+/// Anexa `pane` como aba da folha `leaf`. `out_added` (opcional) recebe se
+/// houve mudança (grupo cheio/duplicado ⇒ no-op, `false`).
+pub export fn zyntra_dock_add_tab(
+    handle: ?*ZyntraDock,
+    leaf: u8,
+    pane: u16,
+    out_added: ?*bool,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkDock(handle) catch return .invalid_argument;
+    const added = dock_layout_mod.dockAddTab(toDock(h), leaf, pane);
+    if (out_added) |o| o.* = added;
+    return .ok;
+}
+
+/// Ativa a aba `tab` da folha `leaf`. `out_set` (opcional) recebe se houve
+/// mudança (folha inválida/aba fora da faixa ⇒ no-op, `false`).
+pub export fn zyntra_dock_set_active_tab(
+    handle: ?*ZyntraDock,
+    leaf: u8,
+    tab: u8,
+    out_set: ?*bool,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkDock(handle) catch return .invalid_argument;
+    const set = dock_layout_mod.dockSetActiveTab(toDock(h), leaf, tab);
+    if (out_set) |o| o.* = set;
+    return .ok;
+}
+
+/// Remove o painel `pane` (aba ou grupo inteiro; dissolve o split se for a
+/// última aba). `out_removed` (opcional) recebe se houve mudança.
+pub export fn zyntra_dock_remove_pane(
+    handle: ?*ZyntraDock,
+    pane: u16,
+    out_removed: ?*bool,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkDock(handle) catch return .invalid_argument;
+    const removed = dock_layout_mod.dockRemovePane(toDock(h), pane);
+    if (out_removed) |o| o.* = removed;
+    return .ok;
+}
+
+/// Grupo (abas + ativa) da folha `leaf`; nó não-folha/índice inválido ⇒
+/// `ZYNTRA_INVALID_ARGUMENT`.
+pub export fn zyntra_dock_group(
+    handle: ?*ZyntraDock,
+    leaf: u8,
+    out_group: ?*ct.ZyntraDockGroup,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkDock(handle) catch return .invalid_argument;
+    const o = out_group orelse return .invalid_argument;
+    const g = dock_layout_mod.dockGroup(toDock(h), leaf) orelse return .invalid_argument;
+    o.* = fromDockGroup(g);
+    return .ok;
+}
+
+/// Divisórias do layout (pré-ordem) dentro de `bounds`, com `divider` px
+/// entre os lados. `out` pode ser NULL com `out_len == 0` (só a contagem);
+/// `out_len` menor que o número de splits ⇒ `ZYNTRA_INVALID_ARGUMENT`.
+pub export fn zyntra_dock_splits(
+    handle: ?*ZyntraDock,
+    bounds: ct.ZyntraRect,
+    divider: f32,
+    out: ?[*]ct.ZyntraDockSplitInfo,
+    out_len: usize,
+    out_count: ?*usize,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkDock(handle) catch return .invalid_argument;
+    const count = out_count orelse return .invalid_argument;
+    var scratch: [Dock.max_panes]dock_layout_mod.DockSplitInfo = undefined;
+    const n = dock_layout_mod.dockSplits(toDock(h), toRect(bounds), divider, &scratch) catch return .invalid_argument;
+    if (out) |dst| {
+        if (out_len < n) return .invalid_argument;
+        for (scratch[0..n], 0..) |info, i| {
+            dst[i] = .{
+                .node = info.node,
+                .orientation = @intCast(@backingInt(info.orientation)),
+                .ratio = info.ratio,
+                .rect = fromRect(info.rect),
+                .divider = fromRect(info.divider),
+            };
+        }
+    } else if (out_len != 0) return .invalid_argument;
+    count.* = n;
+    return .ok;
+}
+
+/// Grupos (nó + abas/ativo + rect) em pré-ordem das folhas, dentro de
+/// `bounds`, com `divider` px entre os lados. `out` pode ser NULL com
+/// `out_len == 0` (só a contagem); `out_len` menor que o número de grupos ⇒
+/// `ZYNTRA_INVALID_ARGUMENT`.
+pub export fn zyntra_dock_panes(
+    handle: ?*ZyntraDock,
+    bounds: ct.ZyntraRect,
+    divider: f32,
+    out: ?[*]ct.ZyntraDockPaneInfo,
+    out_len: usize,
+    out_count: ?*usize,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkDock(handle) catch return .invalid_argument;
+    const count = out_count orelse return .invalid_argument;
+    var scratch: [Dock.max_panes]dock_layout_mod.DockPaneInfo = undefined;
+    const n = dock_layout_mod.dockPanes(toDock(h), toRect(bounds), divider, &scratch) catch return .invalid_argument;
+    if (out) |dst| {
+        if (out_len < n) return .invalid_argument;
+        for (scratch[0..n], 0..) |info, i| {
+            dst[i] = .{
+                .node = info.node,
+                .group = fromDockGroup(info.group),
+                .rect = fromRect(info.rect),
+            };
+        }
+    } else if (out_len != 0) return .invalid_argument;
+    count.* = n;
+    return .ok;
+}
+
+/// Estilo de docking do tema embutido (`kind`: `ZYNTRA_THEME_DARK`/`_LIGHT`).
+pub export fn zyntra_style_dock(kind: i32, out_style: ?*ct.ZyntraDockStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.dockStyle();
+    return .ok;
+}
+
+/// Área de docking interativa: desenha fundo/divisórias, trata o arraste das
+/// divisórias e o drop de painéis, e devolve os grupos (nó + abas/ativo +
+/// rect) em `panes`. `dragging` é o painel arrastado (`-1` = nenhum) e
+/// `edge_frac` a fração de borda que dispara uma zona (0..0.5).
+/// `panes` é do chamador e precisa comportar `ZYNTRA_DOCK_MAX_PANES` entradas
+/// (NULL + `panes_len == 0` desenha sem escrever). `out_result` é opcional.
+pub export fn zyntra_widget_dock_view(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    dock: ?*ZyntraDock,
+    panes: ?[*]ct.ZyntraDockPaneInfo,
+    panes_len: usize,
+    dragging: i64,
+    edge_frac: f32,
+    style: ?*const ct.ZyntraDockStyle,
+    out_result: ?*ct.ZyntraDockViewResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const d = checkDock(dock) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    if (panes == null and panes_len > 0) return .invalid_argument;
+    if (panes != null and panes_len == 0) return .invalid_argument;
+    if (dragging < -1 or dragging > 0xFFFF) return .invalid_argument;
+
+    var scratch: [Dock.max_panes]dock_layout_mod.DockPaneInfo = undefined;
+    const cap: usize = if (panes) |_| @min(panes_len, scratch.len) else scratch.len;
+    const options: dock_view_mod.DockViewOptions = .{
+        .dragging = if (dragging < 0) null else @as(u16, @intCast(dragging)),
+        .edge_frac = edge_frac,
+    };
+    const res = dock_view_mod.dockView(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toDock(d),
+        toRect(bounds),
+        scratch[0..cap],
+        st.*,
+        options,
+    ) catch |err| {
+        if (err == error.OutOfBuffer) return .invalid_argument;
+        return mapWidgetErr(err);
+    };
+
+    if (panes) |dst| {
+        for (scratch[0..res.pane_count], 0..) |info, i| {
+            dst[i] = .{
+                .node = info.node,
+                .group = fromDockGroup(info.group),
+                .rect = fromRect(info.rect),
+            };
+        }
+    }
+    if (out_result) |o| o.* = .{
+        .pane_count = res.pane_count,
+        .split_count = res.split_count,
+        .changed = res.changed,
+        .has_drop = res.drop != null,
+        .has_dropped = res.dropped != null,
+        .hovered = fromIndex(res.hovered),
+        .dragging = fromIndex(res.dragging),
+        .drop = if (res.drop) |dd| fromDockDrop(dd) else .{},
+        .dropped = if (res.dropped) |dd| fromDockDrop(dd) else .{},
+    };
+    return .ok;
+}
 
 // ---------------------------------------------------------------------------
 // Draw moderno API function declarations (M114)
@@ -3067,4 +3375,224 @@ test "C-ABI draw: gradiente cônico e linha tracejada" {
     try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_draw_count(handle, &n));
     try stdt.testing.expectEqual(@as(usize, 2), n);
     try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI docking: modelo, consultas e widget dock_view" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+
+    // Ciclo de vida: create/destroy, null-safe e out nulo.
+    var dock: ?*ZyntraDock = null;
+    try eq(ok, zyntra_dock_create(7, &dock));
+    defer zyntra_dock_destroy(dock);
+    try stdt.testing.expect(dock != null);
+    zyntra_dock_destroy(null); // null-safe
+    try eq(bad, zyntra_dock_create(7, null));
+    try eq(bad, zyntra_dock_init(null, 0));
+    try eq(bad, zyntra_dock_set_ratio(null, 0, 0.5));
+
+    // Estilo do tema embutido; kind fora da faixa é rejeitado.
+    var ds: ct.ZyntraDockStyle = undefined;
+    try eq(ok, zyntra_style_dock(0, &ds));
+    try stdt.testing.expect(ds.isValid());
+    try eq(bad, zyntra_style_dock(9, &ds));
+    try eq(bad, zyntra_style_dock(0, null));
+
+    const bounds: ct.ZyntraRect = .{ .x = 0, .y = 0, .w = 400, .h = 300 };
+    var panes: [16]ct.ZyntraDockPaneInfo = undefined;
+    var splits: [16]ct.ZyntraDockSplitInfo = undefined;
+    var group: ct.ZyntraDockGroup = undefined;
+    var count: usize = 0;
+    var leaf: u8 = 0;
+    var leaf2: u8 = 0;
+
+    // Layout único (create com painel 7): 1 folha, 0 splits.
+    try eq(ok, zyntra_dock_panes(dock, bounds, 6, &panes, panes.len, &count));
+    try eq(@as(usize, 1), count);
+    try eq(@as(u8, 0), panes[0].node);
+    try eq(@as(u16, 7), panes[0].group.panes[0]);
+    try eq(@as(u8, 1), panes[0].group.count);
+    try eq(@as(u8, 0), panes[0].group.active);
+    try eq(ok, zyntra_dock_splits(dock, bounds, 6, &splits, splits.len, &count));
+    try eq(@as(usize, 0), count);
+
+    // Split horizontal 0.5 ⇒ duas folhas com a divisória no meio.
+    try eq(ok, zyntra_dock_split(dock, 0, 0, 0.5, 9, &leaf));
+    try eq(ok, zyntra_dock_panes(dock, bounds, 6, &panes, panes.len, &count));
+    try eq(@as(usize, 2), count);
+    try eq(@as(u16, 7), panes[0].group.panes[0]);
+    try eq(@as(u16, 9), panes[1].group.panes[0]);
+    try eq((ct.ZyntraRect){ .x = 0, .y = 0, .w = 400, .h = 147 }, panes[0].rect);
+    try eq((ct.ZyntraRect){ .x = 0, .y = 153, .w = 400, .h = 147 }, panes[1].rect);
+    try eq(ok, zyntra_dock_splits(dock, bounds, 6, &splits, splits.len, &count));
+    try eq(@as(usize, 1), count);
+    try eq(@as(u8, 0), splits[0].node);
+    try eq(@as(u8, 0), splits[0].orientation); // horizontal
+    try stdt.testing.expectApproxEqAbs(@as(f32, 0.5), splits[0].ratio, 0.0001);
+
+    // Segment vertical na segunda folha ⇒ 3 grupos, 2 splits (base das
+    // checagens de buffer pequeno abaixo).
+    try eq(ok, zyntra_dock_split(dock, leaf, 1, 0.5, 11, &leaf2));
+    try eq(ok, zyntra_dock_panes(dock, bounds, 6, &panes, panes.len, &count));
+    try eq(@as(usize, 3), count);
+    try eq(ok, zyntra_dock_splits(dock, bounds, 6, &splits, splits.len, &count));
+    try eq(@as(usize, 2), count);
+    try eq(@as(u8, 1), splits[1].orientation); // vertical
+
+    // Buffer pequeno e saída nula são recusados sem escrever.
+    var one_pane: [1]ct.ZyntraDockPaneInfo = undefined;
+    var one_split: [1]ct.ZyntraDockSplitInfo = undefined;
+    try eq(bad, zyntra_dock_panes(dock, bounds, 6, &one_pane, 1, &count));
+    try eq(bad, zyntra_dock_splits(dock, bounds, 6, &one_split, 1, &count));
+    try eq(bad, zyntra_dock_panes(dock, bounds, 6, null, 0, null));
+    try eq(bad, zyntra_dock_splits(dock, bounds, 6, &splits, splits.len, null));
+    // Só a contagem: `out` nulo com `out_len == 0` é válido.
+    try eq(ok, zyntra_dock_panes(dock, bounds, 6, null, 0, &count));
+    try eq(@as(usize, 3), count);
+    // Argumentos inválidos nos mutadores/consultas.
+    try eq(bad, zyntra_dock_split(dock, 99, 0, 0.5, 1, &leaf));
+    try eq(bad, zyntra_dock_split(dock, 0, 9, 0.5, 1, &leaf));
+    try eq(bad, zyntra_dock_split(dock, 0, 0, 0.5, 1, null));
+    try eq(bad, zyntra_dock_group(dock, 99, &group));
+    try eq(bad, zyntra_dock_group(dock, 0, null));
+    try eq(bad, zyntra_dock_add_tab(null, 0, 1, null));
+
+    // Abas: o grupo do painel 9 (folha real, nó 3) recebe uma aba, ativa e
+    // remove. `leaf` virou nó interno no split vertical, então reuso a folha
+    // consultada em pré-ordem (panes[1] == painel 9).
+    const leaf9 = panes[1].node;
+    try eq(ok, zyntra_dock_group(dock, leaf9, &group));
+    try eq(@as(u8, 1), group.count);
+    try eq(@as(u16, 9), group.panes[0]);
+    var added = false;
+    try eq(ok, zyntra_dock_add_tab(dock, leaf9, 13, &added));
+    try eq(true, added);
+    var set = false;
+    try eq(ok, zyntra_dock_set_active_tab(dock, leaf9, 1, &set));
+    try eq(true, set);
+    try eq(ok, zyntra_dock_group(dock, leaf9, &group));
+    try eq(@as(u8, 2), group.count);
+    try eq(@as(u8, 1), group.active);
+    try eq(@as(u16, 9), group.panes[0]);
+    try eq(@as(u16, 13), group.panes[1]);
+    var removed = false;
+    try eq(ok, zyntra_dock_remove_pane(dock, 13, &removed));
+    try eq(true, removed);
+    try eq(ok, zyntra_dock_group(dock, leaf9, &group));
+    try eq(@as(u8, 1), group.count);
+
+    // Reset + widget: fundo e divisória desenhadas, geometria no lugar.
+    try eq(ok, zyntra_dock_init(dock, 7));
+    try eq(ok, zyntra_dock_split(dock, 0, 0, 0.5, 9, &leaf));
+    var ctx_handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 400, .h = 300 }, &ctx_handle));
+    defer zyntra_context_destroy(ctx_handle);
+    const id = zyntra_id_from_string("c:dock", 6);
+    var res: ct.ZyntraDockViewResult = .{};
+
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_draw_clear(ctx_handle, .{ .r = 0, .g = 0, .b = 0, .a = 255 }));
+    var before: usize = 0;
+    try eq(ok, zyntra_draw_count(ctx_handle, &before));
+    try eq(ok, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, -1, 0.25, &ds, &res));
+    var after: usize = 0;
+    try eq(ok, zyntra_draw_count(ctx_handle, &after));
+    try eq(@as(usize, 2), after - before); // fundo + divisória
+    try eq(@as(usize, 2), res.pane_count);
+    try eq(@as(usize, 1), res.split_count);
+    try eq(false, res.changed);
+    try eq(@as(i64, -1), res.hovered);
+    try eq(@as(i64, -1), res.dragging);
+    try eq(false, res.has_drop);
+    try eq(false, res.has_dropped);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Hover na faixa (y ∈ [147,153)) ⇒ hovered == 0, sem mudança.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 200, .y = 150 }));
+    try eq(ok, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, -1, 0.25, &ds, &res));
+    try eq(@as(i64, 0), res.hovered);
+    try eq(false, res.changed);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Press captura a divisória; o arraste muda o ratio no mesmo frame.
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 200, .y = 150 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, true, .{ .x = 200, .y = 150 }));
+    try eq(ok, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, -1, 0.25, &ds, &res));
+    try eq(@as(i64, 0), res.dragging);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 200, .y = 210 }));
+    try eq(ok, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, -1, 0.25, &ds, &res));
+    try eq(@as(i64, 0), res.dragging);
+    try eq(true, res.changed);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+    try eq(ok, zyntra_dock_splits(dock, bounds, 6, &splits, splits.len, &count));
+    try eq(@as(usize, 1), count);
+    try stdt.testing.expectApproxEqAbs(@as(f32, 0.7), splits[0].ratio, 0.0001);
+
+    // Soltar encerra o arraste (sem mudança de geometria).
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 200, .y = 210 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, false, .{ .x = 200, .y = 210 }));
+    try eq(ok, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, -1, 0.25, &ds, &res));
+    try eq(@as(i64, -1), res.dragging);
+    try eq(false, res.changed);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    // Drop de painel: 9 arrastado sobre 7 no centro ⇒ realce; no release a
+    // aba é acoplada e o grupo alvo passa a ter 2 painéis.
+    try eq(ok, zyntra_dock_init(dock, 7));
+    try eq(ok, zyntra_dock_split(dock, 0, 0, 0.5, 9, &leaf));
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 200, .y = 50 }));
+    try eq(ok, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, 9, 0.25, &ds, &res));
+    try eq(true, res.has_drop);
+    try eq(false, res.has_dropped);
+    try eq(@as(u16, 9), res.drop.pane);
+    try eq(@as(u16, 7), res.drop.target);
+    try eq(@as(ct.ZyntraDockZone, .center), res.drop.zone);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(ok, zyntra_context_push_mouse_move(ctx_handle, .{ .x = 200, .y = 50 }));
+    try eq(ok, zyntra_context_push_mouse_button(ctx_handle, 0, false, .{ .x = 200, .y = 50 }));
+    try eq(ok, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, 9, 0.25, &ds, &res));
+    try eq(true, res.has_dropped);
+    try eq(true, res.changed);
+    try eq(@as(usize, 1), res.pane_count);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
+    try eq(ok, zyntra_dock_group(dock, panes[0].node, &group));
+    try eq(@as(u8, 2), group.count);
+    try eq(@as(u16, 7), group.panes[0]);
+    try eq(@as(u16, 9), group.panes[1]);
+    try eq(@as(u8, 1), group.active);
+
+    // Argumentos inválidos: nunca crasham e devolvem invalid_argument.
+    try eq(ok, zyntra_dock_init(dock, 7));
+    try eq(ok, zyntra_dock_split(dock, 0, 0, 0.5, 9, &leaf));
+    try eq(ok, zyntra_context_begin_frame(ctx_handle));
+    try eq(bad, zyntra_widget_dock_view(null, id, bounds, dock, &panes, panes.len, -1, 0.25, &ds, &res));
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, id, bounds, null, &panes, panes.len, -1, 0.25, &ds, &res));
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, -1, 0.25, null, &res));
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, 0, bounds, dock, &panes, panes.len, -1, 0.25, &ds, &res));
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, 0, -1, 0.25, &ds, &res));
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, null, 5, -1, 0.25, &ds, &res));
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, -2, 0.25, &ds, &res));
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, 70000, 0.25, &ds, &res));
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, -1, 0.9, &ds, &res));
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, id, .{ .x = 0, .y = 0, .w = -1, .h = 10 }, dock, &panes, panes.len, -1, 0.25, &ds, &res));
+    var tiny: [1]ct.ZyntraDockPaneInfo = undefined;
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &tiny, 1, -1, 0.25, &ds, &res));
+    var bad_ds = ds;
+    bad_ds.divider = -1;
+    try eq(bad, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, &panes, panes.len, -1, 0.25, &bad_ds, &res));
+    // Modo "só desenha": `panes` nulo com `out_len == 0` é válido.
+    try eq(ok, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, null, 0, -1, 0.25, &ds, &res));
+    try eq(@as(usize, 2), res.pane_count);
+    try eq(ok, zyntra_context_end_frame(ctx_handle));
 }

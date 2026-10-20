@@ -342,6 +342,58 @@ zyntra_widget_text_area(ctx, area_id, (ZyntraRect){8, 44, 320, 200},
   `undone`/`redone` ficam sempre falsos: undo/redo exigem o histórico
   comptime das variantes Zig (`textInputHistory`/`textInputClipboard`).
 
+Sexto lote (M113): docking — `ZyntraDock` opaco (modelo `DockLayout`), o
+widget `zyntra_widget_dock_view` e as consultas de geometria.
+
+```c
+ZyntraDockStyle ds;
+zyntra_style_dock(ZYNTRA_THEME_DARK, &ds);   /* divisória 6 px, fundo do tema */
+
+ZyntraDock *dock = NULL;
+zyntra_dock_create(1, &dock);                    /* um painel (id 1) */
+uint8_t leaf = 0;
+zyntra_dock_split(dock, 0, ZYNTRA_HORIZONTAL, 0.5f, 2, &leaf);  /* abre o 2 */
+
+/* `panes` é do chamador (ZYNTRA_DOCK_MAX_PANES entradas). */
+ZyntraDockPaneInfo panes[ZYNTRA_DOCK_MAX_PANES];
+ZyntraDockViewResult dres;
+int64_t dragging = -1;                          /* -1 = nenhum painel arrastado */
+
+zyntra_context_begin_frame(ctx);
+zyntra_draw_clear(ctx, ds.bg);
+zyntra_widget_dock_view(ctx, dock_id, (ZyntraRect){0, 0, 640, 480}, dock,
+    panes, ZYNTRA_DOCK_MAX_PANES, dragging, 0.25f, &ds, &dres);
+/* desenhe os painéis (panel/tab_bar) usando panes[i].rect depois disto */
+zyntra_context_end_frame(ctx);
+```
+
+* `zyntra_dock_create`/`_destroy` (NULL seguro) e `_init` reinicia como um
+  único painel. `_split` divide a folha em dois lados (devolve a folha nova
+  em `out_leaf`), `_add_tab` anexa uma aba, `_set_active_tab` ativa uma aba
+  e `_remove_pane` remove um painel (dissolve o split se for o último).
+* Consultas: `zyntra_dock_group` lê o grupo (abas + ativa) de uma folha;
+  `zyntra_dock_panes`/`zyntra_dock_splits` devolvem a geometria atual em
+  pré-ordem, com `divider` px de folga entre os lados. `out` só pode ser
+  NULL com `out_len == 0` (só a contagem); `out_len` menor que o número de
+  entradas ⇒ `ZYNTRA_INVALID_ARGUMENT`.
+* O widget desenha fundo/divisórias, trata o arraste das divisórias (o
+  ratio muda no **mesmo frame**, sem lag) e o drop de painéis. `dragging` é
+  o painel que o chamador arrasta (`-1` = nenhum) e `edge_frac` a fração de
+  borda (0..0.5) que dispara uma zona de drop. `out_result` é opcional.
+* `ZyntraDockViewResult` devolve `pane_count`/`split_count`, `changed`
+  (geometria mudou), `hovered`/`dragging` (índice da divisória, `-1` =
+  nenhum) e `has_drop`/`has_dropped` com `drop`/`dropped` (zona, painéis e
+  rect do realce). Ao ver `has_dropped`, limpe o estado de arraste.
+* `ZyntraDockZone` (`left`/`right`/`top`/`bottom`/`center`) espelha o
+  `DockZone` da API Zig com os mesmos valores; `center` acopla como aba.
+* Erros: handle/dock nulo, `out_leaf`/`out_count`/`out_group` nulo, folha
+  inexistente, `orientation` fora de `ZYNTRA_HORIZONTAL`/`_VERTICAL`,
+  buffer pequeno, `dragging` fora de `-1..0xFFFF` ou `edge_frac` fora de
+  `[0, 0.5]` ⇒ `ZYNTRA_INVALID_ARGUMENT`.
+* `zyntra_dock_create` aloca no `page_allocator` interno; `panes` de
+  `zyntra_widget_dock_view` é preenchido pelo widget (nunca alocado pela
+  lib). As consultas usam scratch na pilha (até 16 entradas).
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -379,6 +431,10 @@ zyntra_widget_text_area(ctx, area_id, (ZyntraRect){8, 44, 320, 200},
   `ZyntraTextInputResult=16`/`ZyntraTextAreaResult=16`.
 * M110: também travados `ZyntraTreeItem=40`, estilo `TreeView=40` e
   resultado `TreeView=32`.
+* M113: também travados `ZyntraDockGroup=10`, `ZyntraDockPaneInfo=28`,
+  `ZyntraDockSplitInfo=40`, `ZyntraDockDrop=24`, `ZyntraDockViewResult=88` e
+  `ZyntraDockStyle=36`; `ZyntraDockZone` é enum `c_int` (0..4, mesmos
+  valores de `dock.DockZone`).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -399,5 +455,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..."
 ```

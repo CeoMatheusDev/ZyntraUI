@@ -16,6 +16,9 @@
  * M110: ZyntraTreeItem=40, estilo TreeView=40 e resultado TreeView=32.
  * M111: ZyntraKey (enum c_int, 0..20) e ZYNTRA_MOD_* (bit 0=shift..3=super).
  * M112: estilos TextInput=32 e resultados TextInput=16/TextArea=16.
+ * M113: docking — handle opaco ZyntraDock, ZyntraDockZone (enum c_int,
+ * 0..4), ZyntraDockGroup=10, ZyntraDockPaneInfo=28, ZyntraDockSplitInfo=40,
+ * ZyntraDockDrop=24, ZyntraDockViewResult=88 e ZyntraDockStyle=36.
  */
 
 #include <stdbool.h>
@@ -643,6 +646,135 @@ ZyntraResult zyntra_widget_text_area(ZyntraContext *handle, ZyntraId id, ZyntraR
     char *buffer, size_t buffer_len, size_t *len, size_t *cursor, size_t *anchor,
     float *scroll_y, float size, const ZyntraTextInputStyle *style,
     ZyntraTextAreaResult *out_result);
+
+/* Docking (M113): layout de painéis divididos com arraste de divisória e
+ * acoplamento de painéis (drop). `ZyntraDock` é um handle opaco sobre o
+ * modelo DockLayout da API Zig (alocado no page_allocator interno).
+ *
+ * Ciclo típico: create → split/add_tab (monta a árvore) → widget dock_view
+ * (desenha e interage) → destroy. As consultas `zyntra_dock_panes`/
+ * `zyntra_dock_splits` devolvem a geometria atual em pré-ordem das folhas,
+ * com `divider` px de folga entre os lados de cada split. `out` só pode ser
+ * NULL com `out_len == 0` (só a contagem); `out_len` menor que o número de
+ * entradas ⇒ ZYNTRA_INVALID_ARGUMENT.
+ *
+ * O widget `zyntra_widget_dock_view` desenha fundo/divisórias, trata o
+ * arraste das divisórias e o drop de painéis. `dragging` é o painel
+ * arrastado (`-1` = nenhum) e `edge_frac` a fração de borda (0..0.5) que
+ * dispara uma zona de drop. O chamador mantém o buffer `panes` com
+ * ZYNTRA_DOCK_MAX_PANES entradas (NULL + `panes_len == 0` desenha sem
+ * escrever). `out_result` é opcional (NULL ignora). */
+
+#define ZYNTRA_DOCK_MAX_PANES 16
+#define ZYNTRA_DOCK_MAX_TABS 4
+
+typedef struct ZyntraDock ZyntraDock;
+
+typedef enum ZyntraDockZone {
+    ZYNTRA_DOCK_ZONE_LEFT = 0,
+    ZYNTRA_DOCK_ZONE_RIGHT = 1,
+    ZYNTRA_DOCK_ZONE_TOP = 2,
+    ZYNTRA_DOCK_ZONE_BOTTOM = 3,
+    ZYNTRA_DOCK_ZONE_CENTER = 4
+} ZyntraDockZone;
+
+typedef struct ZyntraDockGroup {
+    uint16_t panes[ZYNTRA_DOCK_MAX_TABS];
+    uint8_t count;
+    uint8_t active;
+} ZyntraDockGroup;
+
+typedef struct ZyntraDockPaneInfo {
+    uint8_t node; /* índice da folha (aceito por group/set_active_tab) */
+    ZyntraDockGroup group;
+    ZyntraRect rect; /* onde o chamador desenha o corpo/abas */
+} ZyntraDockPaneInfo;
+
+typedef struct ZyntraDockSplitInfo {
+    uint8_t node;
+    uint8_t orientation; /* ZYNTRA_HORIZONTAL / ZYNTRA_VERTICAL */
+    float ratio;
+    ZyntraRect rect;    /* área total do split (os dois lados) */
+    ZyntraRect divider; /* faixa sensível ao mouse */
+} ZyntraDockSplitInfo;
+
+typedef struct ZyntraDockDrop {
+    uint16_t pane;   /* painel arrastado */
+    uint16_t target; /* painel sob o cursor */
+    ZyntraDockZone zone;
+    ZyntraRect rect; /* realce da zona */
+} ZyntraDockDrop;
+
+typedef struct ZyntraDockViewResult {
+    size_t pane_count;  /* grupos escritos em `panes` */
+    size_t split_count; /* divisórias do layout */
+    bool changed;       /* a geometria mudou neste frame */
+    bool has_drop;      /* `drop` é válido (prévia) */
+    bool has_dropped;   /* `dropped` é válido (aplicado) */
+    int64_t hovered;    /* divisória sob o mouse (-1 = nenhuma) */
+    int64_t dragging;   /* divisória em arraste (-1 = nenhuma) */
+    ZyntraDockDrop drop;    /* prévia de acoplamento sob o cursor */
+    ZyntraDockDrop dropped; /* drop aplicado neste frame */
+} ZyntraDockViewResult;
+
+typedef struct ZyntraDockStyle {
+    float divider;
+    ZyntraColor divider_idle;
+    ZyntraColor divider_hover;
+    ZyntraColor divider_drag;
+    ZyntraColor bg;
+    ZyntraColor border;
+    float border_width;
+    ZyntraColor drop_preview;
+    ZyntraColor drop_border;
+} ZyntraDockStyle;
+
+/* Ciclo de vida. `create` aloca e inicializa com um único painel `pane`;
+ * `out` não pode ser NULL. `destroy` aceita NULL. `init` reinicia o layout
+ * como um único painel. */
+ZyntraResult zyntra_dock_create(uint16_t pane, ZyntraDock **out);
+void zyntra_dock_destroy(ZyntraDock *handle);
+ZyntraResult zyntra_dock_init(ZyntraDock *handle, uint16_t pane);
+
+/* Construção da árvore. `zyntra_dock_split` divide a folha `leaf` em dois
+ * lados (`orientation` + `ratio` em [0,1], clampado) e devolve em `out_leaf`
+ * (não-NULL) a folha nova. `zyntra_dock_set_ratio` ajusta a proporção de um
+ * split (no-op se o nó não for split). `zyntra_dock_add_tab` anexa `pane`
+ * como aba da folha (`out_added` opcional). `zyntra_dock_set_active_tab`
+ * ativa a aba `tab` (`out_set` opcional). `zyntra_dock_remove_pane` remove o
+ * painel (dissolve o split se for a última aba; `out_removed` opcional). */
+ZyntraResult zyntra_dock_split(ZyntraDock *handle, uint8_t leaf,
+    int32_t orientation, float ratio, uint16_t pane, uint8_t *out_leaf);
+ZyntraResult zyntra_dock_set_ratio(ZyntraDock *handle, uint8_t node, float ratio);
+ZyntraResult zyntra_dock_add_tab(ZyntraDock *handle, uint8_t leaf, uint16_t pane,
+    bool *out_added);
+ZyntraResult zyntra_dock_set_active_tab(ZyntraDock *handle, uint8_t leaf,
+    uint8_t tab, bool *out_set);
+ZyntraResult zyntra_dock_remove_pane(ZyntraDock *handle, uint16_t pane,
+    bool *out_removed);
+
+/* Consultas em pré-ordem das folhas. `zyntra_dock_group` devolve o grupo
+ * (abas + ativa) da folha `leaf`; nó não-folha/índice inválido ⇒
+ * ZYNTRA_INVALID_ARGUMENT. `out_count` não pode ser NULL. */
+ZyntraResult zyntra_dock_group(ZyntraDock *handle, uint8_t leaf,
+    ZyntraDockGroup *out_group);
+ZyntraResult zyntra_dock_splits(ZyntraDock *handle, ZyntraRect bounds,
+    float divider, ZyntraDockSplitInfo *out, size_t out_len, size_t *out_count);
+ZyntraResult zyntra_dock_panes(ZyntraDock *handle, ZyntraRect bounds,
+    float divider, ZyntraDockPaneInfo *out, size_t out_len, size_t *out_count);
+
+/* Estilo de docking do tema embutido (`theme_kind`: ZYNTRA_THEME_DARK/_LIGHT).
+ * O estilo devolvido é mutável — ajuste e passe ao widget. */
+ZyntraResult zyntra_style_dock(int32_t theme_kind, ZyntraDockStyle *out_style);
+
+/* Área de docking interativa: desenha fundo/divisórias, trata o arraste das
+ * divisórias e o drop de painéis, e preenche `panes` com os grupos atuais.
+ * `dragging` é o painel arrastado (`-1` = nenhum) e `edge_frac` a fração de
+ * borda (0..0.5) que dispara uma zona de drop. */
+ZyntraResult zyntra_widget_dock_view(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, ZyntraDock *dock, ZyntraDockPaneInfo *panes,
+    size_t panes_len, int64_t dragging, float edge_frac,
+    const ZyntraDockStyle *style, ZyntraDockViewResult *out_result);
 
 #ifdef __cplusplus
 }
