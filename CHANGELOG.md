@@ -5,6 +5,24 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `draw`: **primitivas de desenho moderno** (M114, aditivo) — a `DrawList`
+  ganhou `rect_gradient_radial` (gradiente radial: `color0` no centro,
+  `color1` na borda), `rect_gradient_conic` (gradiente cônico por ângulo,
+  radianos desde +X), `circle_outline` (contorno circular com espessura),
+  `circle_dashed` (contorno tracejado) e `line_dashed` (reta tracejada com
+  fase medida ao longo do traço). O backend de referência
+  (`software/raster`) implementa os cinco: os gradientes interpolam por
+  canal com `t` clampado em [0,1], e os contornos usam distância radial
+  (SDF) para cobertura anti-serrilhada.
+- `c-abi`: **fronteira C do desenho moderno** (M114, aditivo) —
+  `zyntra_draw_gradient_radial`, `zyntra_draw_gradient_conic`,
+  `zyntra_draw_circle_outline`, `zyntra_draw_circle_dashed` e
+  `zyntra_draw_line_dashed`, com as mesmas validações da API Zig
+  (coordenadas não-finitas, espessura/dash/gap não-positivos e handle nulo
+  são recusados sem enfileirar).
+
 ## [1.34.0] - 2026-10-18
 
 MINOR estável, 100% compatível: a fronteira C ganha **entrada de teclado,
