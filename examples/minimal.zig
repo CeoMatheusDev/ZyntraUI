@@ -2336,4 +2336,106 @@ pub fn main() !void {
         "m105 focus cold={d} on={d} kept={d} off={d} idle={}\n",
         .{ m105_ti_cold, m105_ti_on, m105_ti_kept, m105_ti_off, m105_ti_idle },
     );
+
+    // ---- M133: texto com fonte real (atlas de glifos) --------------------
+    // O atlas é construído aqui (glifos 5x7 desenhados à mão); o host real
+    // rasterizaria a fonte. O texto sai como BLITS do atlas — então o
+    // rasterizador de referência (que não desenha glifos) mostra o texto.
+    {
+        const glyph_w: u32 = 5;
+        const glyph_h: u32 = 7;
+        const atlas_px: u32 = 16;
+
+        var builder = zyntra_ui.text.atlas.Builder.init(atlas_px, atlas_px, 1);
+        defer builder.deinit(allocator);
+
+        // 'A' e 'B' como blocos 5x7 (0 = vazio, 1 = tinta).
+        const art_a = [_]u8{
+            0, 1, 1, 1, 0,
+            1, 0, 0, 0, 1,
+            1, 0, 0, 0, 1,
+            1, 1, 1, 1, 1,
+            1, 0, 0, 0, 1,
+            1, 0, 0, 0, 1,
+            1, 0, 0, 0, 1,
+        };
+        const art_b = [_]u8{
+            1, 1, 1, 1, 0,
+            1, 0, 0, 0, 1,
+            1, 0, 0, 0, 1,
+            1, 1, 1, 1, 0,
+            1, 0, 0, 0, 1,
+            1, 0, 0, 0, 1,
+            1, 1, 1, 1, 0,
+        };
+        // Reserva 'A' e 'B' (a arte é aplicada direto na imagem do atlas).
+        _ = try builder.addGlyph(allocator, 'A', glyph_w, glyph_h, .{
+            .advance = 6,
+            .bearing_y = -7,
+            .height = 7,
+        });
+        _ = try builder.addGlyph(allocator, 'B', glyph_w, glyph_h, .{
+            .advance = 6,
+            .bearing_y = -7,
+            .height = 7,
+        });
+
+        var atlas_img: [atlas_px * atlas_px * 4]u8 = undefined;
+        @memset(&atlas_img, 0);
+        var atlas = try builder.finish(allocator, .{
+            .width = atlas_px,
+            .height = atlas_px,
+            .stride = atlas_px * 4,
+            .pixels = &atlas_img,
+        });
+        defer atlas.deinit(allocator);
+
+        // Pinta a arte dos glifos dentro das regiões reservadas.
+        for (atlas.glyphs) |g| {
+            const art = if (g.codepoint == 'A') art_a else art_b;
+            for (art, 0..) |v, i| {
+                if (v == 0) continue;
+                const gx = i % 5;
+                const gy = i / 5;
+                const px = g.region.x + gx;
+                const py = g.region.y + gy;
+                const o = (@as(usize, py) * atlas_px + px) * 4;
+                atlas_img[o] = 255;
+                atlas_img[o + 1] = 255;
+                atlas_img[o + 2] = 255;
+                atlas_img[o + 3] = 255;
+            }
+        }
+
+        var fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 64, 24);
+        defer fb.deinit(allocator);
+        fb.clear(zyntra_ui.Color.rgb(0, 0, 0));
+
+        const vp = zyntra_ui.Rect.init(0, 0, 64, 24);
+        ctx.beginFrame();
+        const res = try label_mod.labelAtlas(
+            &ctx,
+            zyntra_ui.Id.fromString("examples/m133:label"),
+            zyntra_ui.Rect.init(2, 2, 60, 12),
+            "AB",
+            zyntra_ui.Color.rgb(255, 255, 255),
+            &atlas,
+            false,
+        );
+        _ = try zyntra_ui.software.raster.render(&fb, ctx.drawCommands(), vp);
+        ctx.endFrame();
+
+        // O texto ficou visível no framebuffer (o fallback de texto seria
+        // pulado pelo rasterizador de referência).
+        var lit: u32 = 0;
+        for (0..24) |y| {
+            for (0..64) |x| {
+                if (fb.get(@intCast(x), @intCast(y))[0] > 0) lit += 1;
+            }
+        }
+        std.debug.print(
+            "m133 atlas w={d} blits={d} lit={d} ascent={d}\n",
+            .{ @as(u32, @intFromFloat(res.metrics.width)), ctx.drawCommands().len, lit, @as(u32, @intFromFloat(atlas.ascent())) },
+        );
+    }
 }

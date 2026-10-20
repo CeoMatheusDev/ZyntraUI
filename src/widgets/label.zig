@@ -17,6 +17,9 @@ const context_mod = @import("../core/context.zig");
 const id_mod = @import("../core/id.zig");
 const metrics_mod = @import("../text/metrics.zig");
 const wrap_mod = @import("../text/wrap.zig");
+const atlas_mod = @import("../text/atlas.zig");
+const layout_mod = @import("../text/layout.zig");
+const image_mod = @import("../draw/image.zig");
 
 pub const LabelResult = struct {
     metrics: metrics_mod.TextMetrics = .{},
@@ -96,6 +99,134 @@ test "label emite texto, detecta truncate e debug desenha" {
     ctx.beginFrame();
     try stdt.testing.expectError(error.InvalidUtf8, label(&ctx, id, types.Rect.init(0, 0, 100, 20), "\xff", types.Color.rgb(0, 0, 0), font, false));
     try stdt.testing.expectError(error.InvalidArgument, label(&ctx, .null, types.Rect.init(0, 0, 100, 20), "A", types.Color.rgb(0, 0, 0), font, false));
+    ctx.endFrame();
+}
+
+/// Rótulo desenhado a partir de um atlas de glifos (M133, aditivo).
+///
+/// Cada glifo vira um blit da sua região no atlas — assim o texto fica
+/// visível até no rasterizador de referência, que não rasteriza glifos.
+/// A medição usa os AVANÇOS REAIS do atlas (fonte proporcional), então
+/// largura medida e desenhada coincidem. Sem quebra suave (o corte por
+/// largura do fallback é monospace).
+pub fn labelAtlas(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    text: []const u8,
+    color: types.Color,
+    atlas: *const atlas_mod.FontAtlas,
+    debug_draw: bool,
+) !LabelResult {
+    if (id.isNull()) return error.InvalidArgument;
+    if (atlas.glyphs.len == 0) return error.InvalidArgument;
+    if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
+        !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h) or
+        bounds.w < 0 or bounds.h < 0)
+    {
+        return error.InvalidArgument;
+    }
+    const layout = try layout_mod.Layout.fromAtlas(atlas);
+    const m = try layout.measure(text);
+    const res = LabelResult{
+        .metrics = m,
+        .truncated = bounds.w > 0 and m.width > bounds.w,
+    };
+    // A linha de base fica na ascente do atlas: o topo do texto alinha
+    // com o topo do rect.
+    const baseline = types.Vec2.init(bounds.x, bounds.y + atlas.ascent());
+    layout.draw(&ctx.draw, ctx.allocator, text, baseline, color) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidCommand => return error.InvalidCommand,
+        error.InvalidUtf8 => return error.InvalidUtf8,
+        error.InvalidMetrics => return error.InvalidArgument,
+        error.InvalidGlyph => return error.InvalidArgument,
+        error.InvalidArgument => return error.InvalidArgument,
+    };
+    if (debug_draw) {
+        ctx.draw.rectOutline(ctx.allocator, bounds, color, 1.0) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.InvalidCommand => return error.InvalidCommand,
+        };
+    }
+    return res;
+}
+
+test "labelAtlas mede pelos avanços reais e blita os glifos" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:label-atlas");
+
+    // Atlas com 2 glifos: 'A' (avanço 5) e 'B' (avanço 3), 4x8 px.
+    var b = atlas_mod.Builder.init(32, 32, 1);
+    defer b.deinit(gpa);
+    _ = try b.addGlyph(gpa, 'A', 4, 8, .{ .advance = 5, .bearing_y = -8, .height = 8 });
+    _ = try b.addGlyph(gpa, 'B', 4, 8, .{ .advance = 3, .bearing_y = -8, .height = 8 });
+    var bytes: [32 * 32 * 4]u8 = undefined;
+    for (&bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = try image_mod.Image.init(32, 32, &bytes);
+    var atlas = try b.finish(gpa, img);
+    defer atlas.deinit(gpa);
+
+    ctx.beginFrame();
+    const r = try labelAtlas(
+        &ctx,
+        id,
+        types.Rect.init(2, 3, 100, 20),
+        "AB",
+        types.Color.rgb(255, 255, 255),
+        &atlas,
+        false,
+    );
+    // Largura real: 5 + 3 = 8 (o fallback monospace daria 12).
+    try stdt.testing.expectEqual(@as(f32, 8), r.metrics.width);
+    try stdt.testing.expect(!r.truncated);
+    // Um blit por glifo (nada de comando `.text`).
+    try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len);
+    try stdt.testing.expect(ctx.drawCommands()[0] == .image);
+    try stdt.testing.expect(ctx.drawCommands()[1] == .image);
+    // A linha de base fica na ascente (8): o topo do glifo alinha com o
+    // topo do rect (y = bounds.y + asc + bearing_y = 3 + 8 - 8).
+    try stdt.testing.expectEqual(@as(f32, 3), ctx.drawCommands()[0].image.rect.y);
+    // O glifo tem 4x8 px no atlas (escala 1) e o segundo avança 5 px.
+    try stdt.testing.expectEqual(@as(f32, 4), ctx.drawCommands()[0].image.rect.w);
+    try stdt.testing.expectEqual(@as(f32, 8), ctx.drawCommands()[0].image.rect.h);
+    try stdt.testing.expectEqual(@as(f32, 2 + 5), ctx.drawCommands()[1].image.rect.x);
+    ctx.endFrame();
+
+    // Truncation e inválidos.
+    ctx.beginFrame();
+    const r2 = try labelAtlas(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 4, 20),
+        "AB",
+        types.Color.rgb(255, 255, 255),
+        &atlas,
+        true,
+    );
+    try stdt.testing.expect(r2.truncated);
+    try stdt.testing.expectEqual(@as(usize, 3), ctx.drawCommands().len); // 2 blits + outline
+    try stdt.testing.expectError(error.InvalidUtf8, labelAtlas(
+        &ctx,
+        id,
+        types.Rect.init(0, 0, 100, 20),
+        "\xff",
+        types.Color.rgb(0, 0, 0),
+        &atlas,
+        false,
+    ));
+    try stdt.testing.expectError(error.InvalidArgument, labelAtlas(
+        &ctx,
+        .null,
+        types.Rect.init(0, 0, 100, 20),
+        "A",
+        types.Color.rgb(0, 0, 0),
+        &atlas,
+        false,
+    ));
     ctx.endFrame();
 }
 

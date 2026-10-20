@@ -240,6 +240,18 @@ try zyntra_ui.text.atlas.drawRun(
 Glyph metrics are in logical pixels; `atlas.scale` records how many atlas
 pixels make one logical pixel, which is what high-DPI atlases need.
 
+`text.layout.Layout` measures and draws with the *same* source — either
+the fallback metrics or a real atlas — so the measured width never drifts
+from the drawn one. `widgets.label.labelAtlas` renders a label from an
+atlas: every glyph becomes a blit of its region, so text is visible even
+in the reference rasterizer (which does not rasterize glyphs).
+
+```zig
+const layout = try zyntra_ui.TextLayout.fromAtlas(&atlas);
+const m = try layout.measure("Hello"); // real (proportional) advances
+try layout.draw(&ctx.draw, gpa, "Hello", pos, color); // blits per glyph
+```
+
 ### Flex layout
 
 `layout.flex` distributes children in a row or column with gaps,

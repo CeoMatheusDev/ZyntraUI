@@ -5,6 +5,22 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+- `text`: **layout de texto com fonte real ou fallback** (M132, aditivo) —
+  `text.layout.Layout` mede e desenha com a MESMA fonte: as métricas de
+  fallback (monospace) ou um `FontAtlas` (avanços reais, fonte
+  proporcional). Expõe `advance`/`measure`/`truncateToWidth`/`lineHeight` e
+  `draw`, que emite o comando `.text` no fallback e blits do atlas quando
+  há fonte real — medido e desenhado nunca divergem.
+- `widgets`: **rótulo com atlas de glifos** (M133, aditivo) —
+  `label.labelAtlas` desenha o texto a partir de um `FontAtlas` (cada glifo
+  vira um blit da sua região), com a linha de base na ascente do atlas e
+  medição pelos avanços reais. Como o texto vira blit, ele fica visível
+  até no rasterizador de referência, que não rasteriza glifos.
+- `examples`: **demo de fonte real** (M134) — o exemplo mínimo monta um
+  atlas de glifos 5x7 à mão, desenha um rótulo com `labelAtlas` e
+  confere os pixels no framebuffer (38 pixels acesos), provando o caminho
+  completo do atlas.
+
 ## [1.36.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a base de UI ganha **imagens** (RGBA8 nos

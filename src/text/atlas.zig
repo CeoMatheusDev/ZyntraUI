@@ -212,15 +212,37 @@ pub const FontAtlas = struct {
         return width;
     }
 
+    /// Ascente do atlas: distância da linha de base até o topo do
+    /// bitmap mais alto (0 quando nenhum glifo tem `bearing_y < 0`).
+    pub fn ascent(self: *const FontAtlas) f32 {
+        var max_a: f32 = 0;
+        for (self.glyphs) |g| {
+            const asc = @max(0, -g.metrics.bearing_y);
+            if (asc > max_a) max_a = asc;
+        }
+        return max_a;
+    }
+
+    /// Descida do atlas: distância da linha de base até abaixo do bitmap
+    /// mais baixo (0 quando nenhum glifo desce da base).
+    pub fn descent(self: *const FontAtlas) f32 {
+        var max_d: f32 = 0;
+        for (self.glyphs) |g| {
+            const d = @max(0, g.metrics.bearing_y + g.metrics.height);
+            if (d > max_d) max_d = d;
+        }
+        return max_d;
+    }
+
     /// Altura de linha do atlas: maior (ascente + descida) dos glifos.
     /// A ascente vem do `bearing_y` (negativo = acima da base) e a
     /// descida do que sobra abaixo da base.
     pub fn lineHeight(self: *const FontAtlas) f32 {
         var max_h: f32 = 0;
         for (self.glyphs) |g| {
-            const ascent = @max(0, -g.metrics.bearing_y);
-            const descent = @max(0, g.metrics.bearing_y + g.metrics.height);
-            const h = ascent + descent;
+            const asc = @max(0, -g.metrics.bearing_y);
+            const desc = @max(0, g.metrics.bearing_y + g.metrics.height);
+            const h = asc + desc;
             if (h > max_h) max_h = h;
         }
         return max_h;
