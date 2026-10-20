@@ -41,6 +41,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   desenha cada linha como blits do atlas (limite de 64 linhas, como no
   `labelWrapped`).
 
+- `examples`: **demo do novo stack de UI** (M138) — o exemplo mínimo
+  compõe layout flex (3 colunas, a do meio cresce), o widget de imagem com
+  `cover` e a projeção do frame para o espaço de dispositivo (DPI 2x),
+  conferindo os comandos resultantes.
+
 ## [1.36.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a base de UI ganha **imagens** (RGBA8 nos

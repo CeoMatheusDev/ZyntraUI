@@ -2438,4 +2438,54 @@ pub fn main() !void {
             .{ @as(u32, @intFromFloat(res.metrics.width)), ctx.drawCommands().len, lit, @as(u32, @intFromFloat(atlas.ascent())) },
         );
     }
+
+    // ---- M138: novo stack de UI (flex + imagem + escala DPI) ------------
+    // Layout flex (3 colunas, a do meio cresce), widget de imagem com
+    // `cover` e projeção do frame para o espaço de dispositivo (DPI 2x).
+    {
+        const items = [_]zyntra_ui.FlexItem{
+            .{ .size = .{ .w = 40, .h = 20 } },
+            .{ .size = .{ .w = 0, .h = 20 }, .grow = 1 },
+            .{ .size = .{ .w = 40, .h = 20 } },
+        };
+        var rects: [3]zyntra_ui.Rect = undefined;
+        try zyntra_ui.layout.flex.flex(
+            zyntra_ui.Rect.init(0, 0, 200, 20),
+            &items,
+            .{ .direction = .row, .gap = 4 },
+            &rects,
+        );
+
+        // Imagem 2x2 RGBA8 (vermelho, verde / azul, branco).
+        const pixels = [16]u8{
+            255, 0, 0,   255, 0,   255, 0,   255,
+            0,   0, 255, 255, 255, 255, 255, 255,
+        };
+        const img = try zyntra_ui.Image.init(2, 2, &pixels);
+
+        var device = zyntra_ui.DrawList.initEmpty();
+        defer device.deinit(allocator);
+
+        ctx.beginFrame();
+        try zyntra_ui.widgets.image.image(&ctx, rects[0], img, .{
+            .fit = .cover,
+        });
+        try ctx.draw.rectFilled(allocator, rects[1], zyntra_ui.Color.rgb(40, 60, 80));
+        // Projeção para pixels de dispositivo (DPI 2x).
+        try ctx.draw.scaledInto(allocator, &device, 2.0);
+        ctx.endFrame();
+
+        var blits: usize = 0;
+        var rects_dev: usize = 0;
+        for (device.items()) |cmd| {
+            if (cmd == .image) blits += 1;
+            if (cmd == .rect_filled) rects_dev += 1;
+        }
+        std.debug.print(
+            "m138 flex w={d} blits={d} rects={d} cmds={d}\n",
+            .{ @as(u32, @intFromFloat(rects[1].w)), blits, rects_dev, device.len() },
+        );
+        std.debug.assert(blits == 1);
+        std.debug.assert(rects_dev == 1);
+    }
 }
