@@ -981,8 +981,7 @@ fn drawTextAreaContent(
         }
 
         if (le > ls) {
-            ctx.draw.pushText(
-                ctx.allocator,
+            ctx.pushText(
                 .{ .x = text_x, .y = y },
                 style.text,
                 font,
@@ -1008,8 +1007,7 @@ fn drawTextAreaContent(
                 const pre = c.preedit();
                 const m_pre = metrics_mod.measure(pre, font) catch return error.InvalidArgument;
                 const m_cur = metrics_mod.measure(pre[0..c.cursor], font) catch return error.InvalidArgument;
-                ctx.draw.pushText(
-                    ctx.allocator,
+                ctx.pushText(
                     .{ .x = cx, .y = cy },
                     style.text,
                     font,

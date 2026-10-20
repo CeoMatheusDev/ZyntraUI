@@ -139,7 +139,7 @@ fn pushLabel(
     font: metrics_mod.FontMetrics,
     text: []const u8,
 ) context_mod.ContextError!void {
-    ctx.draw.pushText(ctx.allocator, pos, color, font, text) catch |err| switch (err) {
+    ctx.pushText(pos, color, font, text) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
         error.InvalidMetrics, error.InvalidUtf8 => return error.InvalidArgument,

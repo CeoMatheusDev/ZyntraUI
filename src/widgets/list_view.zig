@@ -206,8 +206,7 @@ pub fn beginListView(
         };
 
         const text_color = if (is_selected) style.text_selected else style.text;
-        ctx.draw.pushText(
-            ctx.allocator,
+        ctx.pushText(
             .{ .x = bounds.x + style.padding_x, .y = y + (style.item_height - font.lineHeight()) / 2 },
             text_color,
             font,

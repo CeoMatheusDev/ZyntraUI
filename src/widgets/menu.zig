@@ -328,8 +328,7 @@ fn menuInner(
             }
         }
         if (items[i].label.len > 0) {
-            ctx.draw.pushText(
-                ctx.allocator,
+            ctx.pushText(
                 .{ .x = label_x, .y = row.y + 4 },
                 if (selectable(items[i])) style.text else style.text_disabled,
                 font,
@@ -353,8 +352,7 @@ fn menuInner(
                     fits = sx >= label_x + lm.width + 8;
                 }
                 if (fits) {
-                    ctx.draw.pushText(
-                        ctx.allocator,
+                    ctx.pushText(
                         .{ .x = sx, .y = row.y + 4 },
                         style.text_disabled,
                         font,

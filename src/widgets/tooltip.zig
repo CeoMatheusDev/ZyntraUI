@@ -85,8 +85,7 @@ pub fn tooltip(
         error.InvalidCommand => return error.InvalidCommand,
     };
     if (text.len > 0) {
-        ctx.draw.pushText(
-            ctx.allocator,
+        ctx.pushText(
             .{ .x = box.x + pad, .y = box.y + pad },
             style.text,
             font,

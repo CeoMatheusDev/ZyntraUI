@@ -180,8 +180,7 @@ pub fn panel(
     if (title_slice.len > 0) {
         const lh = font.lineHeight();
         const ty = bounds.y + @max(0, (header_h - lh) / 2);
-        ctx.draw.pushText(
-            ctx.allocator,
+        ctx.pushText(
             .{ .x = bounds.x + style.padding_x, .y = ty },
             style.title,
             font,

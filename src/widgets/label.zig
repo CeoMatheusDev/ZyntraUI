@@ -53,8 +53,7 @@ pub fn label(
         .metrics = m,
         .truncated = bounds.w > 0 and m.width > bounds.w,
     };
-    ctx.draw.pushText(
-        ctx.allocator,
+    ctx.pushText(
         .{ .x = bounds.x, .y = bounds.y },
         color,
         font,
@@ -350,8 +349,7 @@ pub fn labelWrapped(
         const r = ranges[i];
         if (r.len == 0) continue; // linha vazia ocupa altura, sem comando
         const slice = text[r.start..][0..r.len];
-        ctx.draw.pushText(
-            ctx.allocator,
+        ctx.pushText(
             .{ .x = bounds.x, .y = bounds.y + @as(f32, @floatFromInt(i)) * font.lineHeight() },
             color,
             font,

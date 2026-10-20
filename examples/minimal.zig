@@ -2513,4 +2513,79 @@ pub fn main() !void {
         );
         std.debug.assert(px[0] == 128);
     }
+
+    // ---- M143: fonte de bitmap global (vale para todos os widgets) ----
+    // Um atlas monoespaçado (avanço 6 = o das métricas com size 10)
+    // registrado no Context: todo texto desenhado pelos widgets sai do
+    // atlas, e aparece até no rasterizador de referência.
+    {
+        var builder = zyntra_ui.text.atlas.Builder.init(16, 16, 1);
+        defer builder.deinit(allocator);
+        _ = try builder.addGlyph(allocator, 'A', 5, 7, .{
+            .advance = 6,
+            .bearing_y = -7,
+            .height = 7,
+        });
+        _ = try builder.addGlyph(allocator, 'B', 5, 7, .{
+            .advance = 6,
+            .bearing_y = -7,
+            .height = 7,
+        });
+
+        var atlas_img: [16 * 16 * 4]u8 = undefined;
+        @memset(&atlas_img, 0);
+        var atlas = try builder.finish(allocator, .{
+            .width = 16,
+            .height = 16,
+            .stride = 16 * 4,
+            .pixels = &atlas_img,
+        });
+        defer atlas.deinit(allocator);
+
+        // Pinta um bloco 5x7 em cada glifo reservado.
+        for (atlas.glyphs) |g| {
+            for (0..7) |gy| {
+                for (0..5) |gx| {
+                    const o = (@as(usize, g.region.y + gy) * 16 +
+                        (g.region.x + gx)) * 4;
+                    atlas_img[o] = 255;
+                    atlas_img[o + 3] = 255;
+                }
+            }
+        }
+
+        const bitmap = try zyntra_ui.BitmapFont.init(&atlas);
+        ctx.setBitmapFont(bitmap);
+
+        var fb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 24, 12);
+        defer fb.deinit(allocator);
+        fb.clear(zyntra_ui.Color.rgb(0, 0, 0));
+
+        ctx.beginFrame();
+        _ = try label_mod.label(
+            &ctx,
+            zyntra_ui.Id.fromString("examples/m143:label"),
+            zyntra_ui.Rect.init(1, 1, 20, 10),
+            "AB",
+            zyntra_ui.Color.rgb(255, 255, 255),
+            zyntra_ui.FontMetrics.withSize(10),
+            false,
+        );
+        _ = try zyntra_ui.software.raster.render(
+            &fb,
+            ctx.drawCommands(),
+            zyntra_ui.Rect.init(0, 0, 24, 12),
+        );
+        ctx.endFrame();
+        ctx.setBitmapFont(null);
+
+        var lit: u32 = 0;
+        for (0..12) |y| {
+            for (0..24) |x| {
+                if (fb.get(@intCast(x), @intCast(y))[0] > 0) lit += 1;
+            }
+        }
+        std.debug.print("m143 bitmap lit={d} blits={d}\n", .{ lit, 2 });
+        std.debug.assert(lit == 70); // 2 glifos de 5x7
+    }
 }

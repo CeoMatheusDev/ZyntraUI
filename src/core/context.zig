@@ -22,6 +22,9 @@ const std = @import("std");
 const types = @import("types.zig");
 const id_mod = @import("id.zig");
 const scale_mod = @import("scale.zig");
+const metrics_mod = @import("../text/metrics.zig");
+const atlas_mod = @import("../text/atlas.zig");
+const bitmap_mod = @import("../text/bitmap.zig");
 const event_mod = @import("../event/event.zig");
 const draw_mod = @import("../draw/commands.zig");
 const dnd_mod = @import("../dnd/service.zig");
@@ -66,6 +69,9 @@ pub const Context = struct {
     /// Escala DPI vigente (M125): o resto da biblioteca fala em pixels
     /// lógicos; o host converte entrada/saída com esta escala.
     scale: scale_mod.DpiScale = .{},
+    /// Fonte de bitmap monoespaçada aplicada a TODOS os widgets (M142).
+    /// `null` = sem fonte de bitmap (o texto vira comando `.text`).
+    bitmap_font: ?bitmap_mod.BitmapFont = null,
     frame_index: u64,
     state: FrameState,
     events: event_mod.EventQueue,
@@ -257,6 +263,50 @@ pub const Context = struct {
     /// Libera o foco de teclado (ex.: click fora, troca de tela).
     pub fn clearFocus(self: *Self) void {
         self.focus_owner = null;
+    }
+
+    /// Registra (ou remove, com `null`) a fonte de bitmap global (M142).
+    /// O atlas é emprestado e precisa viver enquanto estiver registrado.
+    pub fn setBitmapFont(self: *Self, font: ?bitmap_mod.BitmapFont) void {
+        self.bitmap_font = font;
+    }
+
+    /// Desenha texto com a fonte vigente: com a fonte de bitmap
+    /// registrada (e de mesmo avanço que as métricas), o texto sai do
+    /// atlas como blits; senão, vira o comando `.text` de sempre.
+    ///
+    /// Erros: os mesmos de `DrawList.pushText` (e o atlas inconsistente
+    /// vira `InvalidCommand`).
+    pub fn pushText(
+        self: *Self,
+        pos: types.Vec2,
+        color: types.Color,
+        font: metrics_mod.FontMetrics,
+        text: []const u8,
+    ) error{ OutOfMemory, InvalidCommand, InvalidUtf8, InvalidMetrics }!void {
+        if (self.bitmap_font) |bf| {
+            if (bf.matches(font)) {
+                // A linha de base fica na ascente do atlas: o topo do
+                // glifo alinha com o topo do texto.
+                const baseline = types.Vec2.init(pos.x, pos.y + bf.atlas.ascent());
+                atlas_mod.drawRun(&self.draw, self.allocator, bf.atlas, text, baseline, color) catch |err| return switch (err) {
+                    error.OutOfMemory => error.OutOfMemory,
+                    error.InvalidUtf8 => error.InvalidUtf8,
+                    error.InvalidMetrics => error.InvalidMetrics,
+                    error.InvalidGlyph,
+                    error.DuplicateGlyph,
+                    error.AtlasFull,
+                    => error.InvalidCommand,
+                };
+                return;
+            }
+        }
+        self.draw.pushText(self.allocator, pos, color, font, text) catch |err| return switch (err) {
+            error.OutOfMemory => error.OutOfMemory,
+            error.InvalidCommand => error.InvalidCommand,
+            error.InvalidUtf8 => error.InvalidUtf8,
+            error.InvalidMetrics => error.InvalidMetrics,
+        };
     }
 
     /// Define o alfa global dos comandos seguintes (0..1). É o gancho
@@ -768,4 +818,59 @@ test "Context M125: config com escala inválida é recusada" {
     try std.testing.expectError(error.InvalidArgument, Context.init(allocator, .{
         .scale = .{ .factor = std.math.inf(f32) },
     }));
+}
+
+test "Context M142: fonte de bitmap global desenha o texto dos widgets (M142)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    // Atlas monoespaçado de 2 glifos com avanço 6 (igual ao das métricas
+    // de fallback com size 10).
+    var b = atlas_mod.Builder.init(32, 32, 1);
+    defer b.deinit(gpa);
+    _ = try b.addGlyph(gpa, 'A', 4, 8, .{ .advance = 6, .bearing_y = -8, .height = 8 });
+    _ = try b.addGlyph(gpa, 'B', 4, 8, .{ .advance = 6, .bearing_y = -8, .height = 8 });
+    var bytes: [32 * 32 * 4]u8 = undefined;
+    for (&bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = try @import("../draw/image.zig").Image.init(32, 32, &bytes);
+    var atlas = try b.finish(gpa, img);
+    defer atlas.deinit(gpa);
+    const font = try bitmap_mod.BitmapFont.init(&atlas);
+
+    var ctx = try Context.init(gpa, .{});
+    defer ctx.deinit();
+    const metrics = @import("../text/metrics.zig").FontMetrics.withSize(10); // advance 6
+
+    // Sem a fonte: o texto vira comando `.text`.
+    ctx.beginFrame();
+    try ctx.pushText(types.Vec2.init(1, 2), types.Color.rgb(255, 255, 255), metrics, "AB");
+    try stdt.testing.expectEqual(@as(usize, 1), ctx.drawCommands().len);
+    try stdt.testing.expect(ctx.drawCommands()[0] == .text);
+    ctx.endFrame();
+
+    // Com a fonte: o texto vira blits (um por glifo).
+    ctx.setBitmapFont(font);
+    ctx.beginFrame();
+    try ctx.pushText(types.Vec2.init(1, 2), types.Color.rgb(255, 255, 255), metrics, "AB");
+    try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len);
+    try stdt.testing.expect(ctx.drawCommands()[0] == .image);
+    try stdt.testing.expect(ctx.drawCommands()[1] == .image);
+    // O segundo glifo avança 6 px (o avanço da fonte).
+    try stdt.testing.expectEqual(@as(f32, 7), ctx.drawCommands()[1].image.rect.x);
+    ctx.endFrame();
+
+    // Métricas de outro avanço => fallback (medida e desenho seguem a
+    // fonte dos widgets).
+    const other = @import("../text/metrics.zig").FontMetrics.withSize(16);
+    ctx.beginFrame();
+    try ctx.pushText(types.Vec2.init(0, 0), types.Color.rgb(255, 255, 255), other, "AB");
+    try stdt.testing.expectEqual(@as(usize, 1), ctx.drawCommands().len);
+    try stdt.testing.expect(ctx.drawCommands()[0] == .text);
+    ctx.endFrame();
+
+    // Removendo a fonte, volta o fallback.
+    ctx.setBitmapFont(null);
+    ctx.beginFrame();
+    try ctx.pushText(types.Vec2.init(0, 0), types.Color.rgb(255, 255, 255), metrics, "AB");
+    try stdt.testing.expect(ctx.drawCommands()[0] == .text);
+    ctx.endFrame();
 }

@@ -69,8 +69,7 @@ pub fn combo(
         }
         // Rótulo + chevron sobre o campo do botão.
         if (options[selected.*].len > 0) {
-            ctx.draw.pushText(
-                ctx.allocator,
+            ctx.pushText(
                 .{ .x = bounds.x + 8, .y = bounds.y + (bounds.h - font.lineHeight()) / 2 },
                 menu_style.text,
                 font,

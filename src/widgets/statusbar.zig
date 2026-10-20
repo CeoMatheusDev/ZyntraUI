@@ -145,8 +145,7 @@ pub fn statusBarText(
     if (!font.isValid()) return error.InvalidArgument;
     const m = metrics_mod.measure(text, font) catch return error.InvalidArgument;
     const r = sb.nextItem(m.width);
-    ctx.draw.pushText(
-        ctx.allocator,
+    ctx.pushText(
         .{ .x = r.x, .y = sb.left.area.y + @max(0, (sb.item_h - font.lineHeight()) * 0.5) },
         color,
         font,

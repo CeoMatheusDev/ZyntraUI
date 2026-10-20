@@ -16,6 +16,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `examples`: **fade com tween** (M141) — o exemplo mínimo dirige o alfa
   global com um `Tween` do módulo `anim` e confere o pixel atenuado no
   framebuffer.
+- `text`/`core`: **fonte de bitmap global** (M142, aditivo) —
+  `text.bitmap.BitmapFont` valida um atlas MONOESPAÇADO (todos os glifos
+  com o mesmo avanço) e `Context.setBitmapFont` o registra: a partir daí
+  **todos** os widgets desenham o texto a partir do atlas (blits), em vez
+  do comando `.text`. O desenho passa por `Context.pushText`, que usa a
+  fonte do atlas quando ela é compatível com as métricas do widget (mesmo
+  avanço) e cai no fallback caso contrário — assim medido e desenhado
+  nunca divergem. Os 24 pontos de desenho de texto dos widgets foram
+  migrados para o helper (comportamento idêntico sem a fonte).
+- `examples`: **demo da fonte global** (M143) — o exemplo mínimo registra
+  um atlas 5x7 monoespaçado e confere que o texto de um widget aparece
+  no framebuffer (70 pixels acesos).
 
 ## [1.37.0] - 2026-10-20
 

@@ -418,8 +418,7 @@ pub fn graphView(
             if (n.title.len > 0 and tsize >= min_title_size) {
                 const tfont = metrics_mod.FontMetrics.withSize(tsize);
                 const ty = band.y + @max(0, (band.h - tfont.lineHeight()) / 2);
-                ctx.draw.pushText(
-                    ctx.allocator,
+                ctx.pushText(
                     .{ .x = band.x + style.title_pad * zoom, .y = ty },
                     style.title,
                     tfont,

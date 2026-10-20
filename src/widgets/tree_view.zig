@@ -347,8 +347,7 @@ pub fn beginTreeView(
         // Texto
         const text_x = bounds.x + @as(f32, @floatFromInt(flat_node.depth)) * style.indent + style.expander_size + 4;
         const text_color = if (is_selected) style.text_selected else style.text;
-        ctx.draw.pushText(
-            ctx.allocator,
+        ctx.pushText(
             .{ .x = text_x, .y = y + (style.item_height - font.lineHeight()) / 2 },
             text_color,
             font,

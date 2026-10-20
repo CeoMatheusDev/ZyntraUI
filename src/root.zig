@@ -31,6 +31,7 @@ pub const text = struct {
     pub const wrap = @import("text/wrap.zig");
     pub const atlas = @import("text/atlas.zig");
     pub const ime = @import("text/ime.zig");
+    pub const bitmap = @import("text/bitmap.zig");
     pub const layout = @import("text/layout.zig");
 };
 
@@ -155,6 +156,7 @@ pub const AtlasBuilder = text.atlas.Builder;
 pub const GlyphMetrics = text.atlas.GlyphMetrics;
 pub const Glyph = text.atlas.Glyph;
 pub const ImeComposition = text.ime.Composition;
+pub const BitmapFont = text.bitmap.BitmapFont;
 pub const TextLayout = text.layout.Layout;
 pub const TextSource = text.layout.Source;
 
@@ -346,6 +348,7 @@ test {
     _ = @import("text/wrap.zig");
     _ = @import("text/atlas.zig");
     _ = @import("text/ime.zig");
+    _ = @import("text/bitmap.zig");
     _ = @import("text/layout.zig");
     _ = @import("draw/renderer.zig");
     _ = @import("c-abi/types.zig");

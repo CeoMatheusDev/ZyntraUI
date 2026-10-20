@@ -229,8 +229,7 @@ pub fn beginTable(
     var cx: f32 = bounds.x;
     for (columns, 0..) |col, j| {
         if (col.title.len > 0) {
-            ctx.draw.pushText(
-                ctx.allocator,
+            ctx.pushText(
                 .{ .x = cx + style.padding_x, .y = header_rect.y + (style.header_height - font.lineHeight()) / 2 },
                 style.text_header,
                 font,
@@ -283,8 +282,7 @@ pub fn beginTable(
         var cx2: f32 = bounds.x;
         for (columns, 0..) |col, j| {
             if (j < row.cells.len and row.cells[j].len > 0) {
-                ctx.draw.pushText(
-                    ctx.allocator,
+                ctx.pushText(
                     .{ .x = cx2 + style.padding_x, .y = y + (style.row_height - font.lineHeight()) / 2 },
                     text_color,
                     font,

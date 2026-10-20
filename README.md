@@ -335,6 +335,22 @@ try button_mod.button(&ctx, id, rect, style); // drawn faded
 try ctx.pushAlpha(1.0); // back to normal
 ```
 
+### A font for every widget
+
+Register a monospaced glyph atlas once and every widget draws its text
+from it — as blits, so the text is visible even in the reference
+rasterizer:
+
+```zig
+const font = try zyntra_ui.BitmapFont.init(&atlas); // monospaced atlas
+ctx.setBitmapFont(font);
+```
+
+The atlas must be monospaced (all glyphs with the same advance) and that
+advance must match the `FontMetrics` the widgets use, so what the widgets
+measure is what they draw. Widgets that need a *proportional* font can
+use the per-widget variants (`labelAtlas`, `textInputAtlas`).
+
 ### Multi-window registry
 
 `WindowRegistry` is a pure, allocation-free model of the UI surfaces an

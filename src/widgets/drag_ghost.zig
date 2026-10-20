@@ -73,8 +73,7 @@ pub fn dragGhost(
         try ctx.draw.rectOutline(ctx.allocator, box, style.border, style.border_width);
     }
     if (label.len > 0 and style.text.a != 0) {
-        ctx.draw.pushText(
-            ctx.allocator,
+        ctx.pushText(
             types.Vec2.init(box.x + style.pad, box.y + style.pad),
             style.text,
             font,

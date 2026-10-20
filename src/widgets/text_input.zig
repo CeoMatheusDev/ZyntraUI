@@ -743,8 +743,7 @@ fn textInputInner(
                     };
                     const px = tx + m_base.width;
                     ime_caret_x = px + m_cur.width;
-                    ctx.draw.pushText(
-                        ctx.allocator,
+                    ctx.pushText(
                         .{ .x = px, .y = bounds.y + (bounds.h - m.lineHeight()) / 2 },
                         style.text,
                         m,

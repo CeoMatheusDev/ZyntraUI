@@ -97,8 +97,7 @@ pub fn separatorLabeled(
     if (right_edge < right_limit) {
         try fill(ctx, .{ .x = right_edge, .y = line.y, .w = right_limit - right_edge, .h = line.h }, style.color);
     }
-    ctx.draw.pushText(
-        ctx.allocator,
+    ctx.pushText(
         .{ .x = text_x, .y = bounds.y + @max(0, (bounds.h - font.lineHeight()) * 0.5) },
         text_color,
         font,

@@ -122,8 +122,7 @@ pub fn radio(
             };
         }
         if (options[i].len > 0) {
-            ctx.draw.pushText(
-                ctx.allocator,
+            ctx.pushText(
                 .{ .x = bounds.x + 8 + 2 * r, .y = bounds.y + @as(f32, @floatFromInt(i)) * rh + 4 },
                 style.text,
                 font,

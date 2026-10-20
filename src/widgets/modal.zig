@@ -169,8 +169,7 @@ pub fn beginModalTitled(
     const res = try beginModalInner(ctx, id, bounds, drag, title_h, style);
     if (title.len > 0) {
         const ty = bounds.y + @max(0, (title_h - font.lineHeight()) / 2);
-        ctx.draw.pushText(
-            ctx.allocator,
+        ctx.pushText(
             .{ .x = bounds.x + 8, .y = ty },
             style.title_text,
             font,

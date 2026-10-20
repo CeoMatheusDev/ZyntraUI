@@ -101,8 +101,7 @@ pub fn groupBox(
 
     if (show_title) {
         const lh = font.lineHeight();
-        ctx.draw.pushText(
-            ctx.allocator,
+        ctx.pushText(
             .{ .x = bounds.x + style.padding, .y = bounds.y - lh * 0.5 },
             style.title,
             font,

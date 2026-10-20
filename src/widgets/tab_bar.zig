@@ -173,8 +173,7 @@ pub fn beginTabBar(
         const tx = r.x + (r.w - m.width) / 2;
         const ty = r.y + (r.h - font.lineHeight()) / 2;
         const text_color = if (is_active) style.text_active else style.text;
-        ctx.draw.pushText(
-            ctx.allocator,
+        ctx.pushText(
             .{ .x = tx, .y = ty },
             text_color,
             font,
