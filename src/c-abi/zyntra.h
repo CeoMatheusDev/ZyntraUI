@@ -87,6 +87,9 @@ ZyntraResult zyntra_context_frame_index(ZyntraContext *handle, uint64_t *out_ind
 ZyntraResult zyntra_context_set_viewport(ZyntraContext *handle, ZyntraRect viewport);
 ZyntraResult zyntra_context_push_mouse_move(ZyntraContext *handle, ZyntraVec2 pos);
 ZyntraResult zyntra_context_push_mouse_button(ZyntraContext *handle, uint8_t button, bool pressed, ZyntraVec2 pos);
+/* Roda: `dx`/`dy` em unidades de linha (o widget multiplica pela velocidade).
+ * Deltas/posição não-finitos ⇒ ZYNTRA_INVALID_EVENT. */
+ZyntraResult zyntra_context_push_mouse_wheel(ZyntraContext *handle, float dx, float dy, ZyntraVec2 pos);
 ZyntraResult zyntra_context_push_quit(ZyntraContext *handle);
 
 /* Teclado e foco (M111). `key` é um valor de `ZyntraKey` (mesmos valores da
@@ -880,6 +883,105 @@ ZyntraResult zyntra_widget_tooltip(ZyntraContext *handle, ZyntraId id,
     ZyntraRect anchor, const char *text, size_t text_len, float size,
     const ZyntraTooltipStyle *style, uint32_t delay_frames,
     ZyntraTooltipState *state, ZyntraTooltipResult *out_result);
+
+/* ------------------------------------------------------------------ */
+/* Contêineres begin/end (M116): scroll, popup e modal                 */
+/* ------------------------------------------------------------------ */
+
+typedef struct ZyntraScrollStyle {
+    float bar_width;
+    ZyntraColor track;
+    ZyntraColor thumb;
+} ZyntraScrollStyle;
+
+typedef struct ZyntraPopupStyle {
+    ZyntraColor bg;
+    ZyntraColor border;
+    float border_width;
+} ZyntraPopupStyle;
+
+typedef struct ZyntraModalStyle {
+    ZyntraColor dim;
+    ZyntraColor bg;
+    ZyntraColor border;
+    float border_width;
+    ZyntraColor title_text;
+} ZyntraModalStyle;
+
+/* `content` é onde os filhos devem ser posicionados (origem já deslocada
+ * por `offset`). */
+typedef struct ZyntraScrollResult {
+    ZyntraRect content;
+    float offset;
+    float max_offset;
+    bool hovered;
+    bool scrolled;
+    bool dragging;
+} ZyntraScrollResult;
+
+typedef struct ZyntraPopupResult {
+    bool dismissed; /* press fora do painel ou Escape */
+    bool hovered;
+} ZyntraPopupResult;
+
+typedef struct ZyntraModalResult {
+    bool dismissed;
+    bool hovered;
+    bool dragging; /* só na variante arrastável com título */
+} ZyntraModalResult;
+
+/* Estado de arrasto do modal (do chamador). */
+typedef struct ZyntraModalDragState {
+    float dx;
+    float dy;
+} ZyntraModalDragState;
+
+ZyntraResult zyntra_style_scroll(int32_t theme_kind, ZyntraScrollStyle *out_style);
+ZyntraResult zyntra_style_popup(int32_t theme_kind, ZyntraPopupStyle *out_style);
+ZyntraResult zyntra_style_modal(int32_t theme_kind, ZyntraModalStyle *out_style);
+
+/* Posiciona um popup de `size` junto a `anchor`, dentro de `viewport`.
+ * Puro: não exige handle/frame; abre abaixo e vira para cima se faltar
+ * espaço. Não-finitos saturam para a origem do viewport. */
+ZyntraResult zyntra_popup_place(ZyntraRect anchor, ZyntraSize size,
+    ZyntraRect viewport, ZyntraRect *out_rect);
+
+/* Abre o container rolável: roda/teclado/arraste alteram `scroll_y` (do
+ * chamador), emite clip(bounds) e devolve `content` em `out_result`.
+ * SEMPRE pare com zyntra_widget_scroll_end, mesmo sem filhos. */
+ZyntraResult zyntra_widget_scroll_begin(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, float *scroll_y, float content_h, float speed,
+    const ZyntraScrollStyle *style, ZyntraScrollResult *out_result);
+
+/* Fecha o container rolável: limpa o clip e desenha a scrollbar (só com
+ * overflow). Use os mesmos bounds/scroll_y/content_h/style do begin. */
+ZyntraResult zyntra_widget_scroll_end(ZyntraContext *handle, ZyntraRect bounds,
+    float scroll_y, float content_h, const ZyntraScrollStyle *style);
+
+/* Abre o popup: desenha o painel, emite clip(bounds) e sinaliza hover e
+ * dispensa em `out_result`. SEMPRE pare com zyntra_widget_popup_end. */
+ZyntraResult zyntra_widget_popup_begin(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, const ZyntraPopupStyle *style,
+    ZyntraPopupResult *out_result);
+
+ZyntraResult zyntra_widget_popup_end(ZyntraContext *handle);
+
+/* Abre o modal básico: escurece o viewport, desenha o painel, emite
+ * clip(bounds) e sinaliza dispensa em `out_result`. SEMPRE pare com
+ * zyntra_widget_modal_end. */
+ZyntraResult zyntra_widget_modal_begin(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, const ZyntraModalStyle *style,
+    ZyntraModalResult *out_result);
+
+/* Modal arrastável com título: press na faixa de título captura e
+ * `bounds`/`drag` (do chamador) persistem entre frames. `title` é
+ * emprestado só na chamada; `size` é a fonte do título. */
+ZyntraResult zyntra_widget_modal_titled(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect *bounds, const char *title, size_t title_len, float size,
+    float title_h, ZyntraModalDragState *drag,
+    const ZyntraModalStyle *style, ZyntraModalResult *out_result);
+
+ZyntraResult zyntra_widget_modal_end(ZyntraContext *handle);
 
 #ifdef __cplusplus
 }

@@ -45,6 +45,9 @@ const splitter_mod = @import("../widgets/splitter.zig");
 const spinner_mod = @import("../widgets/spinner.zig");
 const groupbox_mod = @import("../widgets/groupbox.zig");
 const tooltip_mod = @import("../widgets/tooltip.zig");
+const scroll_mod = @import("../widgets/scroll.zig");
+const popup_mod = @import("../widgets/popup.zig");
+const modal_mod = @import("../widgets/modal.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -558,6 +561,24 @@ pub export fn zyntra_context_push_mouse_button(
     };
     toCtx(h).pushEvent(.{
         .mouse_button = .{ .button = btn, .pressed = pressed, .pos = .{ .x = pos.x, .y = pos.y } },
+    }) catch |err| {
+        return mapErr(err);
+    };
+    return .ok;
+}
+
+/// Evento de roda: `dx`/`dy` em unidades de linha (o widget multiplica pela
+/// velocidade configurada). Posição e deltas não-finitos ⇒
+/// `ZYNTRA_INVALID_EVENT`.
+pub export fn zyntra_context_push_mouse_wheel(
+    handle: ?*ZyntraContext,
+    dx: f32,
+    dy: f32,
+    pos: ct.ZyntraVec2,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    toCtx(h).pushEvent(.{
+        .mouse_wheel = .{ .dx = dx, .dy = dy, .pos = .{ .x = pos.x, .y = pos.y } },
     }) catch |err| {
         return mapErr(err);
     };
@@ -2289,6 +2310,219 @@ pub export fn zyntra_widget_tooltip(
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Contêineres begin/end: scroll, popup e modal (M116)
+// ---------------------------------------------------------------------------
+
+/// Estilo de container rolável do tema embutido.
+pub export fn zyntra_style_scroll(kind: i32, out_style: ?*ct.ZyntraScrollStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.scrollStyle();
+    return .ok;
+}
+
+/// Estilo de popup do tema embutido.
+pub export fn zyntra_style_popup(kind: i32, out_style: ?*ct.ZyntraPopupStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.popupStyle();
+    return .ok;
+}
+
+/// Estilo de modal do tema embutido.
+pub export fn zyntra_style_modal(kind: i32, out_style: ?*ct.ZyntraModalStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.modalStyle();
+    return .ok;
+}
+
+/// Posiciona um popup de `size` junto a `anchor`, dentro de `viewport`.
+/// Puro (não exige handle/frame): abre abaixo e vira para cima se faltar
+/// espaço; não-finitos saturam para a origem do viewport.
+pub export fn zyntra_popup_place(
+    anchor: ct.ZyntraRect,
+    size: ct.ZyntraSize,
+    viewport: ct.ZyntraRect,
+    out_rect: ?*ct.ZyntraRect,
+) callconv(.c) ct.ZyntraResult {
+    const out = out_rect orelse return .invalid_argument;
+    const r = popup_mod.popupPlace(
+        toRect(anchor),
+        .{ .w = size.w, .h = size.h },
+        toRect(viewport),
+    );
+    out.* = fromRect(r);
+    return .ok;
+}
+
+/// Abre o container rolável: aplica roda/teclado/arrasto em `scroll_y`
+/// (do chamador), emite `clip(bounds)` e devolve em `out_result` a área
+/// `content` onde os filhos devem ser posicionados. SEMPRE parear com
+/// `zyntra_widget_scroll_end`, mesmo sem filhos.
+pub export fn zyntra_widget_scroll_begin(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    scroll_y: ?*f32,
+    content_h: f32,
+    speed: f32,
+    style: ?*const ct.ZyntraScrollStyle,
+    out_result: ?*ct.ZyntraScrollResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const sy = scroll_y orelse return .invalid_argument;
+    const res = scroll_mod.beginScroll(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        sy,
+        content_h,
+        speed,
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .content = fromRect(res.content),
+        .offset = res.offset,
+        .max_offset = res.max_offset,
+        .hovered = res.hovered,
+        .scrolled = res.scrolled,
+        .dragging = res.dragging,
+    };
+    return .ok;
+}
+
+/// Fecha o container rolável: limpa o clip e desenha a scrollbar (só com
+/// overflow). `bounds`, `scroll_y`, `content_h` e `style` devem ser os
+/// mesmos do `zyntra_widget_scroll_begin` correspondente.
+pub export fn zyntra_widget_scroll_end(
+    handle: ?*ZyntraContext,
+    bounds: ct.ZyntraRect,
+    scroll_y: f32,
+    content_h: f32,
+    style: ?*const ct.ZyntraScrollStyle,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const b = toRect(bounds);
+    if (!std.math.isFinite(b.x) or !std.math.isFinite(b.y) or
+        !std.math.isFinite(b.w) or !std.math.isFinite(b.h) or b.w <= 0 or b.h <= 0)
+    {
+        return .invalid_argument;
+    }
+    if (!std.math.isFinite(scroll_y) or scroll_y < 0) return .invalid_argument;
+    if (!std.math.isFinite(content_h) or content_h < 0) return .invalid_argument;
+    if (!st.isValid()) return .invalid_argument;
+    scroll_mod.endScroll(toCtx(h), b, scroll_y, content_h, st.*) catch |err| return mapWidgetErr(err);
+    return .ok;
+}
+
+/// Abre o popup: desenha o painel, emite `clip(bounds)` e sinaliza em
+/// `out_result` hover e dispensa (press fora ou Escape). SEMPRE parear com
+/// `zyntra_widget_popup_end`; o chamador decide abrir/fechar.
+pub export fn zyntra_widget_popup_begin(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    style: ?*const ct.ZyntraPopupStyle,
+    out_result: ?*ct.ZyntraPopupResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const res = popup_mod.beginPopup(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{ .dismissed = res.dismissed, .hovered = res.hovered };
+    return .ok;
+}
+
+/// Fecha o popup: limpa o clip do `zyntra_widget_popup_begin` correspondente.
+pub export fn zyntra_widget_popup_end(handle: ?*ZyntraContext) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    popup_mod.endPopup(toCtx(h)) catch |err| return mapWidgetErr(err);
+    return .ok;
+}
+
+/// Abre o modal básico: escurece o viewport, desenha o painel, emite
+/// `clip(bounds)` e sinaliza dispensa (press fora ou Escape). SEMPRE parear
+/// com `zyntra_widget_modal_end`.
+pub export fn zyntra_widget_modal_begin(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    style: ?*const ct.ZyntraModalStyle,
+    out_result: ?*ct.ZyntraModalResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const res = modal_mod.beginModal(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{ .dismissed = res.dismissed, .hovered = res.hovered, .dragging = res.dragging };
+    return .ok;
+}
+
+/// Abre o modal arrastável com título: press na faixa de título captura e
+/// `bounds`/`drag` (do chamador) persistem entre frames. `title` é emprestado
+/// só na chamada; `size` é a fonte do título. SEMPRE parear com
+/// `zyntra_widget_modal_end`.
+pub export fn zyntra_widget_modal_titled(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ?*ct.ZyntraRect,
+    title: ?[*]const u8,
+    title_len: usize,
+    size: f32,
+    title_h: f32,
+    drag: ?*ct.ZyntraModalDragState,
+    style: ?*const ct.ZyntraModalStyle,
+    out_result: ?*ct.ZyntraModalResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const bp = bounds orelse return .invalid_argument;
+    const dp = drag orelse return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    if (!std.math.isFinite(title_h) or title_h <= 0) return .invalid_argument;
+    if (title_len > 0 and title == null) return .invalid_argument;
+    const bytes: []const u8 = if (title_len == 0) &.{} else title.?[0..title_len];
+    var b = toRect(bp.*);
+    defer bp.* = fromRect(b);
+    var d = modal_mod.ModalDragState{ .dx = dp.dx, .dy = dp.dy };
+    defer {
+        dp.dx = d.dx;
+        dp.dy = d.dy;
+    }
+    const res = modal_mod.beginModalTitled(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        &b,
+        bytes,
+        metrics_mod.FontMetrics.withSize(size),
+        title_h,
+        &d,
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{ .dismissed = res.dismissed, .hovered = res.hovered, .dragging = res.dragging };
+    return .ok;
+}
+
+/// Fecha o modal: limpa o clip do `zyntra_widget_modal_begin`/`_titled`
+/// correspondente.
+pub export fn zyntra_widget_modal_end(handle: ?*ZyntraContext) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    modal_mod.endModal(toCtx(h)) catch |err| return mapWidgetErr(err);
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -4004,5 +4238,235 @@ test "C-ABI widgets M115: combo, splitter, spinner, groupbox e tooltip" {
     var bad_tts = tts;
     bad_tts.padding = -1;
     try eq(bad, zyntra_widget_tooltip(handle, tip_id, tip_anchor, "T", 1, 10, &bad_tts, 0, &tstate, &mtres));
+    try eq(ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI containers M116: scroll, popup e modal" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    const nan = std.math.nan(f32);
+
+    var handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 300, .h = 200 }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    // Estilos do tema embutido; kind fora da faixa e out nulo são recusados.
+    var scs: ct.ZyntraScrollStyle = undefined;
+    var pps: ct.ZyntraPopupStyle = undefined;
+    var mds: ct.ZyntraModalStyle = undefined;
+    try eq(ok, zyntra_style_scroll(0, &scs));
+    try eq(ok, zyntra_style_popup(1, &pps));
+    try eq(ok, zyntra_style_modal(0, &mds));
+    try stdt.testing.expect(scs.isValid() and pps.isValid() and mds.isValid());
+    try eq(bad, zyntra_style_scroll(9, &scs));
+    try eq(bad, zyntra_style_popup(0, null));
+    try eq(bad, zyntra_style_modal(9, &mds));
+
+    // popupPlace: abre abaixo, vira para cima e prende na horizontal.
+    var placed: ct.ZyntraRect = undefined;
+    try eq(ok, zyntra_popup_place(
+        .{ .x = 100, .y = 100, .w = 40, .h = 20 },
+        .{ .w = 100, .h = 80 },
+        .{ .x = 0, .y = 0, .w = 200, .h = 150 },
+        &placed,
+    ));
+    try eq(@as(f32, 100), placed.x);
+    try eq(@as(f32, 20), placed.y);
+    try eq(@as(f32, 100), placed.w);
+    try eq(@as(f32, 80), placed.h);
+    try eq(bad, zyntra_popup_place(.{}, .{}, .{}, null));
+
+    // Popup: hover dentro, dispensa com press fora e com Escape.
+    const pop_bounds: ct.ZyntraRect = .{ .x = 100, .y = 100, .w = 160, .h = 80 };
+    const pop_id: ct.ZyntraId = 0xA0;
+    var pres: ct.ZyntraPopupResult = undefined;
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 110, .y = 110 }));
+    try eq(ok, zyntra_widget_popup_begin(handle, pop_id, pop_bounds, &pps, &pres));
+    try stdt.testing.expect(pres.hovered and !pres.dismissed);
+    try eq(ok, zyntra_widget_popup_end(handle));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 10, .y = 10 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 10, .y = 10 }));
+    try eq(ok, zyntra_widget_popup_begin(handle, pop_id, pop_bounds, &pps, &pres));
+    try stdt.testing.expect(pres.dismissed and !pres.hovered);
+    try eq(ok, zyntra_widget_popup_end(handle));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.escape), true, 0));
+    try eq(ok, zyntra_widget_popup_begin(handle, pop_id, pop_bounds, &pps, &pres));
+    try stdt.testing.expect(pres.dismissed);
+    try eq(ok, zyntra_widget_popup_end(handle));
+    // Inválidos: handle/id/estilo/retângulo.
+    try eq(bad, zyntra_widget_popup_begin(null, pop_id, pop_bounds, &pps, &pres));
+    try eq(bad, zyntra_widget_popup_begin(handle, 0, pop_bounds, &pps, &pres));
+    try eq(bad, zyntra_widget_popup_begin(handle, pop_id, pop_bounds, null, &pres));
+    try eq(bad, zyntra_widget_popup_begin(handle, pop_id, .{ .x = 0, .y = 0, .w = 0, .h = 10 }, &pps, &pres));
+    var bad_pps = pps;
+    bad_pps.border_width = -1;
+    try eq(bad, zyntra_widget_popup_begin(handle, pop_id, pop_bounds, &bad_pps, &pres));
+    try eq(bad, zyntra_widget_popup_end(null));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Modal básico: hover dentro e dispensa fora.
+    const modal_bounds: ct.ZyntraRect = .{ .x = 50, .y = 50, .w = 120, .h = 90 };
+    const modal_id: ct.ZyntraId = 0xB0;
+    var mres: ct.ZyntraModalResult = undefined;
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 60, .y = 60 }));
+    try eq(ok, zyntra_widget_modal_begin(handle, modal_id, modal_bounds, &mds, &mres));
+    try stdt.testing.expect(mres.hovered and !mres.dismissed and !mres.dragging);
+    try eq(ok, zyntra_widget_modal_end(handle));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 10, .y = 10 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 10, .y = 10 }));
+    try eq(ok, zyntra_widget_modal_begin(handle, modal_id, modal_bounds, &mds, &mres));
+    try stdt.testing.expect(mres.dismissed and !mres.hovered);
+    try eq(ok, zyntra_widget_modal_end(handle));
+    // Inválidos: handle/id/estilo/retângulo.
+    try eq(bad, zyntra_widget_modal_begin(null, modal_id, modal_bounds, &mds, &mres));
+    try eq(bad, zyntra_widget_modal_begin(handle, 0, modal_bounds, &mds, &mres));
+    try eq(bad, zyntra_widget_modal_begin(handle, modal_id, modal_bounds, null, &mres));
+    try eq(bad, zyntra_widget_modal_begin(handle, modal_id, .{ .x = 0, .y = 0, .w = 0, .h = 10 }, &mds, &mres));
+    try eq(bad, zyntra_widget_modal_end(null));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Modal com título arrastável: press na barra captura; mover desloca
+    // `bounds`, clampado ao viewport.
+    var tbounds = ct.ZyntraRect{ .x = 50, .y = 50, .w = 120, .h = 90 };
+    var tdrag = ct.ZyntraModalDragState{};
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 60, .y = 55 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 60, .y = 55 }));
+    try eq(ok, zyntra_widget_modal_titled(handle, modal_id, &tbounds, "T", 1, 10, 20, &tdrag, &mds, &mres));
+    try stdt.testing.expect(mres.dragging and !mres.dismissed);
+    try eq(@as(f32, 50), tbounds.x);
+    try eq(@as(f32, 50), tbounds.y);
+    try eq(ok, zyntra_widget_modal_end(handle));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 70, .y = 65 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 70, .y = 65 }));
+    try eq(ok, zyntra_widget_modal_titled(handle, modal_id, &tbounds, "T", 1, 10, 20, &tdrag, &mds, &mres));
+    try stdt.testing.expect(mres.dragging);
+    try eq(@as(f32, 60), tbounds.x);
+    try eq(@as(f32, 60), tbounds.y);
+    try eq(ok, zyntra_widget_modal_end(handle));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 70, .y = 65 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 70, .y = 65 }));
+    try eq(ok, zyntra_widget_modal_titled(handle, modal_id, &tbounds, "T", 1, 10, 20, &tdrag, &mds, &mres));
+    try stdt.testing.expect(!mres.dragging);
+    try eq(ok, zyntra_widget_modal_end(handle));
+    // Inválidos: bounds/drag/título/fonte/title_h/estilo.
+    try eq(bad, zyntra_widget_modal_titled(null, modal_id, &tbounds, "T", 1, 10, 20, &tdrag, &mds, &mres));
+    try eq(bad, zyntra_widget_modal_titled(handle, 0, &tbounds, "T", 1, 10, 20, &tdrag, &mds, &mres));
+    try eq(bad, zyntra_widget_modal_titled(handle, modal_id, null, "T", 1, 10, 20, &tdrag, &mds, &mres));
+    try eq(bad, zyntra_widget_modal_titled(handle, modal_id, &tbounds, null, 1, 10, 20, &tdrag, &mds, &mres));
+    try eq(bad, zyntra_widget_modal_titled(handle, modal_id, &tbounds, "T", 1, nan, 20, &tdrag, &mds, &mres));
+    try eq(bad, zyntra_widget_modal_titled(handle, modal_id, &tbounds, "T", 1, 10, 0, &tdrag, &mds, &mres));
+    try eq(bad, zyntra_widget_modal_titled(handle, modal_id, &tbounds, "T", 1, 10, 20, null, &mds, &mres));
+    try eq(bad, zyntra_widget_modal_titled(handle, modal_id, &tbounds, "T", 1, 10, 20, &tdrag, null, &mres));
+    var bad_mds = mds;
+    bad_mds.border_width = -1;
+    try eq(bad, zyntra_widget_modal_titled(handle, modal_id, &tbounds, "T", 1, 10, 20, &tdrag, &bad_mds, &mres));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Scroll: clip + scrollbar; press no thumb posiciona o offset e o
+    // release encerra o arrasto. End com foco vai ao máximo.
+    const sc_bounds: ct.ZyntraRect = .{ .x = 0, .y = 0, .w = 200, .h = 100 };
+    const sc_id: ct.ZyntraId = 0x51;
+    var off: f32 = 0;
+    var sres: ct.ZyntraScrollResult = undefined;
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 10, .y = 10 }));
+    try eq(ok, zyntra_widget_scroll_begin(handle, sc_id, sc_bounds, &off, 300, 24, &scs, &sres));
+    try eq(@as(f32, 0), sres.offset);
+    try eq(@as(f32, 200), sres.max_offset);
+    try eq(@as(f32, 0), sres.content.y);
+    try stdt.testing.expect(sres.hovered and !sres.scrolled and !sres.dragging);
+    try eq(ok, zyntra_widget_scroll_end(handle, sc_bounds, off, 300, &scs));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Press no topo do thumb captura o arrasto.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 196, .y = 10 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 196, .y = 10 }));
+    try eq(ok, zyntra_widget_scroll_begin(handle, sc_id, sc_bounds, &off, 300, 24, &scs, &sres));
+    try eq(@as(f32, 0), off);
+    try eq(@as(f32, 0), sres.offset);
+    try stdt.testing.expect(sres.dragging);
+    try eq(ok, zyntra_widget_scroll_end(handle, sc_bounds, off, 300, &scs));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Mover o thumb até o meio (y=50) → offset 100 no mesmo frame.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 196, .y = 50 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 196, .y = 50 }));
+    try eq(ok, zyntra_widget_scroll_begin(handle, sc_id, sc_bounds, &off, 300, 24, &scs, &sres));
+    try eq(@as(f32, 100), off);
+    try eq(@as(f32, 100), sres.offset);
+    try eq(@as(f32, -100), sres.content.y);
+    try stdt.testing.expect(sres.dragging);
+    try eq(ok, zyntra_widget_scroll_end(handle, sc_bounds, off, 300, &scs));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 196, .y = 50 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 196, .y = 50 }));
+    try eq(ok, zyntra_widget_scroll_begin(handle, sc_id, sc_bounds, &off, 300, 24, &scs, &sres));
+    try stdt.testing.expect(!sres.dragging);
+    try eq(ok, zyntra_widget_scroll_end(handle, sc_bounds, off, 300, &scs));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_key(handle, @backingInt(ct.ZyntraKey.end), true, 0));
+    try eq(ok, zyntra_widget_scroll_begin(handle, sc_id, sc_bounds, &off, 300, 24, &scs, &sres));
+    try eq(@as(f32, 200), off);
+    try stdt.testing.expect(sres.scrolled);
+    try eq(ok, zyntra_widget_scroll_end(handle, sc_bounds, off, 300, &scs));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Roda com hover: dy=+5 reduz o offset em 5*speed (200 → 80).
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 10, .y = 10 }));
+    try eq(ok, zyntra_context_push_mouse_wheel(handle, 0, 5, .{ .x = 10, .y = 10 }));
+    try eq(ok, zyntra_widget_scroll_begin(handle, sc_id, sc_bounds, &off, 300, 24, &scs, &sres));
+    try eq(@as(f32, 80), off);
+    try stdt.testing.expect(sres.scrolled);
+    try eq(ok, zyntra_widget_scroll_end(handle, sc_bounds, off, 300, &scs));
+    // Deltas/posição não-finitos são eventos inválidos.
+    try eq(ct.ZyntraResult.invalid_event, zyntra_context_push_mouse_wheel(handle, nan, 0, .{}));
+    try eq(ct.ZyntraResult.invalid_event, zyntra_context_push_mouse_wheel(handle, 0, nan, .{}));
+    try eq(ct.ZyntraResult.invalid_event, zyntra_context_push_mouse_wheel(handle, 0, 0, .{ .x = nan, .y = 0 }));
+    // Inválidos: handle/id/scroll/style/geometria.
+    try eq(bad, zyntra_widget_scroll_begin(null, sc_id, sc_bounds, &off, 300, 24, &scs, &sres));
+    try eq(bad, zyntra_widget_scroll_begin(handle, 0, sc_bounds, &off, 300, 24, &scs, &sres));
+    try eq(bad, zyntra_widget_scroll_begin(handle, sc_id, sc_bounds, null, 300, 24, &scs, &sres));
+    try eq(bad, zyntra_widget_scroll_begin(handle, sc_id, sc_bounds, &off, -1, 24, &scs, &sres));
+    try eq(bad, zyntra_widget_scroll_begin(handle, sc_id, sc_bounds, &off, 300, 0, &scs, &sres));
+    try eq(bad, zyntra_widget_scroll_begin(handle, sc_id, .{ .x = 0, .y = 0, .w = 0, .h = 10 }, &off, 300, 24, &scs, &sres));
+    var bad_scs = scs;
+    bad_scs.bar_width = 0;
+    try eq(bad, zyntra_widget_scroll_begin(handle, sc_id, sc_bounds, &off, 300, 24, &bad_scs, &sres));
+    try eq(bad, zyntra_widget_scroll_end(null, sc_bounds, off, 300, &scs));
+    try eq(bad, zyntra_widget_scroll_end(handle, sc_bounds, off, 300, null));
+    try eq(bad, zyntra_widget_scroll_end(handle, .{ .x = 0, .y = 0, .w = 0, .h = 10 }, off, 300, &scs));
+    try eq(bad, zyntra_widget_scroll_end(handle, sc_bounds, nan, 300, &scs));
+    try eq(bad, zyntra_widget_scroll_end(handle, sc_bounds, off, -1, &scs));
     try eq(ok, zyntra_context_end_frame(handle));
 }

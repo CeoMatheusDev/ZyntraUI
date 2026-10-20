@@ -219,6 +219,10 @@ pub const ZyntraSplitterStyle = style_mod.SplitterStyle;
 pub const ZyntraSpinnerStyle = style_mod.SpinnerStyle;
 pub const ZyntraGroupBoxStyle = style_mod.GroupBoxStyle;
 pub const ZyntraTooltipStyle = style_mod.TooltipStyle;
+/// Estilos dos contêineres begin/end (M116): scroll, popup e modal.
+pub const ZyntraScrollStyle = style_mod.ScrollStyle;
+pub const ZyntraPopupStyle = style_mod.PopupStyle;
+pub const ZyntraModalStyle = style_mod.ModalStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -361,6 +365,38 @@ pub const ZyntraTooltipResult = extern struct {
     hovered: bool = false,
 };
 
+/// Resultado do container rolável (M116): `content` é a área onde os filhos
+/// devem ser posicionados (origem já deslocada por `offset`).
+pub const ZyntraScrollResult = extern struct {
+    content: ZyntraRect = .{},
+    offset: f32 = 0,
+    max_offset: f32 = 0,
+    hovered: bool = false,
+    scrolled: bool = false,
+    dragging: bool = false,
+};
+
+/// Resultado do popup (M116).
+pub const ZyntraPopupResult = extern struct {
+    dismissed: bool = false,
+    hovered: bool = false,
+};
+
+/// Resultado do modal (M116). `dragging` só é verdadeiro na variante
+/// arrastável com título.
+pub const ZyntraModalResult = extern struct {
+    dismissed: bool = false,
+    hovered: bool = false,
+    dragging: bool = false,
+};
+
+/// Estado de arrasto do modal (M116), do chamador: guarda o deslocamento
+/// entre o cursor e a origem do painel no momento da captura.
+pub const ZyntraModalDragState = extern struct {
+    dx: f32 = 0,
+    dy: f32 = 0,
+};
+
 /// Zona de acoplamento de um drop (espelha `dock.DockZone`; mesmos valores).
 pub const ZyntraDockZone = enum(c_int) {
     left = 0,
@@ -482,6 +518,13 @@ comptime {
     if (@sizeOf(ZyntraSplitterResult) != 8 or @alignOf(ZyntraSplitterResult) != 4) @compileError("ZyntraSplitterResult ABI drift");
     if (@sizeOf(ZyntraTooltipState) != 4 or @alignOf(ZyntraTooltipState) != 4) @compileError("ZyntraTooltipState ABI drift");
     if (@sizeOf(ZyntraTooltipResult) != 2 or @alignOf(ZyntraTooltipResult) != 1) @compileError("ZyntraTooltipResult ABI drift");
+    if (@sizeOf(ZyntraScrollStyle) != 12 or @alignOf(ZyntraScrollStyle) != 4) @compileError("ZyntraScrollStyle ABI drift");
+    if (@sizeOf(ZyntraPopupStyle) != 12 or @alignOf(ZyntraPopupStyle) != 4) @compileError("ZyntraPopupStyle ABI drift");
+    if (@sizeOf(ZyntraModalStyle) != 20 or @alignOf(ZyntraModalStyle) != 4) @compileError("ZyntraModalStyle ABI drift");
+    if (@sizeOf(ZyntraScrollResult) != 28 or @alignOf(ZyntraScrollResult) != 4) @compileError("ZyntraScrollResult ABI drift");
+    if (@sizeOf(ZyntraPopupResult) != 2 or @alignOf(ZyntraPopupResult) != 1) @compileError("ZyntraPopupResult ABI drift");
+    if (@sizeOf(ZyntraModalResult) != 3 or @alignOf(ZyntraModalResult) != 1) @compileError("ZyntraModalResult ABI drift");
+    if (@sizeOf(ZyntraModalDragState) != 8 or @alignOf(ZyntraModalDragState) != 4) @compileError("ZyntraModalDragState ABI drift");
     if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
         @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
     {
@@ -535,6 +578,14 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 8), @sizeOf(ZyntraSplitterResult));
     try stdt.testing.expectEqual(@as(usize, 4), @sizeOf(ZyntraTooltipState));
     try stdt.testing.expectEqual(@as(usize, 2), @sizeOf(ZyntraTooltipResult));
+    // Contêineres begin/end M116: estilos, resultados e estado de arrasto.
+    try stdt.testing.expectEqual(@as(usize, 12), @sizeOf(ZyntraScrollStyle));
+    try stdt.testing.expectEqual(@as(usize, 12), @sizeOf(ZyntraPopupStyle));
+    try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraModalStyle));
+    try stdt.testing.expectEqual(@as(usize, 28), @sizeOf(ZyntraScrollResult));
+    try stdt.testing.expectEqual(@as(usize, 2), @sizeOf(ZyntraPopupResult));
+    try stdt.testing.expectEqual(@as(usize, 3), @sizeOf(ZyntraModalResult));
+    try stdt.testing.expectEqual(@as(usize, 8), @sizeOf(ZyntraModalDragState));
     // Docking: espelhos do modelo e do resultado da área interativa.
     try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));
     try stdt.testing.expectEqual(@as(usize, 28), @sizeOf(ZyntraDockPaneInfo));

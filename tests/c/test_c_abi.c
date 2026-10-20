@@ -1846,6 +1846,336 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 63-76: contêineres begin/end (M116) — scroll, popup e modal,
+     * com checagem de pixels e estado. */
+    int c116_px_popup = 0, c116_px_modal = 0, c116_modal_dim = 0;
+    int c116_px_scroll0 = 0, c116_px_scroll_mid = 0, c116_px_scroll_end = 0;
+    int c116_px_scroll_wheel = 0;
+    int c116_popup_dismiss = 0, c116_modal_dismiss = 0;
+    {
+        ZyntraScrollStyle c_scs;
+        ZyntraPopupStyle c_pps;
+        ZyntraModalStyle c_mds;
+        ZyntraScrollResult c_sres;
+        ZyntraPopupResult c_pres;
+        ZyntraModalResult c_mres;
+
+        _Static_assert(sizeof(ZyntraScrollStyle) == 12, "ZyntraScrollStyle ABI");
+        _Static_assert(sizeof(ZyntraPopupStyle) == 12, "ZyntraPopupStyle ABI");
+        _Static_assert(sizeof(ZyntraModalStyle) == 20, "ZyntraModalStyle ABI");
+        _Static_assert(sizeof(ZyntraScrollResult) == 28, "ZyntraScrollResult ABI");
+        _Static_assert(sizeof(ZyntraPopupResult) == 2, "ZyntraPopupResult ABI");
+        _Static_assert(sizeof(ZyntraModalResult) == 3, "ZyntraModalResult ABI");
+        _Static_assert(sizeof(ZyntraModalDragState) == 8, "ZyntraModalDragState ABI");
+
+        CHECK(zyntra_style_scroll(ZYNTRA_THEME_DARK, &c_scs));
+        CHECK(zyntra_style_popup(ZYNTRA_THEME_LIGHT, &c_pps));
+        CHECK(zyntra_style_modal(ZYNTRA_THEME_DARK, &c_mds));
+        assert(zyntra_style_scroll(9, &c_scs) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_popup(0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_modal(9, &c_mds) == ZYNTRA_INVALID_ARGUMENT);
+
+        ZyntraFramebuffer *c116fb = NULL;
+        CHECK(zyntra_framebuffer_create(240, 200, &c116fb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 240, 200}));
+        ZyntraThemeColors c116cols;
+        CHECK(zyntra_theme_colors(ZYNTRA_THEME_DARK, &c116cols));
+        ZyntraColor cp = {0, 0, 0, 0};
+
+        /* popup_place: puro, com flip vertical. */
+        {
+            ZyntraRect placed;
+            CHECK(zyntra_popup_place((ZyntraRect){100, 100, 40, 20},
+                (ZyntraSize){100, 80}, (ZyntraRect){0, 0, 200, 150}, &placed));
+            assert(placed.x == 100.0f && placed.y == 20.0f);
+            assert(placed.w == 100.0f && placed.h == 80.0f);
+            assert(zyntra_popup_place((ZyntraRect){0, 0, 10, 10}, (ZyntraSize){10, 10},
+                (ZyntraRect){0, 0, 100, 100}, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        }
+
+        /* Frame 63: popup — painel desenhado e hover dentro. */
+        {
+            const ZyntraRect pop_b = {100, 100, 160, 80};
+            const unsigned long long pop_id =
+                (unsigned long long)zyntra_id_from_string("c:pop", 5);
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){150, 140}));
+            CHECK(zyntra_draw_clear(ctx, c116cols.bg));
+            CHECK(zyntra_widget_popup_begin(ctx, pop_id, pop_b, &c_pps, &c_pres));
+            assert(c_pres.hovered && !c_pres.dismissed);
+            CHECK(zyntra_widget_popup_end(ctx));
+            CHECK(zyntra_framebuffer_render(c116fb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(c116fb, 150, 140, &cp));
+            c116_px_popup = (cp.r == c_pps.bg.r && cp.g == c_pps.bg.g &&
+                cp.b == c_pps.bg.b);
+            assert(c116_px_popup);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 64: popup dispensa com press fora. */
+        {
+            const ZyntraRect pop_b = {100, 100, 160, 80};
+            const unsigned long long pop_id =
+                (unsigned long long)zyntra_id_from_string("c:pop", 5);
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){10, 10}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){10, 10}));
+            CHECK(zyntra_widget_popup_begin(ctx, pop_id, pop_b, &c_pps, &c_pres));
+            assert(c_pres.dismissed && !c_pres.hovered);
+            c116_popup_dismiss = c_pres.dismissed;
+            CHECK(zyntra_widget_popup_end(ctx));
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 65: modal — dim no fundo, painel opaco no centro. */
+        {
+            const ZyntraRect mod_b = {50, 50, 120, 90};
+            const unsigned long long mod_id =
+                (unsigned long long)zyntra_id_from_string("c:modal", 7);
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){60, 60}));
+            CHECK(zyntra_draw_clear(ctx, c116cols.bg));
+            CHECK(zyntra_widget_modal_begin(ctx, mod_id, mod_b, &c_mds, &c_mres));
+            assert(c_mres.hovered && !c_mres.dismissed && !c_mres.dragging);
+            CHECK(zyntra_widget_modal_end(ctx));
+            CHECK(zyntra_framebuffer_render(c116fb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(c116fb, 60, 60, &cp));
+            c116_px_modal = (cp.r == c_mds.bg.r && cp.g == c_mds.bg.g &&
+                cp.b == c_mds.bg.b);
+            assert(c116_px_modal);
+            CHECK(zyntra_framebuffer_pixel(c116fb, 10, 10, &cp));
+            c116_modal_dim = (cp.r != c116cols.bg.r || cp.g != c116cols.bg.g ||
+                cp.b != c116cols.bg.b);
+            assert(c116_modal_dim);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 66: modal dispensa com press fora. */
+        {
+            const ZyntraRect mod_b = {50, 50, 120, 90};
+            const unsigned long long mod_id =
+                (unsigned long long)zyntra_id_from_string("c:modal", 7);
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){10, 10}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){10, 10}));
+            CHECK(zyntra_widget_modal_begin(ctx, mod_id, mod_b, &c_mds, &c_mres));
+            assert(c_mres.dismissed && !c_mres.hovered);
+            c116_modal_dismiss = c_mres.dismissed;
+            CHECK(zyntra_widget_modal_end(ctx));
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frames 67-69: modal titulado — captura, arrasto e release. */
+        {
+            const unsigned long long mod_id =
+                (unsigned long long)zyntra_id_from_string("c:modal", 7);
+            ZyntraRect tb = {50, 50, 120, 90};
+            ZyntraModalDragState td = {0, 0};
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){60, 55}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){60, 55}));
+            CHECK(zyntra_widget_modal_titled(ctx, mod_id, &tb, "T", 1, 10.0f, 20.0f,
+                &td, &c_mds, &c_mres));
+            assert(c_mres.dragging && !c_mres.dismissed);
+            assert(tb.x == 50.0f && tb.y == 50.0f);
+            CHECK(zyntra_widget_modal_end(ctx));
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){70, 65}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){70, 65}));
+            CHECK(zyntra_widget_modal_titled(ctx, mod_id, &tb, "T", 1, 10.0f, 20.0f,
+                &td, &c_mds, &c_mres));
+            assert(c_mres.dragging && tb.x == 60.0f && tb.y == 60.0f);
+            CHECK(zyntra_widget_modal_end(ctx));
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){70, 65}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){70, 65}));
+            CHECK(zyntra_widget_modal_titled(ctx, mod_id, &tb, "T", 1, 10.0f, 20.0f,
+                &td, &c_mds, &c_mres));
+            assert(!c_mres.dragging);
+            CHECK(zyntra_widget_modal_end(ctx));
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frames 70-74: scroll — thumb, captura, arrasto, release e End. */
+        {
+            const ZyntraRect sc_b = {0, 0, 200, 100};
+            const unsigned long long sc_id =
+                (unsigned long long)zyntra_id_from_string("c:scroll", 8);
+            float off = 0.0f;
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){10, 10}));
+            CHECK(zyntra_draw_clear(ctx, c116cols.bg));
+            CHECK(zyntra_widget_scroll_begin(ctx, sc_id, sc_b, &off, 300.0f, 24.0f,
+                &c_scs, &c_sres));
+            assert(off == 0.0f && c_sres.offset == 0.0f && c_sres.max_offset == 200.0f);
+            assert(c_sres.content.y == 0.0f && c_sres.hovered && !c_sres.dragging);
+            CHECK(zyntra_widget_scroll_end(ctx, sc_b, off, 300.0f, &c_scs));
+            CHECK(zyntra_framebuffer_render(c116fb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(c116fb, 196, 10, &cp));
+            c116_px_scroll0 = (cp.r == c_scs.thumb.r && cp.g == c_scs.thumb.g &&
+                cp.b == c_scs.thumb.b);
+            assert(c116_px_scroll0);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){196, 10}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){196, 10}));
+            CHECK(zyntra_widget_scroll_begin(ctx, sc_id, sc_b, &off, 300.0f, 24.0f,
+                &c_scs, &c_sres));
+            assert(c_sres.dragging && off == 0.0f);
+            CHECK(zyntra_widget_scroll_end(ctx, sc_b, off, 300.0f, &c_scs));
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){196, 50}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){196, 50}));
+            CHECK(zyntra_draw_clear(ctx, c116cols.bg));
+            CHECK(zyntra_widget_scroll_begin(ctx, sc_id, sc_b, &off, 300.0f, 24.0f,
+                &c_scs, &c_sres));
+            assert(c_sres.dragging && off == 100.0f && c_sres.offset == 100.0f);
+            assert(c_sres.content.y == -100.0f);
+            CHECK(zyntra_widget_scroll_end(ctx, sc_b, off, 300.0f, &c_scs));
+            CHECK(zyntra_framebuffer_render(c116fb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(c116fb, 196, 50, &cp));
+            c116_px_scroll_mid = (cp.r == c_scs.thumb.r && cp.g == c_scs.thumb.g &&
+                cp.b == c_scs.thumb.b);
+            assert(c116_px_scroll_mid);
+            CHECK(zyntra_framebuffer_pixel(c116fb, 196, 10, &cp));
+            assert(cp.r == c_scs.track.r && cp.g == c_scs.track.g);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){196, 50}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){196, 50}));
+            CHECK(zyntra_widget_scroll_begin(ctx, sc_id, sc_b, &off, 300.0f, 24.0f,
+                &c_scs, &c_sres));
+            assert(!c_sres.dragging);
+            CHECK(zyntra_widget_scroll_end(ctx, sc_b, off, 300.0f, &c_scs));
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_key(ctx, ZYNTRA_KEY_END, true, 0));
+            CHECK(zyntra_draw_clear(ctx, c116cols.bg));
+            CHECK(zyntra_widget_scroll_begin(ctx, sc_id, sc_b, &off, 300.0f, 24.0f,
+                &c_scs, &c_sres));
+            assert(off == 200.0f && c_sres.scrolled);
+            CHECK(zyntra_widget_scroll_end(ctx, sc_b, off, 300.0f, &c_scs));
+            CHECK(zyntra_framebuffer_render(c116fb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(c116fb, 196, 90, &cp));
+            c116_px_scroll_end = (cp.r == c_scs.thumb.r && cp.g == c_scs.thumb.g &&
+                cp.b == c_scs.thumb.b);
+            assert(c116_px_scroll_end);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            /* Frame 75: roda com hover (dy=+5 → 200 - 5*24 = 80). */
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){10, 10}));
+            CHECK(zyntra_context_push_mouse_wheel(ctx, 0.0f, 5.0f, (ZyntraVec2){10, 10}));
+            CHECK(zyntra_draw_clear(ctx, c116cols.bg));
+            CHECK(zyntra_widget_scroll_begin(ctx, sc_id, sc_b, &off, 300.0f, 24.0f,
+                &c_scs, &c_sres));
+            assert(off == 80.0f && c_sres.scrolled && !c_sres.dragging);
+            CHECK(zyntra_widget_scroll_end(ctx, sc_b, off, 300.0f, &c_scs));
+            CHECK(zyntra_framebuffer_render(c116fb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(c116fb, 196, 50, &cp));
+            c116_px_scroll_wheel = (cp.r == c_scs.thumb.r && cp.g == c_scs.thumb.g &&
+                cp.b == c_scs.thumb.b);
+            assert(c116_px_scroll_wheel);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Inválidos dos contêineres: nada crasha e nada deixa clip aberto. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        {
+            const ZyntraRect good_b = {0, 0, 100, 50};
+            const unsigned long long good_id =
+                (unsigned long long)zyntra_id_from_string("c:m116", 6);
+            float off = 0.0f;
+            ZyntraRect tb = {0, 0, 100, 50};
+            ZyntraModalDragState td = {0, 0};
+
+            assert(zyntra_widget_popup_begin(NULL, good_id, good_b, &c_pps, &c_pres)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_popup_begin(ctx, 0, good_b, &c_pps, &c_pres)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_popup_begin(ctx, good_id, good_b, NULL, &c_pres)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_popup_begin(ctx, good_id, (ZyntraRect){0, 0, 0, 10},
+                &c_pps, &c_pres) == ZYNTRA_INVALID_ARGUMENT);
+            {
+                ZyntraPopupStyle bad = c_pps;
+                bad.border_width = -1.0f;
+                assert(zyntra_widget_popup_begin(ctx, good_id, good_b, &bad, &c_pres)
+                    == ZYNTRA_INVALID_ARGUMENT);
+            }
+            assert(zyntra_widget_popup_end(NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+            assert(zyntra_widget_modal_begin(NULL, good_id, good_b, &c_mds, &c_mres)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_modal_begin(ctx, 0, good_b, &c_mds, &c_mres)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_modal_begin(ctx, good_id, good_b, NULL, &c_mres)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_modal_begin(ctx, good_id, (ZyntraRect){0, 0, 0, 10},
+                &c_mds, &c_mres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_modal_titled(ctx, good_id, NULL, "T", 1, 10.0f, 20.0f,
+                &td, &c_mds, &c_mres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_modal_titled(ctx, good_id, &tb, NULL, 1, 10.0f, 20.0f,
+                &td, &c_mds, &c_mres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_modal_titled(ctx, good_id, &tb, "T", 1, 0.0f, 20.0f,
+                &td, &c_mds, &c_mres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_modal_titled(ctx, good_id, &tb, "T", 1, 10.0f, 0.0f,
+                &td, &c_mds, &c_mres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_modal_titled(ctx, good_id, &tb, "T", 1, 10.0f, 20.0f,
+                NULL, &c_mds, &c_mres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_modal_end(NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+            assert(zyntra_context_push_mouse_wheel(ctx, 0.0f / 0.0f, 0.0f,
+                (ZyntraVec2){0, 0}) == ZYNTRA_INVALID_EVENT);
+            assert(zyntra_context_push_mouse_wheel(ctx, 0.0f, 0.0f / 0.0f,
+                (ZyntraVec2){0, 0}) == ZYNTRA_INVALID_EVENT);
+            assert(zyntra_context_push_mouse_wheel(ctx, 0.0f, 0.0f,
+                (ZyntraVec2){0.0f / 0.0f, 0}) == ZYNTRA_INVALID_EVENT);
+
+            assert(zyntra_widget_scroll_begin(NULL, good_id, good_b, &off, 100.0f, 24.0f,
+                &c_scs, &c_sres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_scroll_begin(ctx, 0, good_b, &off, 100.0f, 24.0f,
+                &c_scs, &c_sres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_scroll_begin(ctx, good_id, good_b, NULL, 100.0f, 24.0f,
+                &c_scs, &c_sres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_scroll_begin(ctx, good_id, good_b, &off, -1.0f, 24.0f,
+                &c_scs, &c_sres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_scroll_begin(ctx, good_id, good_b, &off, 100.0f, 0.0f,
+                &c_scs, &c_sres) == ZYNTRA_INVALID_ARGUMENT);
+            {
+                ZyntraScrollStyle bad = c_scs;
+                bad.bar_width = 0.0f;
+                assert(zyntra_widget_scroll_begin(ctx, good_id, good_b, &off, 100.0f,
+                    24.0f, &bad, &c_sres) == ZYNTRA_INVALID_ARGUMENT);
+            }
+            assert(zyntra_widget_scroll_end(NULL, good_b, off, 100.0f, &c_scs)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_scroll_end(ctx, good_b, off, 100.0f, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_scroll_end(ctx, (ZyntraRect){0, 0, 0, 10}, off, 100.0f,
+                &c_scs) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_scroll_end(ctx, good_b, 0.0f / 0.0f, 100.0f, &c_scs)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_scroll_end(ctx, good_b, off, -1.0f, &c_scs)
+                == ZYNTRA_INVALID_ARGUMENT);
+        }
+        CHECK(zyntra_context_end_frame(ctx));
+
+        zyntra_framebuffer_destroy(c116fb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -1899,6 +2229,11 @@ int main(void) {
         m_sel, m_open, m_changed, m_px_closed, m_px_open, m_px_after,
         (double)m_pos, m_drag_px, m_moved_px, m_orient_err,
         m_spin_px, m_gb_px, m_tip_px);
+    printf("C-ABI containers popup=%d/%d modal=%d/%d dim=%d"
+        " scroll=%d/%d/%d/%d\n",
+        c116_px_popup, c116_popup_dismiss, c116_px_modal, c116_modal_dismiss,
+        c116_modal_dim, c116_px_scroll0, c116_px_scroll_mid, c116_px_scroll_end,
+        c116_px_scroll_wheel);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

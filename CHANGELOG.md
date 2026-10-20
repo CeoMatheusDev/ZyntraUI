@@ -56,6 +56,21 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `TooltipResult=2`). O consumidor C ganhou os frames 47–61 (combo
   fechado/aberto/escolha, arraste de splitter com checagem de pixel, spinner,
   groupbox e tooltip com atraso) e os inválidos dos cinco widgets.
+- `c-abi`: **contêineres begin/end na fronteira C** (M116, aditivo) —
+  `zyntra_widget_scroll_begin`/`_end` (roda, teclado e arraste do thumb sobre
+  `scroll_y` do chamador, com clip e área `content` em `ZyntraScrollResult`),
+  `zyntra_widget_popup_begin`/`_end` (painel com `dismissed`/`hovered`) e
+  `zyntra_widget_modal_begin`/`_end`/`_titled` (dim + painel; a variante com
+  título arrastável usa `bounds` e `ZyntraModalDragState` do chamador).
+  `zyntra_popup_place` é puro (abre abaixo, vira para cima e prende ao
+  viewport) e `zyntra_context_push_mouse_wheel` passa a enfileirar eventos de
+  roda (deltas/posição não-finitos ⇒ `ZYNTRA_INVALID_EVENT`). Estilos via
+  `zyntra_style_scroll`/`_popup`/`_modal`, com travas de ABI
+  (`ScrollStyle=12`, `PopupStyle=12`, `ModalStyle=20`, `ScrollResult=28`,
+  `PopupResult=2`, `ModalResult=3`, `ModalDragState=8`). O consumidor C
+  ganhou os frames 63–76 (popup com hover/dispensa, modal com dim/dispensa,
+  arraste do modal titulado, scroll com thumb/arraste/End/roda e checagem de
+  pixels) e os inválidos dos contêineres.
 
 ## [1.34.0] - 2026-10-18
 

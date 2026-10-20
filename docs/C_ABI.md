@@ -45,12 +45,14 @@ Toda função retorna `ZyntraResult` (`0 == ZYNTRA_OK`):
 ## Entrada: mouse, teclado e foco
 
 O mouse entra por `zyntra_context_push_mouse_move`,
-`zyntra_context_push_mouse_button` e a roda (quando houver); o teclado entra
-por `zyntra_context_push_key` e o texto digitado por
+`zyntra_context_push_mouse_button` e pela roda
+(`zyntra_context_push_mouse_wheel`, `dx`/`dy` em unidades de linha); o teclado
+entra por `zyntra_context_push_key` e o texto digitado por
 `zyntra_context_push_text` (um codepoint por chamada):
 
 ```c
 zyntra_context_push_mouse_button(ctx, 0 /* left */, true, (ZyntraVec2){x, y});
+zyntra_context_push_mouse_wheel(ctx, 0, -1, (ZyntraVec2){x, y}); /* rola p/ baixo */
 zyntra_context_push_key(ctx, ZYNTRA_KEY_DOWN, true, 0);
 zyntra_context_push_key(ctx, ZYNTRA_KEY_S, true, ZYNTRA_MOD_CTRL);
 zyntra_context_push_text(ctx, 'a');   /* texto digitado */
@@ -451,6 +453,76 @@ zyntra_widget_splitter(ctx, sid, (ZyntraRect){0, 0, 640, 480},
   nulo e `len > 0` (UTF-8 malformado vira `ZYNTRA_INVALID_TEXT` no desenho
   do tooltip).
 
+### Oitavo lote (M116): contêineres begin/end
+
+Contêineres que emitem `clip` e exigem pareamento, com estado no chamador:
+
+```c
+ZyntraScrollStyle scs;
+zyntra_style_scroll(ZYNTRA_THEME_DARK, &scs);
+float off = 0;
+ZyntraScrollResult sres;
+if (zyntra_widget_scroll_begin(ctx, id, (ZyntraRect){0, 0, 320, 240},
+        &off, 1200, 24, &scs, &sres) == ZYNTRA_OK) {
+  /* posicione os filhos em sres.content (origem já deslocada) */
+  zyntra_widget_scroll_end(ctx, (ZyntraRect){0, 0, 320, 240}, off, 1200, &scs);
+}
+
+ZyntraPopupStyle pps;
+zyntra_style_popup(ZYNTRA_THEME_DARK, &pps);
+ZyntraRect placed;
+zyntra_popup_place(anchor, (ZyntraSize){200, 120}, viewport, &placed);
+ZyntraPopupResult pres;
+if (open) {
+  zyntra_widget_popup_begin(ctx, id, placed, &pps, &pres);
+  /* filhos */
+  zyntra_widget_popup_end(ctx);
+  if (pres.dismissed) open = 0;
+}
+
+ZyntraModalStyle mds;
+zyntra_style_modal(ZYNTRA_THEME_DARK, &mds);
+ZyntraRect mb = {200, 150, 320, 200};
+ZyntraModalDragState md = {0, 0};
+ZyntraModalResult mres;
+zyntra_widget_modal_titled(ctx, id, &mb, "Título", 6, 14, 28, &md, &mds, &mres);
+/* filhos */
+zyntra_widget_modal_end(ctx);
+if (mres.dismissed) open = 0;
+```
+
+* `zyntra_widget_scroll_begin` aplica roda
+  (`zyntra_context_push_mouse_wheel`, com hover), teclado
+  (`Home`/`End`/`PageUp`/`PageDown` com foco) e arraste do thumb em
+  `scroll_y` (do chamador), clampado em `[0, content_h - bounds.h]`. Emite
+  `clip(bounds)` e devolve `content` (origem deslocada) para os filhos.
+  `zyntra_widget_scroll_end` limpa o clip e desenha a scrollbar (só com
+  overflow) usando os mesmos `bounds`/`scroll_y`/`content_h`/`style`.
+  **SEMPRE pareie**, mesmo sem filhos.
+* `zyntra_widget_popup_begin` desenha painel + borda, emite `clip(bounds)` e
+  devolve `dismissed` (press fora ou `Escape`) e `hovered`.
+  `zyntra_widget_popup_end` limpa o clip. `zyntra_popup_place` é puro (não
+  exige handle/frame): abre abaixo da âncora, vira para cima se faltar
+  espaço e prende na horizontal; não-finitos saturam para a origem.
+* `zyntra_widget_modal_begin` (básico) escurece o viewport inteiro, desenha
+  o painel e emite `clip(bounds)`; `dismissed` sinaliza press fora ou
+  `Escape`. `zyntra_widget_modal_titled` acrescenta o título e o arrasto pela
+  faixa de título: `bounds` e `drag` pertencem ao chamador e persistem entre
+  frames (clampados ao viewport quando o painel cabe).
+  `zyntra_widget_modal_end` limpa o clip. O bloqueio dos widgets de trás é
+  por convenção: com o modal aberto, o chamador não os sonda.
+* `ZyntraScrollStyle` = `bar_width`/`track`/`thumb`; `ZyntraPopupStyle` =
+  `bg`/`border`/`border_width`; `ZyntraModalStyle` =
+  `dim`/`bg`/`border`/`border_width`/`title_text`. Resultados:
+  `ZyntraScrollResult` (`content`/`offset`/`max_offset`/`hovered`/`scrolled`/
+  `dragging`), `ZyntraPopupResult` (`dismissed`/`hovered`) e
+  `ZyntraModalResult` (`dismissed`/`hovered`/`dragging`).
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle/id/estilo/ponteiro obrigatório
+  nulo, retângulo sem área ou não-finito, `content_h`/`scroll_y` negativos,
+  `speed` ≤ 0 ou não-finita, `bar_width` ≤ 0, `border_width` negativo,
+  fonte (`size`) ou `title_h` ≤ 0/não-finitos, título com ponteiro nulo e
+  `len > 0`.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -497,6 +569,10 @@ zyntra_widget_splitter(ctx, sid, (ZyntraRect){0, 0, 640, 480},
   `ZyntraTooltipStyle=20` e os resultados `ZyntraComboResult=2`,
   `ZyntraSplitterResult=8`, `ZyntraTooltipState=4`,
   `ZyntraTooltipResult=2`.
+* M116: também travados os estilos `ZyntraScrollStyle=12`,
+  `ZyntraPopupStyle=12`, `ZyntraModalStyle=20`, os resultados
+  `ZyntraScrollResult=28`, `ZyntraPopupResult=2`, `ZyntraModalResult=3` e o
+  `ZyntraModalDragState=8`.
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -517,5 +593,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..."
 ```
