@@ -48,6 +48,16 @@ pub fn spinner(
     if (!std.math.isFinite(center.x) or !std.math.isFinite(center.y)) return error.InvalidArgument;
     if (!std.math.isFinite(t)) return error.InvalidArgument;
 
+    // O quadro muda a cada instante ⇒ a área precisa ser repintada
+    // (o spinner não tem id: ele marca o próprio retângulo).
+    const radius = style.radius + style.dot_radius;
+    ctx.mark_dirty(types.Rect.init(
+        center.x - radius,
+        center.y - radius,
+        radius * 2,
+        radius * 2,
+    ));
+
     const head = spinnerHeadIndex(style.dots, t);
     var i: usize = 0;
     while (i < @as(usize, style.dots)) : (i += 1) {

@@ -52,11 +52,12 @@ pub fn tooltip(
         state.hover_frames = 0;
     }
     var res = TooltipResult{ .hovered = hovered };
-    if (!hovered or state.hover_frames < delay_frames) return res;
-    // delay 0: hovered no 1º frame já mostra (frames>=1 > 0). Para
-    // delay>0 exige N frames consecutivos. hovered aqui implica
-    // frames>=1, então delay=0 sempre mostra.
-    res.visible = true;
+    if (!hovered) {
+        // Saiu do hover: a área que o tooltip ocupava é repintada
+        // (o contexto guarda a área do frame anterior).
+        try ctx.mark_hot(id, types.Rect.init(0, 0, 0, 0), false);
+        return res;
+    }
 
     const m = metrics_mod.measure(text, font) catch {
         return error.InvalidArgument; // texto do chamador malformado
@@ -76,6 +77,15 @@ pub fn tooltip(
         by = @max(by, vp.y);
     }
     const box = types.Rect{ .x = bx, .y = by, .w = @max(1, bw), .h = @max(1, bh) };
+    // O tooltip aparece e some: a área é repintada enquanto o mouse
+    // está sobre o anchor (e na saída, pelo contexto).
+    try ctx.mark_hot(id, box, true);
+
+    if (state.hover_frames < delay_frames) return res;
+    // delay 0: hovered no 1º frame já mostra (frames>=1 > 0). Para
+    // delay>0 exige N frames consecutivos. hovered aqui implica
+    // frames>=1, então delay=0 sempre mostra.
+    res.visible = true;
     ctx.draw.rectFilled(ctx.allocator, box, style.bg) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
@@ -196,5 +206,32 @@ test "tooltip limites: âncora NaN, texto malformado, saturação" {
     const box = ctx.drawCommands()[0].rect_filled.rect;
     try stdt.testing.expect(box.x + box.w <= 800);
     try stdt.testing.expect(box.y + box.h <= 600);
+    ctx.endFrame();
+}
+
+test "tooltip participa da região suja (aparece e some)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().tooltipStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("test:tip-dirty");
+    const anchor = types.Rect.init(0, 0, 100, 20);
+    var state = TooltipState{};
+
+    // Frame 1: o mouse sobre o anchor ⇒ o tooltip fica "quente" e a
+    // área dele entra na região suja.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(10, 10) } });
+    _ = try tooltip(&ctx, id, anchor, "hi", font, style, 0, &state);
+    try stdt.testing.expect(!ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+
+    // Frame 2: o mouse sai ⇒ a área anterior é repintada.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(500, 500) } });
+    _ = try tooltip(&ctx, id, anchor, "hi", font, style, 0, &state);
+    try stdt.testing.expect(!ctx.dirty_rect.isEmpty());
     ctx.endFrame();
 }

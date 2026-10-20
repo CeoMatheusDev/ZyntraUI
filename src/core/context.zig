@@ -63,6 +63,12 @@ pub const FocusDirection = enum {
     prev,
 };
 
+/// Widget "quente" registrado no frame (id + área ocupada).
+pub const HotEntry = struct {
+    id: id_mod.Id,
+    bounds: types.Rect,
+};
+
 /// Contexto raiz da GUI. Um por aplicação/janela na M1.
 pub const Context = struct {
     allocator: std.mem.Allocator,
@@ -112,13 +118,15 @@ pub const Context = struct {
     /// (estado de interação) e o chamador marca direto via `mark_dirty`
     /// quando dados externos mudam a aparência.
     dirty_rect: types.Rect = types.Rect.init(0, 0, 0, 0),
-    /// Ids "quentes" no frame anterior (ver `mark_hot`): widgets que
+    /// Widgets "quentes" no frame anterior (ver `mark_hot`): widgets que
     /// declararam interação e que, portanto, podem ter deixado pixels
-    /// realçados para desfazer. Trocado com `hot_now` no `beginFrame`.
-    hot_prev: std.ArrayList(id_mod.Id) = .empty,
-    /// Ids "quentes" do frame corrente, em ordem de declaração. Vira
-    /// `hot_prev` no `beginFrame` seguinte.
-    hot_now: std.ArrayList(id_mod.Id) = .empty,
+    /// realçados para desfazer. Cada entrada guarda também a ÁREA
+    /// ocupada, para que a saída do estado repinte exatamente onde o
+    /// real ficou. Trocado com `hot_now` no `beginFrame`.
+    hot_prev: std.ArrayList(HotEntry) = .empty,
+    /// Widgets "quentes" do frame corrente, em ordem de declaração.
+    /// Vira `hot_prev` no `beginFrame` seguinte.
+    hot_now: std.ArrayList(HotEntry) = .empty,
 
     const Self = @This();
 
@@ -194,7 +202,7 @@ pub const Context = struct {
         self.focusables.clearRetainingCapacity();
         // Fecha o ciclo de interação: o registro quente do frame que
         // terminou vira a base da detecção de saída em `mark_hot`.
-        std.mem.swap(std.ArrayList(id_mod.Id), &self.hot_prev, &self.hot_now);
+        std.mem.swap(std.ArrayList(HotEntry), &self.hot_prev, &self.hot_now);
         self.hot_now.clearRetainingCapacity();
         self.clear_dirty();
     }
@@ -380,21 +388,34 @@ pub const Context = struct {
     ///
     /// O mecanismo é conservador de propósito: enquanto quente, o widget
     /// é tratado como em mudança e o próprio rect é repintado a cada frame
-    /// (os demais continuam pulados). Widget que deixou de ser desenhado
-    /// não é conhecido aqui — quem some deve marcar o próprio rect via
-    /// `mark_dirty` (idem se mudou de posição/tamanho: o rect anterior,
-    /// que ainda está no framebuffer, não é conhecido).
+    /// (os demais continuam pulados). Ao SAIR do estado quente, a área
+    /// que o widget ocupava no frame anterior é repintada (é lá que o
+    /// real ficou) — assim um widget que some não deixa pixels velhos.
+    /// Widget que nunca foi declarado quente e some do nada continua
+    /// desconhecido: quem some deve marcar o próprio rect via
+    /// `mark_dirty`.
     pub fn mark_hot(self: *Self, id: id_mod.Id, bounds: types.Rect, hot: bool) ContextError!void {
-        if (hot and !hotIdIn(self.hot_now.items, id)) {
-            self.hot_now.append(self.allocator, id) catch return error.OutOfMemory;
+        if (hot) {
+            // Registra (ou atualiza) a entrada quente do frame corrente.
+            if (hotEntryIndex(self.hot_now.items, id)) |i| {
+                self.hot_now.items[i].bounds = bounds;
+            } else {
+                self.hot_now.append(self.allocator, .{ .id = id, .bounds = bounds }) catch return error.OutOfMemory;
+            }
+            self.mark_dirty(bounds);
+            return;
         }
-        if (hot or self.was_hot(id)) self.mark_dirty(bounds);
+        // Saiu do estado quente: repinta a ÁREA que ele ocupava no
+        // frame ANTERIOR.
+        if (hotEntry(self.hot_prev.items, id)) |prev| {
+            self.mark_dirty(prev.bounds);
+        }
     }
 
     /// True se `id` foi declarado quente no frame anterior — isto é, pode
     /// ter pixels realçados pendentes de repintura.
     pub fn was_hot(self: *const Self, id: id_mod.Id) bool {
-        return hotIdIn(self.hot_prev.items, id);
+        return hotEntryIndex(self.hot_prev.items, id) != null;
     }
 
     pub fn hasFocus(self: *const Self, id: id_mod.Id) bool {
@@ -461,11 +482,16 @@ pub const Context = struct {
 
 /// Busca linear de `id` numa lista de ids (registros por frame são
 /// pequenos e a ordem não importa). Ver `Context.mark_hot`.
-fn hotIdIn(items: []const id_mod.Id, id: id_mod.Id) bool {
-    for (items) |other| {
-        if (other == id) return true;
+fn hotEntryIndex(items: []const HotEntry, id: id_mod.Id) ?usize {
+    for (items, 0..) |other, i| {
+        if (other.id == id) return i;
     }
-    return false;
+    return null;
+}
+
+fn hotEntry(items: []const HotEntry, id: id_mod.Id) ?HotEntry {
+    const i = hotEntryIndex(items, id) orelse return null;
+    return items[i];
 }
 
 test "Context ciclo de vida mínimo" {
@@ -947,5 +973,32 @@ test "Context M153: métricas do frame e reserva de capacidade" {
         try ctx.draw.rectFilled(ctx.allocator, types.Rect.init(0, 0, 1, 1), types.Color.rgb(1, 2, 3));
     }
     try stdt.testing.expect(ctx.frameMetrics().buffer_growths > 0);
+    ctx.endFrame();
+}
+
+test "Context M143: ao sair do estado quente, a área ANTERIOR é repintada" {
+    const stdt = @import("std");
+    const allocator = stdt.testing.allocator;
+    var ctx = try Context.init(allocator, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("hot:move");
+
+    // Frame 1: o widget é quente em (0,0,10,10).
+    ctx.beginFrame();
+    try ctx.mark_hot(id, types.Rect.init(0, 0, 10, 10), true);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 10, 10), ctx.dirty_rect);
+    ctx.endFrame();
+
+    // Frame 2: o widget mudou de lugar e saiu do estado quente ⇒ a
+    // área ANTIGA (onde o real ficou) é repintada.
+    ctx.beginFrame();
+    try ctx.mark_hot(id, types.Rect.init(50, 50, 10, 10), false);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 10, 10), ctx.dirty_rect);
+    ctx.endFrame();
+
+    // Frame 3: sem estado quente nem registro ⇒ nada é repintado.
+    ctx.beginFrame();
+    try ctx.mark_hot(id, types.Rect.init(50, 50, 10, 10), false);
+    try stdt.testing.expect(ctx.dirty_rect.isEmpty());
     ctx.endFrame();
 }

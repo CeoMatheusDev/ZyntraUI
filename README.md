@@ -166,14 +166,18 @@ capacity and its text arena between frames.
 Interactive widgets take part automatically: each control calls
 `mark_hot(id, bounds, hot)` every frame, and the context repaints its bounds
 both when the state starts (hover, press/drag, value change) and when it stops
-— the previous frame's hot ids are retained so a highlight left behind in the
-framebuffer is erased. Currently wired: `button`, `checkbox`, `radio`,
+— the previous frame's hot entries keep the **area** the widget occupied, so
+a widget that moves or disappears has its old pixels erased. Currently
+wired: `button`, `checkbox`, `radio`,
 `switch`, `slider` (both orientations), `list_view`, `table`, `tree_view`,
-`tab_bar`, `splitter`, `scroll`, `menu`, `text_input` and `textarea`. The
+`tab_bar`, `splitter`, `scroll`, `menu`, `text_input` and `textarea`; plus
+`tooltip` (appears/disappears on hover) and `spinner` (animated — it marks
+its own rect dirty). The
 mechanism is conservative by
 design: while hot, the widget is treated as changing and its own rect is
 repainted every frame, while the rest of the frame stays skipped. A widget
-that is no longer drawn is unknown to the context — mark its rect yourself.
+that is no longer drawn and was never hot is unknown to the context — mark
+its rect yourself.
 
 ### Images and sprites (RGBA8)
 
