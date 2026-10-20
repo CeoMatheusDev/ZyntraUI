@@ -76,6 +76,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   caret. O consumidor C ganhou o frame de composição (pré-edit, commit e
   buffer resultante).
 
+- `widgets`/`c-abi`: **IME na área de texto** (M131, aditivo) —
+  `textAreaIme` (Zig) e `zyntra_widget_text_area_ime` (C) aplicam o texto
+  confirmado no buffer multilinha substituindo a seleção e desenham o
+  pré-edit na linha do caret, com o caret dentro do pré-edit durante a
+  composição. Sem foco, a composição é cancelada.
+
 ## [1.35.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a fronteira C avança de forma substancial e

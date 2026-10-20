@@ -3586,6 +3586,36 @@ int main(void) {
         assert(zyntra_widget_text_input_ime(NULL, ti_ime, (ZyntraRect){0, 0,
             200, 30}, buf, sizeof(buf), &len, &cursor, &anchor, &comp, 10.0f,
             &tis, &tir) == ZYNTRA_INVALID_ARGUMENT);
+        /* A mesma composição numa área de texto multilinha. */
+        {
+            char abuf[32] = {0};
+            size_t alen = 0;
+            size_t acursor = 0;
+            size_t aanchor = 0;
+            float ascroll = 0.0f;
+            const ZyntraId ta_ime = zyntra_id_from_string("m130:ta", 7);
+            ZyntraTextAreaResult tar;
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_focus(ctx, ta_ime));
+            CHECK(zyntra_ime_update(&comp, "xy", 2, 2));
+            CHECK(zyntra_widget_text_area_ime(ctx, ta_ime,
+                (ZyntraRect){0, 0, 200, 60}, abuf, sizeof(abuf), &alen,
+                &acursor, &aanchor, &ascroll, &comp, 10.0f, &tis, &tar));
+            assert(alen == 0);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_ime_commit(&comp));
+            CHECK(zyntra_widget_text_area_ime(ctx, ta_ime,
+                (ZyntraRect){0, 0, 200, 60}, abuf, sizeof(abuf), &alen,
+                &acursor, &aanchor, &ascroll, &comp, 10.0f, &tis, &tar));
+            assert(tar.changed);
+            assert(alen == 2);
+            assert(strcmp(abuf, "xy") == 0);
+            assert(acursor == 2);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
         c130_ime = (len == 2 && strcmp(buf, "ni") == 0);
     }
 

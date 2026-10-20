@@ -880,7 +880,8 @@ zyntra_widget_text_input_ime(ctx, id, bounds, buffer, sizeof(buffer), &len,
 * `zyntra_widget_text_input_ime` aplica o texto confirmado no buffer do
   campo (substituindo a seleção), desenha o pré-edit na posição do caret e
   mantém o caret dentro do pré-edit durante a composição. Sem foco, a
-  composição é cancelada.
+  composição é cancelada. `zyntra_widget_text_area_ime` faz o mesmo na
+  área de texto multilinha (o pré-edit é desenhado na linha do caret).
 * Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: composição nula, buffer/pré-edit
   nulos ou inconsistentes, pré-edit maior que o buffer, cursor fora do
   buffer; UTF-8 malformado ⇒ `ZYNTRA_INVALID_TEXT`.

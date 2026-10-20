@@ -686,6 +686,11 @@ ZyntraResult zyntra_widget_text_input_ime(ZyntraContext *handle, ZyntraId id,
     size_t *cursor, size_t *anchor, ZyntraImeComposition *comp, float size,
     const ZyntraTextInputStyle *style, ZyntraTextInputResult *out_result);
 
+ZyntraResult zyntra_widget_text_area_ime(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, char *buffer, size_t buffer_len, size_t *len,
+    size_t *cursor, size_t *anchor, float *scroll_y,
+    ZyntraImeComposition *comp, float size,
+    const ZyntraTextInputStyle *style, ZyntraTextAreaResult *out_result);
 ZyntraResult zyntra_widget_text_area(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
     char *buffer, size_t buffer_len, size_t *len, size_t *cursor, size_t *anchor,
     float *scroll_y, float size, const ZyntraTextInputStyle *style,

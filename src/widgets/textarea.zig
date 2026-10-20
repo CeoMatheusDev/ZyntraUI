@@ -39,6 +39,7 @@ const id_mod = @import("../core/id.zig");
 const style_mod = @import("../style/style.zig");
 const metrics_mod = @import("../text/metrics.zig");
 const edit = @import("../text/edit.zig");
+const ime_mod = @import("../text/ime.zig");
 const input = @import("input.zig");
 
 /// Área de transferência INTERNA e histórico de undo/redo (definidos em
@@ -47,6 +48,10 @@ const input = @import("input.zig");
 /// então um único buffer serve `text_input` e `textarea`.
 pub const Clipboard = edit.Clipboard;
 pub const TextHistory = edit.TextHistory;
+
+/// Estado de composição de IME (M131): o app atualiza a partir do
+/// callback de IME da plataforma e entrega o estado ao widget.
+pub const Composition = ime_mod.Composition;
 
 /// Padding interno (px) da área útil (mesmo valor de `text_input`).
 const pad: f32 = 4.0;
@@ -341,7 +346,7 @@ pub fn textArea(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextAreaResult {
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null, false);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null, false, null);
 }
 
 /// Área de texto com undo/redo (M88, aditivo): `Ctrl+Z` desfaz, `Ctrl+Y`
@@ -365,7 +370,7 @@ pub fn textAreaHistory(
 ) context_mod.ContextError!TextAreaResult {
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, null, false);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, null, false, null);
 }
 
 /// Área de texto completa (M88, aditivo): undo/redo + área de
@@ -391,7 +396,7 @@ pub fn textAreaClipboard(
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
     if (clip.len > clip.buf.len) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, clip, false);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, clip, false, null);
 }
 
 /// Área de texto com **quebra suave** (M89, aditivo): linhas longas
@@ -409,7 +414,7 @@ pub fn textAreaWrapped(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextAreaResult {
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null, true);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null, true, null);
 }
 
 /// Quebra suave (M89) + undo/redo: `Ctrl+Z` desfaz, `Ctrl+Y`/
@@ -431,7 +436,7 @@ pub fn textAreaWrappedHistory(
 ) context_mod.ContextError!TextAreaResult {
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, null, true);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, null, true, null);
 }
 
 /// Quebra suave (M89) + undo/redo + área de transferência
@@ -455,7 +460,31 @@ pub fn textAreaWrappedClipboard(
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
     if (clip.len > clip.buf.len) return error.InvalidArgument;
-    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, clip, true);
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, *TextHistory(S, B), hist, clip, true, null);
+}
+
+/// Área de texto com composição de IME (M131, aditivo).
+///
+/// `comp` é o estado de composição do app: o widget aplica o texto
+/// confirmado (após `Composition.commit`) no buffer, substituindo a
+/// seleção, e desenha o pré-edit na posição do caret enquanto a
+/// composição está ativa.
+pub fn textAreaIme(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    scroll_y: *f32,
+    comp: *Composition,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextAreaResult {
+    if (anchor.* > len.*) return error.InvalidArgument;
+    if (comp.len > comp.buf.len) return error.InvalidArgument;
+    return textAreaInner(ctx, id, bounds, buffer, len, cursor, anchor, scroll_y, font, style, void, {}, null, false, comp);
 }
 
 fn textAreaInner(
@@ -473,6 +502,7 @@ fn textAreaInner(
     hist: Hist,
     clip: ?*Clipboard,
     wrap: bool,
+    comp: ?*Composition,
 ) context_mod.ContextError!TextAreaResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
@@ -828,6 +858,21 @@ fn textAreaInner(
         }
     }
 
+    // Composição de IME (M131): o texto confirmado entra no buffer
+    // (substituindo a seleção). Sem foco, a composição é cancelada.
+    if (comp) |c| {
+        if (c.committed) {
+            c.applyCommit(buffer, len, cursor, anchor) catch |err| switch (err) {
+                error.OutOfSpace => res.overflowed = true,
+                error.InvalidState => {},
+                error.InvalidUtf8 => {},
+                error.BufferTooSmall => {},
+            };
+            if (!c.committed) res.changed = true;
+        } else if (!focused and c.active) {
+            c.cancel();
+        }
+    }
     res.len = len.*;
     if (!ctx.hasFocus(id)) res.focused = false;
     res.selected = res.focused and anchor.* != cursor.*;
@@ -871,7 +916,7 @@ fn textAreaInner(
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
-    try drawTextAreaContent(ctx, buffer, len.*, cursor.*, anchor.*, res.selected, res.focused, bounds, scroll_y.*, text_top, text_x, line_h, wrap_cols, font, style);
+    try drawTextAreaContent(ctx, buffer, len.*, cursor.*, anchor.*, res.selected, res.focused, bounds, scroll_y.*, text_top, text_x, line_h, wrap_cols, font, style, comp);
     ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = .{}, .null_rect = true } }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
@@ -896,6 +941,7 @@ fn drawTextAreaContent(
     wrap_cols: usize,
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
+    comp: ?*Composition,
 ) context_mod.ContextError!void {
     const nlines = visualCount(buffer, len, wrap_cols);
     const view_h = @max(0, bounds.h - pad * 2);
@@ -953,8 +999,39 @@ fn drawTextAreaContent(
     if (focused and vis_w > 0) {
         const vp = visualPosOf(buffer, len, wrap_cols, @min(cursor, len));
         // `advance` é uniforme: a coluna visual (codepoints) dá o x exato.
-        const cx = text_x + @as(f32, @floatFromInt(vp.col)) * font.advance;
+        var cx = text_x + @as(f32, @floatFromInt(vp.col)) * font.advance;
         const cy = text_top + @as(f32, @floatFromInt(vp.index)) * line_h - scroll_y;
+        // Pré-edit do IME (M131): desenhado na posição do caret, com
+        // sublinhado; durante a composição o caret fica dentro dele.
+        if (comp) |c| {
+            if (c.active and c.len > 0) {
+                const pre = c.preedit();
+                const m_pre = metrics_mod.measure(pre, font) catch return error.InvalidArgument;
+                const m_cur = metrics_mod.measure(pre[0..c.cursor], font) catch return error.InvalidArgument;
+                ctx.draw.pushText(
+                    ctx.allocator,
+                    .{ .x = cx, .y = cy },
+                    style.text,
+                    font,
+                    pre,
+                ) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    error.InvalidCommand => return error.InvalidCommand,
+                    error.InvalidUtf8 => return error.InvalidArgument,
+                    error.InvalidMetrics => return error.InvalidArgument,
+                };
+                ctx.draw.rectFilled(ctx.allocator, .{
+                    .x = cx,
+                    .y = cy + line_h - 1,
+                    .w = m_pre.width,
+                    .h = 1,
+                }, style.caret) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    error.InvalidCommand => return error.InvalidCommand,
+                };
+                cx += m_cur.width;
+            }
+        }
         ctx.draw.line(
             ctx.allocator,
             .{ .x = cx, .y = cy },
@@ -1867,5 +1944,54 @@ test "textarea alimenta o dirty rect (M105): foco marca os bounds" {
     try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
     _ = try textArea(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
     try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+}
+
+test "textAreaIme compõe, desenha o pré-edit e confirma (M131)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 60);
+    const id = id_mod.Id.fromString("test:ta-ime");
+    var buf: [32]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    var pre: [16]u8 = undefined;
+    var comp = Composition.init(&pre);
+
+    // Click foca; a composição mostra o pré-edit.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{
+        .button = .left,
+        .pressed = true,
+        .pos = types.Vec2.init(6, 10),
+    } });
+    comp.begin();
+    try comp.update("ab", 2);
+    const r = try textAreaIme(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &comp, font, style);
+    try stdt.testing.expect(r.focused);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    var saw_preedit = false;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .text and std.mem.eql(u8, ctx.draw.textOf(cmd), "ab")) saw_preedit = true;
+    }
+    try stdt.testing.expect(saw_preedit);
+    ctx.endFrame();
+
+    // Commit: o texto entra no buffer e o cursor avança.
+    ctx.beginFrame();
+    comp.commit();
+    const r2 = try textAreaIme(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &comp, font, style);
+    try stdt.testing.expect(r2.changed);
+    try stdt.testing.expectEqual(@as(usize, 2), len);
+    try stdt.testing.expectEqualStrings("ab", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    try stdt.testing.expect(!comp.active);
+    try stdt.testing.expect(!comp.committed);
     ctx.endFrame();
 }

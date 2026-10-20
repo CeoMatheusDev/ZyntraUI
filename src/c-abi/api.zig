@@ -2350,6 +2350,60 @@ pub export fn zyntra_widget_text_input_selected(
 
 /// Área de texto multilinha: além de `buffer`/`len`/`cursor`/`anchor`,
 /// `scroll_y` (px) pertence ao chamador e é ajustado pelo widget.
+/// Área de texto com composição de IME: aplica o texto confirmado no
+/// buffer (substituindo a seleção) e desenha o pré-edit na posição do
+/// caret.
+pub export fn zyntra_widget_text_area_ime(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    buffer: ?[*]u8,
+    buffer_len: usize,
+    len: ?*usize,
+    cursor: ?*usize,
+    anchor: ?*usize,
+    scroll_y: ?*f32,
+    comp: ?*ct.ZyntraImeComposition,
+    size: f32,
+    style: ?*const ct.ZyntraTextInputStyle,
+    out_result: ?*ct.ZyntraTextAreaResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const n = len orelse return .invalid_argument;
+    const cur = cursor orelse return .invalid_argument;
+    const anc = anchor orelse return .invalid_argument;
+    const scroll = scroll_y orelse return .invalid_argument;
+    const c = comp orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    const buf = byteBufOf(buffer, buffer_len) catch return .invalid_argument;
+    var zig_comp = toImeComp(c.*) orelse return .invalid_argument;
+    const res = textarea_mod.textAreaIme(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        buf,
+        n,
+        cur,
+        anc,
+        scroll,
+        &zig_comp,
+        metrics_mod.FontMetrics.withSize(size),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    fromImeComp(c, zig_comp);
+    if (out_result) |o| o.* = .{
+        .focused = res.focused,
+        .changed = res.changed,
+        .overflowed = res.overflowed,
+        .selected = res.selected,
+        .undone = res.undone,
+        .redone = res.redone,
+        .len = res.len,
+    };
+    return .ok;
+}
+
 pub export fn zyntra_widget_text_area(
     handle: ?*ZyntraContext,
     id: ct.ZyntraId,
