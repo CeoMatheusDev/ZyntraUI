@@ -29,6 +29,9 @@ const style_mod = @import("../style/style.zig");
 const metrics_mod = @import("../text/metrics.zig");
 const edit = @import("../text/edit.zig");
 const ime_mod = @import("../text/ime.zig");
+const atlas_mod = @import("../text/atlas.zig");
+const layout_mod = @import("../text/layout.zig");
+const image_mod = @import("../draw/image.zig");
 const input = @import("input.zig");
 
 pub const TextInputResult = struct {
@@ -156,7 +159,7 @@ pub fn textInput(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextInputResult {
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, null, font, style, void, {}, null, null);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, null, .{ .metrics = font }, style, void, {}, null, null);
 }
 
 /// Campo de texto com seleção (1.1.0): `anchor` persiste entre frames
@@ -174,7 +177,7 @@ pub fn textInputSelected(
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextInputResult {
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, void, {}, null, null);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, .{ .metrics = font }, style, void, {}, null, null);
 }
 
 /// Campo de texto completo (1.5.0, aditivo): seleção + undo/redo +
@@ -199,7 +202,7 @@ pub fn textInputClipboard(
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
     if (clip.len > clip.buf.len) return error.InvalidArgument;
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, *TextHistory(S, B), hist, clip, null);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, .{ .metrics = font }, style, *TextHistory(S, B), hist, clip, null);
 }
 
 /// Campo de texto com undo/redo (1.5.0, aditivo): `Ctrl+Z` desfaz,
@@ -222,7 +225,30 @@ pub fn textInputHistory(
 ) context_mod.ContextError!TextInputResult {
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, *TextHistory(S, B), hist, null, null);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, .{ .metrics = font }, style, *TextHistory(S, B), hist, null, null);
+}
+
+/// Campo de texto com fonte real (atlas de glifos) (M135, aditivo).
+///
+/// Mede, posiciona o caret e desenha com os AVANÇOS REAIS do atlas
+/// (fonte proporcional): o texto sai como blits do atlas — visível até
+/// no rasterizador de referência, que não rasteriza glifos — e o caret,
+/// a seleção e o clique usam a mesma métrica do desenho. `anchor`
+/// (seleção) é do chamador, como em `textInputSelected`.
+pub fn textInputAtlas(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    atlas: *const atlas_mod.FontAtlas,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextInputResult {
+    if (anchor.* > len.*) return error.InvalidArgument;
+    if (atlas.glyphs.len == 0) return error.InvalidArgument;
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, .{ .atlas = atlas }, style, void, {}, null, null);
 }
 
 /// Campo de texto com composição de IME (M126, aditivo).
@@ -245,7 +271,7 @@ pub fn textInputIme(
 ) context_mod.ContextError!TextInputResult {
     if (anchor.* > len.*) return error.InvalidArgument;
     if (comp.len > comp.buf.len) return error.InvalidArgument;
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, void, {}, null, comp);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, .{ .metrics = font }, style, void, {}, null, comp);
 }
 
 fn textInputInner(
@@ -256,7 +282,7 @@ fn textInputInner(
     len: *usize,
     cursor: *usize,
     anchor: ?*usize,
-    font: metrics_mod.FontMetrics,
+    source: layout_mod.Source,
     style: style_mod.TextInputStyle,
     Hist: type,
     hist: Hist,
@@ -264,7 +290,8 @@ fn textInputInner(
     comp: ?*Composition,
 ) context_mod.ContextError!TextInputResult {
     if (id.isNull()) return error.InvalidArgument;
-    if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
+    if (!style.isValid()) return error.InvalidArgument;
+    const layout = layout_mod.Layout.init(source) catch return error.InvalidArgument;
     if (!std.math.isFinite(bounds.x) or !std.math.isFinite(bounds.y) or
         !std.math.isFinite(bounds.w) or !std.math.isFinite(bounds.h))
     {
@@ -287,14 +314,14 @@ fn textInputInner(
     // Troca de foco quebra rajada de digitação do histórico.
     const had_focus = ctx.hasFocus(id);
     // Offset de rolagem atual (p/ mapear o press; recalculado no desenho).
-    const xoff_hit = visibleOffset(buffer, len.*, cursor.*, font, bounds.w - 8);
+    const xoff_hit = layout.visibleOffset(buffer, len.*, cursor.*, bounds.w - 8);
     if (fm.pressedInside(bounds)) {
         ctx.focus_owner = id;
         if (use_hist and !had_focus) hist.closeGroup();
         // Click posiciona o caret; captura p/ arrasto de seleção (M45).
         if (ctx.press_owner == null) {
             if (fm.pressed_pos) |pp| {
-                const at = offsetAt(buffer[0..len.*], font, pp.x - (bounds.x + 4) + xoff_hit);
+                const at = layout.offsetAtX(buffer[0..len.*], pp.x - (bounds.x + 4) + xoff_hit);
                 cursor.* = at;
                 if (anchor) |a| a.* = at;
             }
@@ -313,7 +340,7 @@ fn textInputInner(
     }
     if (ctx.press_owner == id and ctx.mouse_down_left and mouse_fresh) {
         if (ctx.mouse_pos) |mp| {
-            cursor.* = offsetAt(buffer[0..len.*], font, mp.x - (bounds.x + 4) + xoff_hit);
+            cursor.* = layout.offsetAtX(buffer[0..len.*], mp.x - (bounds.x + 4) + xoff_hit);
         }
     }
     // Release do dono solta (vale p/ todas as variantes).
@@ -642,11 +669,11 @@ fn textInputInner(
     var xoff: f32 = 0;
     var clipped = false;
     if (vis_w > 0 and len.* > 0) {
-        const full_w = (metrics_mod.measure(buffer[0..len.*], font) catch {
+        const full_w = layout.advance(buffer[0..len.*]) catch {
             return error.InvalidArgument;
-        }).width;
+        };
         if (full_w > vis_w) {
-            xoff = visibleOffset(buffer, len.*, cursor.*, font, vis_w);
+            xoff = layout.visibleOffset(buffer, len.*, cursor.*, vis_w);
             ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = bounds, .null_rect = false } }) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 error.InvalidCommand => return error.InvalidCommand,
@@ -660,19 +687,19 @@ fn textInputInner(
         const a = anchor.?;
         const lo = @min(a.*, cursor.*);
         const hi = @max(a.*, cursor.*);
-        const m0 = metrics_mod.measure(buffer[0..lo], font) catch {
+        const m0 = layout.advance(buffer[0..lo]) catch {
             return error.InvalidArgument;
         };
-        const m1 = metrics_mod.measure(buffer[0..hi], font) catch {
+        const m1 = layout.advance(buffer[0..hi]) catch {
             return error.InvalidArgument;
         };
         const hy = bounds.y + 2;
         const hh = bounds.h - 4;
         if (hh > 0) {
             ctx.draw.rectFilled(ctx.allocator, .{
-                .x = tx + m0.width,
+                .x = tx + m0,
                 .y = hy,
-                .w = @max(0, m1.width - m0.width),
+                .w = @max(0, m1 - m0),
                 .h = hh,
             }, style.selection) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
@@ -680,18 +707,21 @@ fn textInputInner(
             };
         }
     }
+    const line_h = layout.lineHeight();
     if (len.* > 0) {
-        ctx.draw.pushText(
+        layout.draw(
+            &ctx.draw,
             ctx.allocator,
-            .{ .x = tx, .y = bounds.y + (bounds.h - font.lineHeight()) / 2 },
-            style.text,
-            font,
             buffer[0..len.*],
+            .{ .x = tx, .y = bounds.y + (bounds.h - line_h) / 2 },
+            style.text,
         ) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             error.InvalidCommand => return error.InvalidCommand,
             error.InvalidUtf8 => return error.InvalidArgument, // buffer do chamador corrompido
             error.InvalidMetrics => return error.InvalidArgument,
+            error.InvalidGlyph => return error.InvalidArgument,
+            error.InvalidArgument => return error.InvalidArgument,
         };
     }
     // Pré-edit do IME (M126): desenhado na posição do caret, com
@@ -699,51 +729,59 @@ fn textInputInner(
     var ime_caret_x: ?f32 = null;
     if (comp) |c| {
         if (c.active and c.len > 0) {
-            const pre = c.preedit();
-            const m_pre = metrics_mod.measure(pre, font) catch {
-                return error.InvalidArgument;
-            };
-            const m_cur = metrics_mod.measure(pre[0..c.cursor], font) catch {
-                return error.InvalidArgument;
-            };
-            const m_base = metrics_mod.measure(buffer[0..cursor.*], font) catch {
-                return error.InvalidArgument;
-            };
-            const px = tx + m_base.width;
-            ime_caret_x = px + m_cur.width;
-            ctx.draw.pushText(
-                ctx.allocator,
-                .{ .x = px, .y = bounds.y + (bounds.h - font.lineHeight()) / 2 },
-                style.text,
-                font,
-                pre,
-            ) catch |err| switch (err) {
-                error.OutOfMemory => return error.OutOfMemory,
-                error.InvalidCommand => return error.InvalidCommand,
-                error.InvalidUtf8 => return error.InvalidArgument,
-                error.InvalidMetrics => return error.InvalidArgument,
-            };
-            // Sublinhado do pré-edit (mesma cor do caret).
-            const uy = bounds.y + bounds.h - 5;
-            if (m_pre.width > 0 and uy + 1 <= bounds.y + bounds.h) {
-                ctx.draw.rectFilled(ctx.allocator, .{
-                    .x = px,
-                    .y = uy,
-                    .w = m_pre.width,
-                    .h = 1,
-                }, style.caret) catch |err| switch (err) {
-                    error.OutOfMemory => return error.OutOfMemory,
-                    error.InvalidCommand => return error.InvalidCommand,
-                };
+            switch (layout.source) {
+                .metrics => |m| {
+                    const pre = c.preedit();
+                    const m_pre = metrics_mod.measure(pre, m) catch {
+                        return error.InvalidArgument;
+                    };
+                    const m_cur = metrics_mod.measure(pre[0..c.cursor], m) catch {
+                        return error.InvalidArgument;
+                    };
+                    const m_base = metrics_mod.measure(buffer[0..cursor.*], m) catch {
+                        return error.InvalidArgument;
+                    };
+                    const px = tx + m_base.width;
+                    ime_caret_x = px + m_cur.width;
+                    ctx.draw.pushText(
+                        ctx.allocator,
+                        .{ .x = px, .y = bounds.y + (bounds.h - m.lineHeight()) / 2 },
+                        style.text,
+                        m,
+                        pre,
+                    ) catch |err| switch (err) {
+                        error.OutOfMemory => return error.OutOfMemory,
+                        error.InvalidCommand => return error.InvalidCommand,
+                        error.InvalidUtf8 => return error.InvalidArgument,
+                        error.InvalidMetrics => return error.InvalidArgument,
+                    };
+                    // Sublinhado do pré-edit (mesma cor do caret).
+                    const uy = bounds.y + bounds.h - 5;
+                    if (m_pre.width > 0 and uy + 1 <= bounds.y + bounds.h) {
+                        ctx.draw.rectFilled(ctx.allocator, .{
+                            .x = px,
+                            .y = uy,
+                            .w = m_pre.width,
+                            .h = 1,
+                        }, style.caret) catch |err| switch (err) {
+                            error.OutOfMemory => return error.OutOfMemory,
+                            error.InvalidCommand => return error.InvalidCommand,
+                        };
+                    }
+                },
+                // No atlas os glifos do pré-edit ainda não existem (ele
+                // ainda não está no texto confirmado): o pré-edit não é
+                // desenhado, mas o texto confirmado entra no buffer.
+                .atlas => {},
             }
         }
     }
     if (res.focused) {
         // Caret na posição do cursor (mede o prefixo + padding - offset).
-        const m = metrics_mod.measure(buffer[0..cursor.*], font) catch {
+        const caret_w = layout.advance(buffer[0..cursor.*]) catch {
             return error.InvalidArgument;
         };
-        const cx = ime_caret_x orelse (tx + m.width);
+        const cx = ime_caret_x orelse (tx + caret_w);
         const top = bounds.y + 4;
         const bottom = bounds.y + bounds.h - 4;
         if (bottom > top) {
@@ -1763,5 +1801,107 @@ test "textInputIme compõe, desenha o pré-edit e confirma (M126)" {
     _ = try textInputIme(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &comp, font, style);
     try stdt.testing.expect(!comp.active);
     try stdt.testing.expectEqual(@as(usize, 2), len);
+    ctx.endFrame();
+}
+
+test "textInputAtlas usa os avanços reais do atlas (M135)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-atlas");
+
+    // 'A' com avanço 5 e 'B' com avanço 3 (largura total 8, não 12).
+    var b = atlas_mod.Builder.init(32, 32, 1);
+    defer b.deinit(gpa);
+    _ = try b.addGlyph(gpa, 'A', 4, 8, .{ .advance = 5, .bearing_y = -8, .height = 8 });
+    _ = try b.addGlyph(gpa, 'B', 4, 8, .{ .advance = 3, .bearing_y = -8, .height = 8 });
+    var bytes: [32 * 32 * 4]u8 = undefined;
+    for (&bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = try image_mod.Image.init(32, 32, &bytes);
+    var atlas = try b.finish(gpa, img);
+    defer atlas.deinit(gpa);
+
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+
+    // Digita "AB": o texto entra no buffer e sai como 2 blits.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{
+        .button = .left,
+        .pressed = true,
+        .pos = types.Vec2.init(6, 15),
+    } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'A' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'B' } });
+    const r = try textInputAtlas(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &atlas, style);
+    try stdt.testing.expect(r.focused and r.changed);
+    try stdt.testing.expectEqual(@as(usize, 2), len);
+    try stdt.testing.expectEqualStrings("AB", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+
+    // Dois blits (um por glifo) + caixa/borda; nenhum comando `.text`.
+    var blits: usize = 0;
+    var texts: usize = 0;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .image) blits += 1;
+        if (cmd == .text) texts += 1;
+    }
+    try stdt.testing.expectEqual(@as(usize, 2), blits);
+    try stdt.testing.expectEqual(@as(usize, 0), texts);
+    ctx.endFrame();
+
+    // O caret fica no fim do texto: x = 4 (padding) + 8 (avanços reais).
+    ctx.beginFrame();
+    _ = try textInputAtlas(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &atlas, style);
+    var caret_x: f32 = -1;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .line) caret_x = cmd.line.p0.x;
+    }
+    try stdt.testing.expectEqual(@as(f32, 4 + 8), caret_x);
+    ctx.endFrame();
+
+    // Clique posiciona o caret pelos avanços reais: x=6 cai em "B"
+    // (A ocupa 0..5, B 5..8) ⇒ offset 1.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{
+        .button = .left,
+        .pressed = true,
+        .pos = types.Vec2.init(4 + 6, 15),
+    } });
+    _ = try textInputAtlas(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &atlas, style);
+    try stdt.testing.expectEqual(@as(usize, 1), cursor);
+    ctx.endFrame();
+
+    // Contratos: atlas vazio e id nulo.
+    ctx.beginFrame();
+    var empty_atlas = atlas;
+    empty_atlas.glyphs = &.{};
+    try stdt.testing.expectError(error.InvalidArgument, textInputAtlas(
+        &ctx,
+        id,
+        bounds,
+        &buf,
+        &len,
+        &cursor,
+        &anchor,
+        &empty_atlas,
+        style,
+    ));
+    try stdt.testing.expectError(error.InvalidArgument, textInputAtlas(
+        &ctx,
+        .null,
+        bounds,
+        &buf,
+        &len,
+        &cursor,
+        &anchor,
+        &atlas,
+        style,
+    ));
     ctx.endFrame();
 }

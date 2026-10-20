@@ -252,6 +252,10 @@ const m = try layout.measure("Hello"); // real (proportional) advances
 try layout.draw(&ctx.draw, gpa, "Hello", pos, color); // blits per glyph
 ```
 
+Editable text follows the same source: `textInputAtlas` measures, places
+the caret, highlights the selection and draws with the atlas advances, so
+what you measure is what you see.
+
 ### Flex layout
 
 `layout.flex` distributes children in a row or column with gaps,

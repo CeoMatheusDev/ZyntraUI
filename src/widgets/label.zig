@@ -132,10 +132,9 @@ pub fn labelAtlas(
         .metrics = m,
         .truncated = bounds.w > 0 and m.width > bounds.w,
     };
-    // A linha de base fica na ascente do atlas: o topo do texto alinha
-    // com o topo do rect.
-    const baseline = types.Vec2.init(bounds.x, bounds.y + atlas.ascent());
-    layout.draw(&ctx.draw, ctx.allocator, text, baseline, color) catch |err| switch (err) {
+    // `draw` posiciona pelo canto superior-esquerdo: a linha de base
+    // fica na ascente do atlas (o topo do texto alinha com o rect).
+    layout.draw(&ctx.draw, ctx.allocator, text, .{ .x = bounds.x, .y = bounds.y }, color) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
         error.InvalidUtf8 => return error.InvalidUtf8,

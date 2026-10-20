@@ -159,8 +159,8 @@ pub const Layout = struct {
         };
     }
 
-    /// Desenha o texto em `pos` (origem da linha de base no atlas; canto
-    /// superior-esquerdo no fallback) com a cor `color`.
+    /// Desenha o texto com o canto superior-esquerdo em `pos` (mesma
+    /// convenção dos widgets) e a cor `color`.
     ///
     /// Com o atlas, cada glifo vira um blit da sua região (o texto fica
     /// visível até no rasterizador de referência, que não desenha
@@ -183,7 +183,10 @@ pub const Layout = struct {
                 };
             },
             .atlas => |a| {
-                atlas_mod.drawRun(dl, gpa, a, text, pos, color) catch |err| return switch (err) {
+                // A linha de base fica na ascente do atlas: o topo do
+                // glifo alinha com o topo de `pos`.
+                const baseline = types.Vec2.init(pos.x, pos.y + a.ascent());
+                atlas_mod.drawRun(dl, gpa, a, text, baseline, color) catch |err| return switch (err) {
                     error.OutOfMemory => error.OutOfMemory,
                     error.InvalidUtf8 => error.InvalidUtf8,
                     error.InvalidMetrics => error.InvalidMetrics,
@@ -193,6 +196,41 @@ pub const Layout = struct {
                 };
             },
         }
+    }
+    /// Offset de byte do glifo cujo "anel" contém `x` (relativo à
+    /// origem do texto). Multibyte-safe; `x <= 0` ⇒ 0; além do texto ⇒
+    /// o fim. Metade do avanço do glifo decide a fronteira (mesma
+    /// regra do fallback monospace).
+    pub fn offsetAtX(self: Layout, text: []const u8, x: f32) usize {
+        if (!std.math.isFinite(x) or x <= 0 or text.len == 0) return 0;
+        var acc: f32 = 0;
+        var i: usize = 0;
+        while (i < text.len) {
+            const d = metrics_mod.decodeOne(text[i..]) catch return i;
+            const adv = self.glyphAdvance(d.codepoint);
+            if (x < acc + adv / 2) return i;
+            acc += adv;
+            i += d.len;
+        }
+        return i;
+    }
+
+    /// Avanço de UM glifo (0 quando o glifo não existe no atlas).
+    fn glyphAdvance(self: Layout, codepoint: u21) f32 {
+        return switch (self.source) {
+            .metrics => |m| m.advance,
+            .atlas => |a| if (a.glyph(codepoint)) |g| g.metrics.advance else 0,
+        };
+    }
+
+    /// Deslocamento horizontal para manter o caret visível (0 quando o
+    /// texto cabe). Puro e derivado — mesma fórmula do desenho.
+    pub fn visibleOffset(self: Layout, text: []const u8, len: usize, cursor: usize, vis_w: f32) f32 {
+        if (vis_w <= 0 or len == 0) return 0;
+        const full = self.advance(text[0..len]) catch return 0;
+        if (full <= vis_w) return 0;
+        const pre = self.advance(text[0..@min(cursor, len)]) catch return 0;
+        return std.math.clamp(pre - vis_w, 0, full - vis_w);
     }
 };
 

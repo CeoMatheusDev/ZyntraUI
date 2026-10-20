@@ -21,6 +21,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   confere os pixels no framebuffer (38 pixels acesos), provando o caminho
   completo do atlas.
 
+- `widgets`: **campo de texto com fonte real** (M135, aditivo) — o núcleo
+  do `text_input` passou a medir, posicionar o caret, realçar a seleção e
+  desenhar por um `text.layout.Layout` (mesma métrica para medir e
+  desenhar), e a nova variante `textInputAtlas` usa um `FontAtlas`: o
+  texto sai como blits (visível até no rasterizador de referência) e o
+  clique/caret seguem os AVANÇOS REAIS da fonte proporcional. As variantes
+  existentes (métricas de fallback) mantêm o comportamento idêntico.
+  `text.layout.Layout` ganhou `offsetAtX` (x → offset) e `visibleOffset`
+  (rolagem horizontal) para a edição.
+
 ## [1.36.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a base de UI ganha **imagens** (RGBA8 nos
