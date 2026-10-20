@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.35.0] - 2026-10-20
+
+MINOR estável, 100% compatível: a fronteira C avança de forma substancial e
+fecha o ciclo das grandes views interativas — docking, contêineres
+(scroll/popup/modal), arrastar-e-soltar, barras de composição, grafo de nós,
+timeline e inspector de propriedades —, além das primitivas de desenho
+moderno (M114) e dos helpers de animação (M122). Nada que já existia mudou
+de assinatura ou layout.
+
 ### Adicionado
 
 - `c-abi`: **docking na fronteira C** (M113, aditivo) — handle opaco
