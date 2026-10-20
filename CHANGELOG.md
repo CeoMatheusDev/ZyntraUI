@@ -5,6 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.42.0] - 2026-10-20
+
+MINOR estável, 100% compatível: os **caminhos vetoriais viram ícone** —
+o novo `widgets.icon` desenha um path (já achatado ou vindo de um path
+SVG) dentro de um rect, com modo de ajuste e cor, e o `widgets.icon.Cache`
+guarda o caminho de cada SVG (analisado uma vez, não a cada frame). A
+fronteira C acompanha com `zyntra_svg_path_bounds` e
+`zyntra_draw_svg_path_transformed`. Nada que já existia mudou de
+assinatura, layout ou comportamento.
+
 ### Adicionado
 
 - `widgets`/`c-abi`: **ícone vetorial** (M162–M163, aditivo) — o novo

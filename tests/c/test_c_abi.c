@@ -29,7 +29,7 @@ int main(void) {
      * release; o CI detecta divergência). major==1 também trava
      * MAJOR acidental (ver M44). */
     assert(zyntra_version_major() == 1);
-    assert(zyntra_version_minor() == 41);
+    assert(zyntra_version_minor() == 42);
     assert(zyntra_version_patch() == 0);
     assert(strcmp(zyntra_version_prerelease(), "") == 0);
 
@@ -3846,6 +3846,15 @@ int main(void) {
         zyntra_framebuffer_destroy(fb);
         assert(lit > 100);
 
+        /* Ícone: bbox do path + desenho transformado (M163). */
+        float bx = 0, by = 0, bw = 0, bh = 0;
+        CHECK(zyntra_svg_path_bounds((const uint8_t *)svg,
+            (uint32_t)strlen(svg), &bx, &by, &bw, &bh));
+        assert(bw > 0.0f && bh > 0.0f);
+        CHECK(zyntra_draw_svg_path_transformed(ctx, (const uint8_t *)svg,
+            (uint32_t)strlen(svg), (ZyntraColor){200, 120, 240, 255}, 0.0f,
+            0, 1, 0, 2.0f, 4.0f, 4.0f));
+
         /* Erros: geometria inválida, contorno fora do range e modo
          * desconhecido. */
         CHECK(zyntra_context_begin_frame(ctx));
@@ -3862,6 +3871,11 @@ int main(void) {
         assert(zyntra_draw_svg_path(ctx, (const uint8_t *)"zzz", 3,
                    (ZyntraColor){255, 255, 255, 255}, 0.0f, 0, 1, 0) ==
             ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_draw_svg_path_transformed(ctx, (const uint8_t *)svg,
+                   (uint32_t)strlen(svg), (ZyntraColor){255, 255, 255, 255},
+                   0.0f, 0, 1, 0, 0.0f, 0.0f, 0.0f) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_svg_path_bounds((const uint8_t *)"zzz", 3, &bx, &by,
+                   &bw, &bh) == ZYNTRA_INVALID_ARGUMENT);
         CHECK(zyntra_context_end_frame(ctx));
         c161_paths = (lit > 100);
     }
