@@ -99,6 +99,25 @@ pub fn build(b: *std.Build) void {
     run_viewport3d.dependOn(&run_viewport3d_cmd.step);
     run_viewport3d_cmd.step.dependOn(b.getInstallStep());
 
+    // Exemplo dos caminhos vetoriais (path SVG + preenchimento/traço).
+    const paths_exe = b.addExecutable(.{
+        .name = "zyntra-paths",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/paths.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zyntra_ui", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(paths_exe);
+
+    const run_paths = b.step("run-paths", "Executa o exemplo dos caminhos vetoriais");
+    const run_paths_cmd = b.addRunArtifact(paths_exe);
+    run_paths.dependOn(&run_paths_cmd.step);
+    run_paths_cmd.step.dependOn(b.getInstallStep());
+
     // Benchmark da pipeline por frame (medir por fora; ver examples/bench.zig).
     const bench_exe = b.addExecutable(.{
         .name = "zyntra-bench",

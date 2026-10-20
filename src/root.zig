@@ -25,6 +25,7 @@ pub const draw = struct {
     pub const renderer = @import("draw/renderer.zig");
     pub const image = @import("draw/image.zig");
     pub const path = @import("draw/path.zig");
+    pub const svg = @import("draw/svg.zig");
     pub const stats = @import("draw/stats.zig");
 };
 
@@ -161,6 +162,8 @@ pub const PathContourRange = draw.path.ContourRange;
 pub const PathFillRule = draw.path.FillRule;
 pub const PathStrokeJoin = draw.path.StrokeJoin;
 pub const PathStrokeCap = draw.path.StrokeCap;
+pub const SvgPath = draw.svg.parsePath;
+pub const svg = draw.svg;
 pub const FrameStats = draw.renderer.FrameStats;
 pub const FrameMetrics = draw.stats.FrameMetrics;
 pub const NullRenderer = draw.renderer.NullRenderer;
@@ -353,6 +356,7 @@ test {
     _ = @import("draw/commands.zig");
     _ = @import("draw/image.zig");
     _ = @import("draw/path.zig");
+    _ = @import("draw/svg.zig");
     _ = @import("software/path_fill.zig");
     _ = @import("draw/stats.zig");
     _ = @import("layout/layout.zig");
