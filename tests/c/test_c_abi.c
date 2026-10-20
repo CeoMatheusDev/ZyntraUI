@@ -3715,6 +3715,38 @@ int main(void) {
             CHECK(zyntra_context_end_frame(ctx));
         }
 
+        /* Campo de texto com a mesma fonte real (M151). */
+        {
+            char ibuf[16] = {0};
+            size_t ilen = 0;
+            size_t icursor = 0;
+            size_t ianchor = 0;
+            const ZyntraId ti_atlas = zyntra_id_from_string("m151:ti", 7);
+            ZyntraTextInputResult tir;
+            ZyntraTextInputStyle tis2;
+            CHECK(zyntra_style_text_input(0, &tis2));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_focus(ctx, ti_atlas));
+            CHECK(zyntra_context_push_text(ctx, 'A'));
+            CHECK(zyntra_widget_text_input_atlas(ctx, ti_atlas,
+                (ZyntraRect){0, 0, 200, 30}, ibuf, sizeof(ibuf), &ilen,
+                &icursor, &ianchor, atlas, &tis2, &tir));
+            assert(tir.focused && tir.changed);
+            assert(ilen == 1);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            /* Bloco de texto: quebra pela largura e alinha. */
+            ZyntraTextBlockResult tbr;
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_widget_text_block(ctx,
+                zyntra_id_from_string("m151:tb", 7),
+                (ZyntraRect){0, 0, 20, 100}, "aaa bbb", 7,
+                (ZyntraColor){255, 255, 255, 255}, 10.0f, 1, &tbr));
+            assert(tbr.lines == 2);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
         CHECK(zyntra_font_atlas_destroy(atlas));
         c139_atlas = (w == 8.0f && lh == 7.0f);
     }

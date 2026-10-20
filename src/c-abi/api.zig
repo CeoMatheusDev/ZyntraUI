@@ -67,6 +67,7 @@ const ime_mod = @import("../text/ime.zig");
 const atlas_mod = @import("../text/atlas.zig");
 const bitmap_mod = @import("../text/bitmap.zig");
 const text_layout_mod = @import("../text/layout.zig");
+const text_block_mod = @import("../widgets/text_block.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -2690,6 +2691,91 @@ pub export fn zyntra_widget_text_area_ime(
         .redone = res.redone,
         .len = res.len,
     };
+    return .ok;
+}
+
+/// Campo de texto com fonte real (atlas de glifos): caret, seleção e
+/// clique seguem os AVANÇOS REAIS dos glifos.
+pub export fn zyntra_widget_text_input_atlas(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    buffer: ?[*]u8,
+    buffer_len: usize,
+    len: ?*usize,
+    cursor: ?*usize,
+    anchor: ?*usize,
+    atlas: ?*ZyntraFontAtlas,
+    style: ?*const ct.ZyntraTextInputStyle,
+    out_result: ?*ct.ZyntraTextInputResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const n = len orelse return .invalid_argument;
+    const cur = cursor orelse return .invalid_argument;
+    const anc = anchor orelse return .invalid_argument;
+    const a = atlas orelse return .invalid_argument;
+    const buf = byteBufOf(buffer, buffer_len) catch return .invalid_argument;
+    const state = toFontAtlas(a);
+    state.refresh();
+    const res = text_input_mod.textInputAtlas(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        buf,
+        n,
+        cur,
+        anc,
+        &state.view,
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .focused = res.focused,
+        .changed = res.changed,
+        .submitted = res.submitted,
+        .overflowed = res.overflowed,
+        .selected = res.selected,
+        .undone = res.undone,
+        .redone = res.redone,
+        .len = res.len,
+    };
+    return .ok;
+}
+
+/// Bloco de texto multilinha (parágrafo) com as métricas de fallback:
+/// quebra pela largura do rect e alinha cada linha
+/// (`ZYNTRA_TEXT_ALIGN_START/CENTER/END`).
+pub export fn zyntra_widget_text_block(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    utf8: ?[*]const u8,
+    utf8_len: usize,
+    color: ct.ZyntraColor,
+    size: f32,
+    alignment: i32,
+    out_result: ?*ct.ZyntraTextBlockResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    if (utf8_len > 0 and utf8 == null) return .invalid_argument;
+    const al: text_block_mod.Align = switch (alignment) {
+        0 => .start,
+        1 => .center,
+        2 => .end,
+        else => return .invalid_argument,
+    };
+    const bytes: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
+    const res = text_block_mod.textBlock(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        bytes,
+        toColor(color),
+        metrics_mod.FontMetrics.withSize(size),
+        .{ .alignment = al },
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{ .lines = @intCast(res.lines), .truncated = res.truncated };
     return .ok;
 }
 
@@ -7935,6 +8021,106 @@ test "C-ABI M150: área de texto com atlas (fonte real)" {
         &anchor,
         &scroll,
         atlas,
+        &style,
+        &res,
+    ));
+}
+
+test "C-ABI M151: campo de texto com atlas e bloco de texto" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(ok, zyntra_context_create(.{
+        .x = 0,
+        .y = 0,
+        .w = 200,
+        .h = 100,
+    }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    // Atlas com 'A' (avanço 5).
+    var atlas: ?*ZyntraFontAtlas = null;
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_create(16, 16, 1, &atlas));
+    defer _ = zyntra_font_atlas_destroy(atlas);
+    var gx: u32 = 0;
+    var gy: u32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_add_glyph(atlas, 'A', 4, 8, 5.0, -8.0, &gx, &gy));
+    var pixels: [16 * 16 * 4]u8 = undefined;
+    for (&pixels, 0..) |*p, i| p.* = @truncate(i);
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_set_image(atlas, &pixels, 16, 16, 16 * 4));
+
+    var style: ct.ZyntraTextInputStyle = undefined;
+    try stdt.testing.expectEqual(ok, zyntra_style_text_input(0, &style));
+
+    // Campo de texto com atlas: digita e confere o buffer.
+    var buf: [16]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    const id = zyntra_id_from_string("m151:ti", 7);
+    var res: ct.ZyntraTextInputResult = .{};
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_context_focus(handle, id));
+    try stdt.testing.expectEqual(ok, zyntra_context_push_text(handle, 'A'));
+    try stdt.testing.expectEqual(ok, zyntra_widget_text_input_atlas(
+        handle,
+        id,
+        .{ .x = 0, .y = 0, .w = 200, .h = 30 },
+        &buf,
+        buf.len,
+        &len,
+        &cursor,
+        &anchor,
+        atlas,
+        &style,
+        &res,
+    ));
+    try stdt.testing.expect(res.focused and res.changed);
+    try stdt.testing.expectEqual(@as(usize, 1), len);
+    try stdt.testing.expectEqual(@as(usize, 1), cursor);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // Bloco de texto: quebra e alinha.
+    var bres: ct.ZyntraTextBlockResult = .{};
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_widget_text_block(
+        handle,
+        zyntra_id_from_string("m151:tb", 7),
+        .{ .x = 0, .y = 0, .w = 20, .h = 100 },
+        "aaa bbb",
+        7,
+        .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+        10.0,
+        1,
+        &bres,
+    ));
+    try stdt.testing.expectEqual(@as(u32, 2), bres.lines);
+    try stdt.testing.expect(!bres.truncated);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // Contratos.
+    try stdt.testing.expectEqual(bad, zyntra_widget_text_block(
+        handle,
+        zyntra_id_from_string("m151:tb", 7),
+        .{ .x = 0, .y = 0, .w = 20, .h = 100 },
+        "a",
+        1,
+        .{},
+        10.0,
+        9, // alinhamento inválido
+        &bres,
+    ));
+    try stdt.testing.expectEqual(bad, zyntra_widget_text_input_atlas(
+        handle,
+        id,
+        .{ .x = 0, .y = 0, .w = 200, .h = 30 },
+        &buf,
+        buf.len,
+        &len,
+        &cursor,
+        &anchor,
+        null,
         &style,
         &res,
     ));
