@@ -194,32 +194,9 @@ fn lineAtY(y: f32, top: f32, line_h: f32, nlines: usize) usize {
     return @min(idx, nlines - 1);
 }
 
-/// Offset de byte na linha cujo glifo contém `x` (relativo à origem do
-/// texto da linha). Negativo/0 → 0; além do fim → fim.
-fn colAtX(font: metrics_mod.FontMetrics, line_text: []const u8, x: f32) usize {
-    if (!std.math.isFinite(x) or x <= 0 or line_text.len == 0) return 0;
-    var acc: f32 = 0;
-    var i: usize = 0;
-    while (i < line_text.len) {
-        if (x < acc + font.advance / 2) return i;
-        const d = metrics_mod.decodeOne(line_text[i..]) catch return i;
-        acc += font.advance;
-        i += d.len;
-    }
-    return i;
-}
-
-/// Largura de um trecho (px lógicos): métrica de fallback ou atlas.
-fn advanceOf(source: layout_mod.Source, text: []const u8) f32 {
-    return switch (source) {
-        .metrics => |m| (metrics_mod.measure(text, m) catch metrics_mod.TextMetrics{}).width,
-        .atlas => |a| (a.measure(text) catch 0),
-    };
-}
-
 /// Métricas de fallback do fonte. No caminho atlas (proporcional) as
-/// colunas não se aplicam: o valor é neutro e nunca é usado.
-fn metricsOf(source: layout_mod.Source) metrics_mod.FontMetrics {
+/// colunas não se aplicam: o valor é neutro e só serve de fallback.
+fn fallbackMetrics(source: layout_mod.Source) metrics_mod.FontMetrics {
     return switch (source) {
         .metrics => |m| m,
         .atlas => metrics_mod.FontMetrics.withSize(16),
@@ -229,7 +206,7 @@ fn metricsOf(source: layout_mod.Source) metrics_mod.FontMetrics {
 // ---- Quebra suave (M89) ------------------------------------------------
 //
 // O caret e o desenho trabalham por CODPOINT com `advance` uniforme
-// (mesmo modelo de `colAtX`/`measure`), então a quebra é por colunas:
+// (mesmo modelo do `text.layout.Layout`), então a quebra é por colunas:
 // `max_cols` codepoints por linha visual (>= 1 garante progresso).
 // `max_cols == 0` desliga a quebra — as funções abaixo degeneram para as
 // linhas lógicas (`lineStart`/`lineEnd`), deixando um único caminho.
@@ -583,14 +560,16 @@ fn textAreaInner(
     // sem quebra (1 linha visual por linha lógica). Sob quebra não há
     // rolagem horizontal. O offset horizontal derivado (mantém o caret
     // visível) só se aplica sem quebra.
-    const wrap_cols: usize = if (wrap) wrapCols(metricsOf(source), vis_w) else 0;
+    // A quebra suave é por COLUNAS (fonte monoespaçada): no caminho
+    // atlas (proporcional) ela não se aplica.
+    const wrap_cols: usize = if (wrap) wrapCols(fallbackMetrics(source), vis_w) else 0;
     const nlines0 = visualCount(buffer, len.*, wrap_cols);
     const xoff: f32 = if (wrap_cols != 0) 0 else blk: {
         const caret_line0 = lineOfOffset(buffer, @min(cursor.*, len.*));
         const caret_ls0 = lineStart(buffer, len.*, caret_line0);
         const caret_le0 = lineEnd(buffer, len.*, caret_line0);
-        const caret_pre_w = advanceOf(source, buffer[caret_ls0..@min(cursor.*, caret_le0)]);
-        const caret_full_w = advanceOf(source, buffer[caret_ls0..caret_le0]);
+        const caret_pre_w = layout.advance(buffer[caret_ls0..@min(cursor.*, caret_le0)]) catch 0;
+        const caret_full_w = layout.advance(buffer[caret_ls0..caret_le0]) catch 0;
         break :blk if (caret_full_w <= vis_w) 0 else std.math.clamp(caret_pre_w - vis_w, 0, caret_full_w - vis_w);
     };
     const text_x = bounds.x + pad - xoff;
@@ -608,10 +587,7 @@ fn textAreaInner(
             if (fm.pressed_pos) |pp| {
                 const vline = lineAtY(pp.y, text_top, line_h, nlines0);
                 const seg = visualLineAt(buffer, len.*, wrap_cols, vline);
-                const col = switch (source) {
-                    .metrics => |m| colAtX(m, buffer[seg.start..seg.end], pp.x - text_x),
-                    .atlas => layout.offsetAtX(buffer[seg.start..seg.end], pp.x - text_x),
-                };
+                const col = layout.offsetAtX(buffer[seg.start..seg.end], pp.x - text_x);
                 const at = @min(seg.start + col, len.*);
                 cursor.* = at;
                 anchor.* = at;
@@ -625,10 +601,7 @@ fn textAreaInner(
         if (ctx.mouse_pos) |mp| {
             const vline = lineAtY(mp.y, text_top, line_h, nlines0);
             const seg = visualLineAt(buffer, len.*, wrap_cols, vline);
-            const col = switch (source) {
-                .metrics => |m| colAtX(m, buffer[seg.start..seg.end], mp.x - text_x),
-                .atlas => layout.offsetAtX(buffer[seg.start..seg.end], mp.x - text_x),
-            };
+            const col = layout.offsetAtX(buffer[seg.start..seg.end], mp.x - text_x);
             cursor.* = @min(seg.start + col, len.*);
             moved = true;
         }
@@ -966,7 +939,7 @@ fn textAreaInner(
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
-    try drawTextAreaContent(ctx, buffer, len.*, cursor.*, anchor.*, res.selected, res.focused, bounds, scroll_y.*, text_top, text_x, line_h, wrap_cols, source, style, comp);
+    try drawTextAreaContent(ctx, buffer, len.*, cursor.*, anchor.*, res.selected, res.focused, bounds, scroll_y.*, text_top, text_x, line_h, wrap_cols, source, layout, style, comp);
     ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = .{}, .null_rect = true } }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
@@ -990,6 +963,7 @@ fn drawTextAreaContent(
     line_h: f32,
     wrap_cols: usize,
     source: layout_mod.Source,
+    layout: layout_mod.Layout,
     style: style_mod.TextInputStyle,
     comp: ?*Composition,
 ) context_mod.ContextError!void {
@@ -1016,8 +990,8 @@ fn drawTextAreaContent(
             const s = @max(lo, ls);
             const e = @min(hi, le);
             if (s < e) {
-                const m0 = advanceOf(source, buffer[ls..s]);
-                const m1 = advanceOf(source, buffer[ls..e]);
+                const m0 = layout.advance(buffer[ls..s]) catch 0;
+                const m1 = layout.advance(buffer[ls..e]) catch 0;
                 ctx.draw.rectFilled(ctx.allocator, .{
                     .x = text_x + m0,
                     .y = y,
@@ -1068,14 +1042,16 @@ fn drawTextAreaContent(
         // dá o x exato. Com atlas, o x vem do AVANÇO REAL do prefixo.
         var cx = switch (source) {
             .metrics => |m| text_x + @as(f32, @floatFromInt(vp.col)) * m.advance,
-            .atlas => text_x + advanceOf(source, buffer[vp.start..@min(cursor, len)]),
+            .atlas => text_x + (layout.advance(buffer[vp.start..@min(cursor, len)]) catch 0),
         };
         const cy = text_top + @as(f32, @floatFromInt(vp.index)) * line_h - scroll_y;
         // Pré-edit do IME (M131): desenhado na posição do caret, com
         // sublinhado; durante a composição o caret fica dentro dele.
         if (comp) |c| {
             if (c.active and c.len > 0) {
-                const font = metricsOf(source);
+                // O pré-edit é medido com as métricas de fallback (o
+                // atlas pode não ter os glifos da composição).
+                const font = fallbackMetrics(source);
                 const pre = c.preedit();
                 const m_pre = metrics_mod.measure(pre, font) catch return error.InvalidArgument;
                 const m_cur = metrics_mod.measure(pre[0..c.cursor], font) catch return error.InvalidArgument;

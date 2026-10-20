@@ -17,6 +17,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   capacidade antes do frame (sem realocação no caminho quente; os buffers
   são reutilizados entre frames). O rasterizador ganha `RasterMetrics`
   (caminho rápido/genérico, pixels escritos) em `SoftwareFramebuffer`.
+- `core`/`draw`/`text`/`docs`: **revisão geral do projeto** (M143, aditivo) —
+  a área de texto passou a usar o `text.layout.Layout` compartilhado (o
+  `textarea` reimplementava medição e caret: `colAtX`/`advanceOf` foram
+  removidos); o `DrawList.scaledInto` deixou de falhar com runs acima de
+  256 glifos (a cópia é feita em pedaços, sem buffer grande na pilha); o
+  cache de texto mede UMA vez por texto (a largura é o avanço); a
+  documentação da C-ABI ganhou o índice completo das 192 funções e dos
+  104 tipos públicos (a lista de funções/documentação estava defasada) e
+  as notas de ownership de atlas/fonte de bitmap; o README lista a
+  arquitetura atual (módulos de `text`, `layout`, `viewport3d`) e os novos
+  exemplos. Nenhuma API pública mudou de assinatura.
 - `text`: **geração do atlas** (M138, aditivo) — `FontAtlas.generation`
   muda a cada glifo adicionado; o cache de medições inclui a geração na
   chave, então um atlas alterado invalida as entradas antigas (sem medir

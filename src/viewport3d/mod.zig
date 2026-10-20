@@ -7,6 +7,10 @@
 //! - `clipping`: recorte de triângulos contra o plano near.
 //! - `depth`: buffer de profundidade.
 //! - `raster`: rasterizador de triângulos em software.
+//! - `grid`: plano de grade e eixos XYZ.
+//! - `frustum`: culling dos triângulos fora da câmera.
+//! - `pick`: seleção de objetos (ray casting).
+//! - `gizmo`: gizmos de translação, rotação e escala.
 //! - `viewport`: o WIDGET (desacoplado do rasterizador: recebe uma
 //!   imagem pronta).
 //!

@@ -95,7 +95,10 @@ pub const Layout = struct {
         return self.source.lineHeight();
     }
 
-    /// Largura total do texto (soma dos avanços dos glifos conhecidos).
+    /// Largura do texto (soma dos avanços dos glifos conhecidos).
+    ///
+    /// Atenção: para um texto com QUEBRAS DE LINHA a largura é a da
+    /// linha mais larga (é a medida de uma linha, não a soma).
     pub fn advance(self: Layout, text: []const u8) Error!f32 {
         return switch (self.source) {
             .metrics => |m| (try metrics_mod.measure(text, m)).width,

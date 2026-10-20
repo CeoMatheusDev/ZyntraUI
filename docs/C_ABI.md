@@ -958,6 +958,21 @@ zyntra_widget_label_atlas(ctx, id, bounds, "AB", 2, color, atlas);
   duplicado, glifo que não cabe no atlas e ponteiros de saída nulos;
   UTF-8 malformado ⇒ `ZYNTRA_INVALID_TEXT`.
 
+## Ownership de atlas e fontes de bitmap
+
+* `ZyntraFontAtlas` é um handle **opaco**: a imagem do atlas e os seus
+  pixels são EMPRESTADOS pelo chamador. O atlas (e a imagem) precisam
+  viver enquanto:
+  * o atlas estiver registrado como fonte de bitmap no contexto
+    (`zyntra_context_set_bitmap_font`) — destruí-lo antes deixa um
+    ponteiro pendurado;
+  * o texto desenhado a partir dele ainda estiver em uso no frame.
+* `zyntra_font_atlas_destroy` libera apenas o handle; ele NÃO libera a
+  imagem (que é do chamador).
+* A fonte de bitmap global exige um atlas **monoespaçado** cujo avanço
+  seja igual ao das métricas do `size` informado — assim a medida e o
+  desenho dos widgets coincidem.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -1056,4 +1071,376 @@ zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
 /tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..." + "C-ABI inspector ..." + "C-ABI anim ..." + "C-ABI imagem ..." + "C-ABI ime ..." + "C-ABI atlas ..."
+```
+
+### Tipos públicos
+
+```c
+ZyntraAnimTimer
+ZyntraButtonResult
+ZyntraButtonStyle
+ZyntraCheckboxResult
+ZyntraCheckboxStyle
+ZyntraColor
+ZyntraComboResult
+ZyntraDndDrop
+ZyntraDockDrop
+ZyntraDockGroup
+ZyntraDockPaneInfo
+ZyntraDockSplitInfo
+ZyntraDockStyle
+ZyntraDockViewResult
+ZyntraDragGhostResult
+ZyntraDragGhostStyle
+ZyntraFrameMetrics
+ZyntraGraphEdge
+ZyntraGraphNode
+ZyntraGraphStyle
+ZyntraGraphTransform
+ZyntraGraphViewOptions
+ZyntraGraphViewResult
+ZyntraGraphViewState
+ZyntraGroupBoxStyle
+ZyntraImeComposition
+ZyntraInspectorChoice
+ZyntraInspectorProperty
+ZyntraInspectorRange
+ZyntraInspectorStyle
+ZyntraInspectorViewOptions
+ZyntraInspectorViewResult
+ZyntraInspectorViewState
+ZyntraLabelResult
+ZyntraListViewResult
+ZyntraListViewStyle
+ZyntraMenuItem
+ZyntraMenuResult
+ZyntraMenuStyle
+ZyntraModalDragState
+ZyntraModalResult
+ZyntraModalStyle
+ZyntraPanelOptions
+ZyntraPanelResult
+ZyntraPanelStyle
+ZyntraPopupResult
+ZyntraPopupStyle
+ZyntraProgressStyle
+ZyntraRadioResult
+ZyntraRadioStyle
+ZyntraRasterMetrics
+ZyntraRect
+ZyntraRenderStats
+ZyntraScrollResult
+ZyntraScrollStyle
+ZyntraSeparatorStyle
+ZyntraSize
+ZyntraSliderResult
+ZyntraSliderStyle
+ZyntraSpinnerStyle
+ZyntraSplitterResult
+ZyntraSplitterStyle
+ZyntraStatusBar
+ZyntraStatusBarStyle
+ZyntraStr
+ZyntraSwitchResult
+ZyntraSwitchStyle
+ZyntraTabBarResult
+ZyntraTabBarStyle
+ZyntraTableColumn
+ZyntraTableResult
+ZyntraTableRow
+ZyntraTableStyle
+ZyntraTextAreaResult
+ZyntraTextBlockResult
+ZyntraTextInputResult
+ZyntraTextInputStyle
+ZyntraTextMetrics
+ZyntraThemeColors
+ZyntraTimelineKey
+ZyntraTimelineStyle
+ZyntraTimelineTrack
+ZyntraTimelineTransform
+ZyntraTimelineViewOptions
+ZyntraTimelineViewResult
+ZyntraTimelineViewState
+ZyntraToolbar
+ZyntraToolbarStyle
+ZyntraTooltipResult
+ZyntraTooltipState
+ZyntraTooltipStyle
+ZyntraTreeViewResult
+ZyntraTreeViewStyle
+ZyntraTween
+ZyntraVec2
+ZyntraDndAccept
+ZyntraDockZone
+ZyntraEase
+ZyntraInspectorKind
+ZyntraKey
+ZyntraOrientation
+ZyntraResult
+ZyntraThemeKind
+ZyntraTimelineDragMode
+```
+
+## Apêndice: índice completo das funções C
+
+Gerado a partir de `src/c-abi/zyntra.h` (a referência da verdade); as
+seções explicativas de cada lote estão acima. As assinaturas completas
+estão no header.
+
+### Versão, contexto e frame
+
+```c
+zyntra_context_begin_frame
+zyntra_context_clear_dirty
+zyntra_context_create
+zyntra_context_destroy
+zyntra_context_dirty_rect
+zyntra_context_end_frame
+zyntra_context_focus
+zyntra_context_frame_index
+zyntra_context_get_scale
+zyntra_context_mark_dirty
+zyntra_context_pending_events
+zyntra_context_push_device_mouse_button
+zyntra_context_push_device_mouse_move
+zyntra_context_push_device_mouse_wheel
+zyntra_context_push_key
+zyntra_context_push_mouse_button
+zyntra_context_push_mouse_move
+zyntra_context_push_mouse_wheel
+zyntra_context_push_quit
+zyntra_context_push_text
+zyntra_context_set_device_viewport
+zyntra_context_set_scale
+zyntra_context_set_viewport
+zyntra_version_major
+zyntra_version_minor
+zyntra_version_patch
+zyntra_version_prerelease
+```
+
+### Desenho (comandos)
+
+```c
+zyntra_draw_alpha
+zyntra_draw_blur
+zyntra_draw_circle_dashed
+zyntra_draw_circle_filled
+zyntra_draw_circle_outline
+zyntra_draw_clear
+zyntra_draw_clip
+zyntra_draw_clip_reset
+zyntra_draw_count
+zyntra_draw_gradient_conic
+zyntra_draw_gradient_radial
+zyntra_draw_image
+zyntra_draw_image_region
+zyntra_draw_line
+zyntra_draw_line_dashed
+zyntra_draw_rect_filled
+zyntra_draw_rect_gradient
+zyntra_draw_rect_outline
+zyntra_draw_rect_rounded
+zyntra_draw_rect_shadow
+zyntra_draw_text
+```
+
+### Pixels: framebuffer de software e métricas
+
+```c
+zyntra_framebuffer_create
+zyntra_framebuffer_destroy
+zyntra_framebuffer_fill
+zyntra_framebuffer_pixel
+zyntra_framebuffer_render
+zyntra_framebuffer_render_metrics
+zyntra_framebuffer_render_region
+zyntra_framebuffer_size
+zyntra_text_measure
+zyntra_text_truncate
+```
+
+### Métricas estendidas
+
+```c
+zyntra_context_frame_metrics
+```
+
+### Tema e estilos
+
+```c
+zyntra_style_button
+zyntra_style_checkbox
+zyntra_style_dock
+zyntra_style_drag_ghost
+zyntra_style_graph
+zyntra_style_group_box
+zyntra_style_inspector
+zyntra_style_list_view
+zyntra_style_menu
+zyntra_style_modal
+zyntra_style_panel
+zyntra_style_popup
+zyntra_style_progress
+zyntra_style_radio
+zyntra_style_scroll
+zyntra_style_separator
+zyntra_style_slider
+zyntra_style_spinner
+zyntra_style_splitter
+zyntra_style_status_bar
+zyntra_style_switch
+zyntra_style_tab_bar
+zyntra_style_table
+zyntra_style_text_input
+zyntra_style_timeline
+zyntra_style_toolbar
+zyntra_style_tooltip
+zyntra_style_tree_view
+zyntra_theme_colors
+```
+
+### Ids e widgets (labels, botões, listas, menus, tabelas, árvores)
+
+```c
+zyntra_id_child
+zyntra_id_from_string
+zyntra_widget_button
+zyntra_widget_checkbox
+zyntra_widget_combo
+zyntra_widget_dock_view
+zyntra_widget_drag_ghost
+zyntra_widget_graph_view
+zyntra_widget_group_box
+zyntra_widget_inspector_view
+zyntra_widget_label
+zyntra_widget_label_atlas
+zyntra_widget_list_view
+zyntra_widget_menu
+zyntra_widget_modal_begin
+zyntra_widget_modal_end
+zyntra_widget_modal_titled
+zyntra_widget_panel
+zyntra_widget_popup_begin
+zyntra_widget_popup_end
+zyntra_widget_progress
+zyntra_widget_radio
+zyntra_widget_scroll_begin
+zyntra_widget_scroll_end
+zyntra_widget_separator
+zyntra_widget_slider
+zyntra_widget_spinner
+zyntra_widget_splitter
+zyntra_widget_status_bar
+zyntra_widget_switch
+zyntra_widget_tab_bar
+zyntra_widget_table
+zyntra_widget_text_area
+zyntra_widget_text_area_atlas
+zyntra_widget_text_area_ime
+zyntra_widget_text_block
+zyntra_widget_text_input
+zyntra_widget_text_input_atlas
+zyntra_widget_text_input_ime
+zyntra_widget_text_input_selected
+zyntra_widget_timeline_view
+zyntra_widget_toolbar
+zyntra_widget_tooltip
+zyntra_widget_tree_view
+```
+
+### Docking (modelo)
+
+```c
+zyntra_dock_add_tab
+zyntra_dock_create
+zyntra_dock_destroy
+zyntra_dock_group
+zyntra_dock_init
+zyntra_dock_panes
+zyntra_dock_remove_pane
+zyntra_dock_set_active_tab
+zyntra_dock_set_ratio
+zyntra_dock_split
+zyntra_dock_splits
+```
+
+### Arrastar-e-soltar
+
+```c
+zyntra_dnd_accept
+zyntra_dnd_begin
+zyntra_dnd_cancel
+zyntra_dnd_drag_distance
+zyntra_dnd_drag_exceeds
+zyntra_dnd_drag_origin
+zyntra_dnd_drag_position
+zyntra_dnd_drag_source
+zyntra_dnd_hover_target
+zyntra_dnd_is_dragging
+zyntra_dnd_last_drop
+```
+
+### Campos de texto e IME
+
+```c
+zyntra_ime_cancel
+zyntra_ime_commit
+zyntra_ime_update
+```
+
+### Atlas de glifos (fonte real)
+
+```c
+zyntra_font_atlas_add_glyph
+zyntra_font_atlas_create
+zyntra_font_atlas_destroy
+zyntra_font_atlas_draw_run
+zyntra_font_atlas_line_height
+zyntra_font_atlas_measure
+zyntra_font_atlas_set_image
+```
+
+### Animação (easing, tween, timer)
+
+```c
+zyntra_anim_lerp_color
+zyntra_anim_timer_done
+zyntra_anim_timer_init
+zyntra_anim_timer_progress
+zyntra_anim_timer_reset
+zyntra_anim_timer_tick
+zyntra_ease_apply
+zyntra_tween_done_at
+zyntra_tween_init
+zyntra_tween_value_at
+```
+
+### Layout e placement (puro)
+
+```c
+zyntra_popup_place
+```
+
+### Outros
+
+```c
+zyntra_context_clear_bitmap_font
+zyntra_context_has_focus
+zyntra_context_set_bitmap_font
+zyntra_graph_view_options_default
+zyntra_graph_view_state_init
+zyntra_inspector_view_options_default
+zyntra_inspector_view_state_init
+zyntra_status_bar_next_item
+zyntra_status_bar_next_right
+zyntra_status_bar_remaining
+zyntra_status_bar_separator
+zyntra_status_bar_text
+zyntra_timeline_view_options_default
+zyntra_timeline_view_state_init
+zyntra_toolbar_next_item
+zyntra_toolbar_remaining
+zyntra_toolbar_separator
 ```

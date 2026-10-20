@@ -352,6 +352,28 @@ test "Builder recusa overflow, duplicatas e métricas inválidas" {
     try stdt.testing.expectError(error.DuplicateGlyph, b.addGlyph(gpa, 'A', 2, 2, .{ .advance = 1 }));
 }
 
+test "FontAtlas: ascente, descida e altura de linha" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var b = Builder.init(32, 32, 1);
+    defer b.deinit(gpa);
+    // 'A' sobe 8 px acima da base e desce 2 px abaixo.
+    _ = try b.addGlyph(gpa, 'A', 4, 10, .{ .advance = 6, .bearing_y = -8, .height = 10 });
+    _ = try b.addGlyph(gpa, 'g', 4, 10, .{ .advance = 6, .bearing_y = -2, .height = 10 });
+    var bytes: [32 * 32 * 4]u8 = undefined;
+    for (&bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = try image_mod.Image.init(32, 32, &bytes);
+    var atlas = try b.finish(gpa, img);
+    defer atlas.deinit(gpa);
+
+    // O 'A' define a ascente (8) e o 'g' a descida (8).
+    try stdt.testing.expectEqual(@as(f32, 8), atlas.ascent());
+    try stdt.testing.expectEqual(@as(f32, 8), atlas.descent());
+    // A altura de linha é o maior (ascente + descida) de um glofo: o 'A'
+    // sobe 8 e desce 2 (10); o 'g' sobe 2 e desce 8 (10).
+    try stdt.testing.expectEqual(@as(f32, 10), atlas.lineHeight());
+}
+
 test "FontAtlas ordena, busca e mede" {
     const stdt = @import("std");
     const gpa = stdt.testing.allocator;

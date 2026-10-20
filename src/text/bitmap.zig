@@ -10,10 +10,13 @@
 //! desenho coincidam — e o cursor, a seleção e o corte de texto fiquem
 //! no lugar — o avanço de TODOS os glifos do atlas precisa ser igual ao
 //! avanço das métricas usadas pelos widgets. Se não for, o app pode
-//! trocar `FontMetrics` por outra de mesmo avanço.
+//! trocar `FontMetrics` por outra de mesmo avanço. Atenção: o atlas
+//! precisa ter o glifo de ESPAÇO com o mesmo avanço dos demais (sem
+//! ele, a fonte não é monoespaçada e é recusada).
 //!
 //! Ownership: o atlas é emprestado pelo chamador e precisa viver
-//! enquanto estiver registrado.
+//! enquanto estiver registrado no `Context` (destruí-lo antes deixa um
+//! ponteiro pendurado — o mesmo vale para a imagem do atlas).
 
 const std = @import("std");
 const metrics_mod = @import("metrics.zig");

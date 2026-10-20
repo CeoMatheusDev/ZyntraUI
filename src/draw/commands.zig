@@ -662,13 +662,24 @@ pub const DrawList = struct {
         factor: f32,
     ) !void {
         const refs = self.glyphsOf(cmd);
-        var scaled: [256]GlyphRef = undefined;
-        var list: []const GlyphRef = refs;
-        if (factor != 1.0) {
-            // Blocos locais (o caso comum cabe em 256 glifos).
-            if (refs.len > scaled.len) return error.OutOfMemory;
-            for (refs, 0..) |r, i| {
-                scaled[i] = .{
+        if (refs.len == 0) {
+            var empty = cmd.translated(dx, dy);
+            empty.glyph_run.refs = null;
+            empty.glyph_run.count = 0;
+            try out.push(gpa, empty);
+            return;
+        }
+        // Os glifos do run ficam CONTÍGUOS no bloco de destino (o
+        // reserva garante o espaço) — o comando aponta para o início.
+        try out.reserveGlyphs(gpa, refs.len);
+        const block = out.glyph_blocks.items[out.glyph_blocks.items.len - 1];
+        const base = out.glyph_block_len;
+        // A cópia é feita em pedaços (sem um buffer grande na pilha).
+        var i: usize = 0;
+        while (i < refs.len) {
+            const n = @min(256, refs.len - i);
+            for (refs[i..][0..n], 0..) |r, k| {
+                block.ptr[base + i + k] = .{
                     .src_x = r.src_x,
                     .src_y = r.src_y,
                     .src_w = r.src_w,
@@ -677,12 +688,13 @@ pub const DrawList = struct {
                     .dy = r.dy * factor,
                 };
             }
-            list = scaled[0..refs.len];
+            i += n;
         }
-        const ptr = if (list.len == 0) null else try out.allocGlyphs(gpa, list);
+        out.glyph_block_len = base + refs.len;
+
         var copy = if (factor == 1.0) cmd.translated(dx, dy) else cmd.scaled(factor);
-        copy.glyph_run.refs = ptr;
-        copy.glyph_run.count = @intCast(list.len);
+        copy.glyph_run.refs = block.ptr + base;
+        copy.glyph_run.count = @intCast(refs.len);
         try out.push(gpa, copy);
     }
 
@@ -1837,4 +1849,40 @@ test "DrawList reserve de glyph runs: bloco estável e sem realocação (M153)" 
     const got2 = dl.glyphsOf(dl.items()[0]);
     try stdt.testing.expectEqual(@as(usize, 1), got2.len);
     try stdt.testing.expectEqual(@as(u32, 2), got2[0].src_w);
+}
+
+test "DrawList scaledInto: run com mais de 256 glifos (M142)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var src = DrawList.initEmpty();
+    defer src.deinit(gpa);
+    var out = DrawList.initEmpty();
+    defer out.deinit(gpa);
+
+    // Imagem 8x8 (o atlas tem 64 glifos de 1x1).
+    var bytes: [8 * 8 * 4]u8 = undefined;
+    for (&bytes, 0..) |*b, i| b.* = @truncate(i);
+    const img = try image_mod.Image.init(8, 8, &bytes);
+
+    // 400 glifos (mais que o bloco padrão de 256).
+    var refs: [400]GlyphRef = undefined;
+    for (&refs, 0..) |*r, i| {
+        r.* = .{
+            .src_x = @intCast(i % 8),
+            .src_y = @intCast((i / 8) % 8),
+            .src_w = 1,
+            .src_h = 1,
+            .dx = @floatFromInt(i),
+            .dy = 0,
+        };
+    }
+    try src.glyphRun(gpa, types.Vec2.init(0, 0), types.Color.rgb(255, 255, 255), img, &refs, 1.0);
+    try src.scaledInto(gpa, &out, 2.0);
+
+    // O run inteiro foi copiado (nada se perdeu no limite do bloco).
+    try stdt.testing.expectEqual(@as(usize, 1), out.len());
+    const got = out.glyphsOf(out.items()[0]);
+    try stdt.testing.expectEqual(@as(usize, 400), got.len);
+    try stdt.testing.expectEqual(@as(f32, 2.0), got[1].dx); // escalado
+    try stdt.testing.expectEqual(@as(u32, 399 % 8), got[399].src_x);
 }

@@ -54,10 +54,10 @@ ZyntraUI separates UI behavior, layout, styling, input, and rendering into focus
 ```text
 src/
 ├── root.zig       Public Zig API
-├── core/          Context, types, and stable IDs
+├── core/          Context, types, stable IDs and DPI scale
 ├── event/         Normalized input events
-├── draw/          Draw commands, renderer contract and RGBA8 images
-├── layout/        Constraints and placement
+├── draw/          Draw commands, renderer contract, RGBA8 images, metrics
+├── layout/        Constraints, flex placement and virtualization helpers
 ├── style/         Themes and widget styles
 ├── widgets/       Widget implementations
 ├── dock/          Docking layout model and serialization
@@ -67,8 +67,11 @@ src/
 ├── dnd/           Drag-and-drop service (payload, targets, drop resolution)
 ├── window/        Registry (identity, z-order, focus) + input routing +
 │                  repaint composition + window decorations/drag (M100-M103)
-├── text/          UTF-8 metrics, wrapping, and text-edit helpers
+├── text/          UTF-8 metrics, wrapping, text edit, IME, glyph atlas,
+│                  text layout (real fonts) and the optional text cache
 ├── anim/          Optional animation helpers
+├── viewport3d/    Optional 3D viewport: math, camera, software rasterizer,
+│                  grid/axes, picking and gizmos
 ├── software/      Reference software rasterizer
 └── c-abi/         Optional C interface
 ```
@@ -555,9 +558,11 @@ the vacated and the new area.
 Run these commands from the repository root:
 
 ```sh
-zig build run-example  # Widget and input behavior walkthrough
-zig build run-app      # Integrated mini-app example
-zig build run-bench    # Frame pipeline benchmark
+zig build run-example    # Widget and input behavior walkthrough
+zig build run-app        # Integrated mini-app example
+zig build run-bench      # Frame pipeline benchmark (com métricas)
+zig build run-ui-perf    # Reserva de capacidade, lista virtualizada, cache
+zig build run-viewport3d # Viewport 3D: cubo, depth, câmera, grid, seleção
 zig build test         # Unit tests
 zig fmt --check src/ examples/ build.zig
 ```

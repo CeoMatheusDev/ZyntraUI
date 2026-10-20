@@ -56,6 +56,11 @@ pub const TextCache = struct {
     /// Cria o cache com `capacity` entradas (arredondado para potência
     /// de 2, mínimo 8). Capacidade 0 = cache desativado (as medições
     /// passam direto).
+    ///
+    /// A tabela é aberta (sondagem linear): para manter as sondagens
+    /// curtas, uma entrada nova passa a descartar a antiga quando a
+    /// metade das posições está ocupada — a capacidade efetiva é, por
+    /// isso, ~metade de `capacity`.
     pub fn init(gpa: std.mem.Allocator, entries: usize) !TextCache {
         const cap = @max(8, std.math.ceilPowerOfTwoAssert(usize, entries));
         const slots = try gpa.alloc(Slot, cap);
@@ -116,7 +121,8 @@ pub const TextCache = struct {
         return result;
     }
 
-    /// Mede sem tocar no cache.
+    /// Mede sem tocar no cache (UMA medição: a largura é o avanço
+    /// para as fontes suportadas).
     fn measureUncached(layout: layout_mod.Layout, text: []const u8) !Measure {
         const m = layout.measure(text) catch |err| return switch (err) {
             error.InvalidUtf8 => error.InvalidUtf8,
@@ -126,13 +132,12 @@ pub const TextCache = struct {
             error.InvalidArgument => error.InvalidArgument,
             error.OutOfMemory => error.OutOfMemory,
         };
-        const adv = layout.advance(text) catch 0;
         return .{
             .width = m.width,
             .height = m.height,
             .lines = m.lines,
             .glyphs = m.glyphs,
-            .advance = adv,
+            .advance = m.width,
         };
     }
 

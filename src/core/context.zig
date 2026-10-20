@@ -272,7 +272,9 @@ pub const Context = struct {
     }
 
     /// Registra (ou remove, com `null`) a fonte de bitmap global (M142).
-    /// O atlas é emprestado e precisa viver enquanto estiver registrado.
+    /// O atlas é EMPRESTADO: precisa viver (junto com a sua imagem)
+    /// enquanto estiver registrado — destruí-lo antes deixa um ponteiro
+    /// pendurado.
     pub fn setBitmapFont(self: *Self, font: ?bitmap_mod.BitmapFont) void {
         self.bitmap_font = font;
     }
