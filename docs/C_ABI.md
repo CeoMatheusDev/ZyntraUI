@@ -1099,6 +1099,40 @@ zyntra_a11y_set_value(ctx, id, (const uint8_t *)"42", 2);
 * Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle/ponteiros nulos, índice
   fora da faixa e id nulo.
 
+### Vinte e segundo lote (M165): texto rico
+
+```c
+const char *text = "abcdef";
+ZyntraTextSpan spans[1] = {
+    {2, 2, {255, 0, 0, 255}, /*bold*/1, /*italic*/0, /*tag*/7},
+};
+
+ZyntraTextRun runs[16];
+uint32_t count = 0;
+zyntra_text_rich_runs((const uint8_t *)text, (uint32_t)strlen(text), 10.0f,
+    spans, 1, /*max_width*/0.0f, /*x*/0.0f, /*y*/0.0f, /*align*/0,
+    runs, 16, &count);
+
+/* O mesmo, com a fonte real (atlas de glifos). */
+zyntra_text_rich_runs_atlas(atlas, (const uint8_t *)text, (uint32_t)strlen(text),
+    spans, 1, 0.0f, 0.0f, 0.0f, 0, runs, 16, &count);
+```
+
+* O texto rico é o mesmo texto com TRECHOS DE ESTILOS DIFERENTES: a
+  span diz quais bytes têm qual estilo (cor, negrito, itálico e uma
+  etiqueta livre para o app — escolher o atlas, o efeito, o link...).
+* A função quebra o texto pela largura (`max_width` 0 = sem quebra),
+  aplica as spans (a ÚLTIMA span vence nos bytes em comum) e devolve
+  os trechos prontos: faixa de bytes, posição e estilo. O alinhamento
+  é 0 = start, 1 = center, 2 = end.
+* O app desenha cada trecho (um comando de texto ou um run de glifos
+  por trecho) — o texto NUNCA é copiado pela biblioteca.
+* As fronteiras dos trechos ficam em codepoints UTF-8 (uma span no
+  meio de um caractere é empurrada para o início dele).
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: ponteiros nulos, `size` <= 0,
+  largura ou origem não-finitas, alinhamento desconhecido e texto
+  malformado ⇒ `ZYNTRA_INVALID_TEXT`.
+
 ## Ownership de atlas e fontes de bitmap
 
 * `ZyntraFontAtlas` é um handle **opaco**: a imagem do atlas e os seus
@@ -1497,6 +1531,13 @@ zyntra_popup_place
 zyntra_svg_path_bounds
 ```
 
+### Texto rico (spans com estilo)
+
+```c
+zyntra_text_rich_runs
+zyntra_text_rich_runs_atlas
+```
+
 ### Outros
 
 ```c
@@ -1600,6 +1641,8 @@ ZyntraTextBlockResult
 ZyntraTextInputResult
 ZyntraTextInputStyle
 ZyntraTextMetrics
+ZyntraTextRun
+ZyntraTextSpan
 ZyntraThemeColors
 ZyntraTimelineKey
 ZyntraTimelineStyle

@@ -328,6 +328,42 @@ pub const ZyntraInspectorStyle = style_mod.InspectorStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
+/// Uma faixa do texto com um estilo (texto rico, M165).
+pub const ZyntraTextSpan = extern struct {
+    /// Primeiro byte da faixa (UTF-8).
+    start: u32 = 0,
+    /// Comprimento da faixa em bytes.
+    len: u32 = 0,
+    /// Cor do trecho.
+    color: ZyntraColor = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+    /// Negrito (o app decide o que fazer).
+    bold: u8 = 0,
+    /// Itálico.
+    italic: u8 = 0,
+    /// Etiqueta do estilo (o app escolhe o atlas/efeito).
+    tag: u32 = 0,
+};
+
+/// Um trecho de texto rico pronto para desenhar (M165).
+pub const ZyntraTextRun = extern struct {
+    /// Primeiro byte do trecho no texto original.
+    start: u32 = 0,
+    /// Comprimento do trecho em bytes.
+    len: u32 = 0,
+    /// Posição X do trecho (pixels lógicos).
+    x: f32 = 0,
+    /// Posição Y do trecho (pixels lógicos).
+    y: f32 = 0,
+    /// Cor do trecho.
+    color: ZyntraColor = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+    /// Negrito.
+    bold: u8 = 0,
+    /// Itálico.
+    italic: u8 = 0,
+    /// Etiqueta do estilo.
+    tag: u32 = 0,
+};
+
 /// Um nó da árvore de acessibilidade (M164).
 ///
 /// O rótulo e o valor são EMPRESTADOS (apontam para o texto do app) e

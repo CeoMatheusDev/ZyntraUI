@@ -65,6 +65,7 @@ typedef struct ZyntraColor {
 
 typedef struct ZyntraContext ZyntraContext;
 typedef struct ZyntraFramebuffer ZyntraFramebuffer;
+typedef struct ZyntraFontAtlas ZyntraFontAtlas;
 
 /* Contadores da rasterização de software (zyntra_framebuffer_render*). */
 typedef struct ZyntraRenderStats {
@@ -304,6 +305,49 @@ ZyntraResult zyntra_image_fit_rect(ZyntraRect bounds, uint32_t img_w,
     uint32_t img_h, int32_t mode, ZyntraRect *out_dest,
     uint32_t *out_src_x, uint32_t *out_src_y, uint32_t *out_src_w,
     uint32_t *out_src_h);
+
+/* ------------------------------------------------------------------ */
+/* Texto rico (M165): trechos com estilos diferentes                 */
+/* ------------------------------------------------------------------ */
+
+/* Uma faixa do texto com um estilo. */
+typedef struct ZyntraTextSpan {
+    uint32_t start; /* primeiro byte (UTF-8) */
+    uint32_t len;   /* comprimento em bytes */
+    ZyntraColor color;
+    uint8_t bold;   /* o app decide o que fazer */
+    uint8_t italic;
+    uint32_t tag;   /* etiqueta do estilo (atlas/efeito) */
+} ZyntraTextSpan;
+
+/* Um trecho de texto rico pronto para desenhar. */
+typedef struct ZyntraTextRun {
+    uint32_t start; /* primeiro byte no texto original */
+    uint32_t len;   /* comprimento em bytes */
+    float x;        /* posição X (pixels lógicos) */
+    float y;        /* posição Y (pixels lógicos) */
+    ZyntraColor color;
+    uint8_t bold;
+    uint8_t italic;
+    uint32_t tag;
+} ZyntraTextRun;
+
+/* Calcula os trechos do texto rico (métricas de fallback).
+ * `max_width` 0 = sem quebra; > 0 = quebra pela largura. O
+ * alinhamento é 0 = start, 1 = center, 2 = end. O app aloca
+ * `out_runs` (com `out_capacity` trechos) e recebe a quantidade
+ * escrita em `out_count`. */
+ZyntraResult zyntra_text_rich_runs(const uint8_t *utf8, uint32_t utf8_len,
+    float size, const ZyntraTextSpan *spans, uint32_t span_count,
+    float max_width, float origin_x, float origin_y, int32_t alignment,
+    ZyntraTextRun *out_runs, uint32_t out_capacity, uint32_t *out_count);
+
+/* O mesmo, com um atlas de glifos (fonte real). */
+ZyntraResult zyntra_text_rich_runs_atlas(ZyntraFontAtlas *atlas,
+    const uint8_t *utf8, uint32_t utf8_len, const ZyntraTextSpan *spans,
+    uint32_t span_count, float max_width, float origin_x, float origin_y,
+    int32_t alignment, ZyntraTextRun *out_runs, uint32_t out_capacity,
+    uint32_t *out_count);
 
 /* ------------------------------------------------------------------ */
 /* Acessibilidade (M164): a árvore de nós do frame                   */
@@ -1696,7 +1740,7 @@ ZyntraResult zyntra_widget_inspector_view(ZyntraContext *handle, ZyntraId id,
  * A imagem é EMPRESTADA e precisa viver enquanto o atlas for usado.
  * `advance`/`bearing_y` são em pixels LÓGICOS; `bearing_y` negativo = o
  * bitmap fica acima da linha de base. */
-typedef struct ZyntraFontAtlas ZyntraFontAtlas;
+
 
 /* Campo de texto com fonte real (atlas): caret/seleção/clique seguem os
  * AVANÇOS REAIS dos glifos. */

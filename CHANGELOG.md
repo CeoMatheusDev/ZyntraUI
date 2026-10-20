@@ -5,6 +5,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `text`/`widgets`/`c-abi`: **texto rico** (M165, aditivo) — o novo
+  módulo `text.rich` calcula os TRECHOS de um texto com estilos
+  diferentes (cor, negrito, itálico e uma etiqueta livre): `layoutRuns`
+  quebra o texto pela largura, aplica as spans (a última vence) e
+  devolve cada trecho com a posição; `drawRuns` desenha (um comando
+  por trecho). O novo widget `widgets.rich_label` (com métricas de
+  fallback ou com atlas de glifos) usa isso. A fronteira C ganha
+  `zyntra_text_rich_runs` e `zyntra_text_rich_runs_atlas` (com os
+  tipos `ZyntraTextSpan` e `ZyntraTextRun`).
+
 ## [1.43.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a UI passa a expor uma **árvore de

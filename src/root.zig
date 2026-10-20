@@ -20,6 +20,10 @@ pub const event = struct {
     pub const event_mod = @import("event/event.zig");
 };
 
+pub const a11y = struct {
+    pub const tree = @import("a11y/tree.zig");
+};
+
 pub const draw = struct {
     pub const commands = @import("draw/commands.zig");
     pub const renderer = @import("draw/renderer.zig");
@@ -37,6 +41,7 @@ pub const text = struct {
     pub const bitmap = @import("text/bitmap.zig");
     pub const cache = @import("text/cache.zig");
     pub const layout = @import("text/layout.zig");
+    pub const rich = @import("text/rich.zig");
 };
 
 pub const c_abi = struct {
@@ -97,6 +102,7 @@ pub const window = struct {
 
 pub const widgets = struct {
     pub const icon = @import("widgets/icon.zig");
+    pub const rich_label = @import("widgets/rich_label.zig");
     pub const button = @import("widgets/button.zig");
     pub const checkbox = @import("widgets/checkbox.zig");
     pub const label = @import("widgets/label.zig");
@@ -181,6 +187,12 @@ pub const ImeComposition = text.ime.Composition;
 pub const BitmapFont = text.bitmap.BitmapFont;
 pub const TextCache = text.cache.TextCache;
 pub const TextLayout = text.layout.Layout;
+pub const RichStyle = text.rich.Style;
+pub const RichSpan = text.rich.Span;
+pub const RichRun = text.rich.Run;
+pub const A11yRole = a11y.tree.Role;
+pub const A11yState = a11y.tree.State;
+pub const A11yNode = a11y.tree.Node;
 pub const TextSource = text.layout.Source;
 
 pub const ZyntraResult = c_abi.types.ZyntraResult;
@@ -358,6 +370,9 @@ test {
     _ = @import("draw/image.zig");
     _ = @import("draw/path.zig");
     _ = @import("draw/svg.zig");
+    _ = @import("a11y/tree.zig");
+    _ = @import("text/rich.zig");
+    _ = @import("widgets/rich_label.zig");
     _ = @import("widgets/icon.zig");
     _ = @import("software/path_fill.zig");
     _ = @import("draw/stats.zig");

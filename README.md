@@ -35,15 +35,16 @@ Rather than tying UI logic to a window system or GPU API, ZyntraUI keeps those c
 - **Multi-surface ready:** A window registry, per-surface input routing, repaint composition and draggable/resizable window frames, all on top of the same draw-command pipeline.
 - **Vector paths:** Build shapes and icons with paths (curves, arcs, SVG path data) filled or stroked with anti-aliased edges — no image assets and no external dependencies.
 - **Accessibility:** Every frame exposes an accessibility tree (roles, states, labels and bounds) so screen readers and other assistive tools can announce the UI.
+- **Rich text:** The same text can carry different styles per span (color, bold, italic, your own tag) — measured, wrapped and drawn with the same font.
 
 ## Widgets
 
-ZyntraUI provides **34 widget modules**, organized around common interface needs (some modules expose more than one entry point, such as `label`/wrapped label or `separator`/labeled separator):
+ZyntraUI provides **35 widget modules**, organized around common interface needs (some modules expose more than one entry point, such as `label`/wrapped label or `separator`/labeled separator):
 
 | Category | Widgets |
 | --- | --- |
 | Input & selection | Button, checkbox, radio, switch, slider, text input, textarea, combo |
-| Views & navigation | Label, wrapped label, text block, image, vector icon, list view, tree view, table, tab bar, scroll, splitter, menu, popup, modal, tooltip, node graph, timeline, property inspector |
+| Views & navigation | Label, wrapped label, rich label, text block, image, vector icon, list view, tree view, table, tab bar, scroll, splitter, menu, popup, modal, tooltip, node graph, timeline, property inspector |
 | Feedback | Progress, spinner, drag ghost |
 | Composition | Separator, labeled separator, toolbar, status bar, group box, panel, dock view |
 

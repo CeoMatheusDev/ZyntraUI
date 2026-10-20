@@ -18,6 +18,7 @@ const tabbar_mod = zyntra_ui.widgets.tab_bar;
 const table_mod = zyntra_ui.widgets.table;
 const button_mod = zyntra_ui.widgets.button;
 const label_mod = zyntra_ui.widgets.label;
+const rich_mod = zyntra_ui.widgets.rich_label;
 
 const Task = struct {
     name: [24]u8 = undefined, // lido só em name[0..name_len]
@@ -98,6 +99,23 @@ fn drawApp(ctx: *zyntra_ui.Context, app: *App, theme: zyntra_ui.Theme, font: zyn
         .w = lt.width,
         .h = font.lineHeight(),
     }, "Alternar", theme.text, font, false);
+
+    // Rótulo RICO: "Revisar API agora" com a palavra em destaque.
+    const rich_spans = [_]zyntra_ui.RichSpan{.{
+        .start = 8,
+        .len = 3,
+        .style = .{ .color = theme.accent, .bold = true },
+    }};
+    try rich_mod.richLabel(
+        &ctx.*,
+        zyntra_ui.Id.fromString("app:rich-lb"),
+        zyntra_ui.Rect.init(270, 220, 200, font.lineHeight()),
+        "Revisar API agora",
+        &rich_spans,
+        theme.text,
+        font,
+        .{},
+    );
 
     // Abas filtram as linhas (click seleciona; estado no chamador).
     const tabs = [_][]const u8{ "Todas", "Ativas", "Prontas" };

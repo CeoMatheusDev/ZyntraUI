@@ -70,6 +70,7 @@ const text_layout_mod = @import("../text/layout.zig");
 const text_block_mod = @import("../widgets/text_block.zig");
 const path_mod = @import("../draw/path.zig");
 const a11y_mod = @import("../a11y/tree.zig");
+const rich_mod = @import("../text/rich.zig");
 const svg_mod = @import("../draw/svg.zig");
 const image_widget_mod = @import("../widgets/image.zig");
 const vp3d_math = @import("../viewport3d/math.zig");
@@ -1439,6 +1440,176 @@ pub export fn zyntra_text_truncate(
         error.InvalidMetrics, error.InvalidArgument => return .invalid_argument,
     };
     out.* = kept;
+    return .ok;
+}
+
+// ---------------------------------------------------------------------------
+// Texto rico: trechos com estilos diferentes (M165)
+// ---------------------------------------------------------------------------
+
+/// Converte as spans da fronteira C para o modelo interno.
+fn toRichSpans(
+    spans: ?[*]const ct.ZyntraTextSpan,
+    count: u32,
+    out: []rich_mod.Span,
+) !usize {
+    if (count == 0) return 0;
+    const src = spans orelse return error.InvalidArgument;
+    if (out.len < count) return error.NoSpaceLeft;
+    for (out[0..count], 0..) |*sp, i| {
+        const s = src[i];
+        sp.* = .{
+            .start = s.start,
+            .len = s.len,
+            .style = .{
+                .color = toColor(s.color),
+                .bold = s.bold != 0,
+                .italic = s.italic != 0,
+                .tag = s.tag,
+            },
+        };
+    }
+    return count;
+}
+
+/// Escreve os trechos no buffer da fronteira C.
+fn fromRichRuns(runs: []const rich_mod.Run, out: ?[*]ct.ZyntraTextRun, capacity: u32) u32 {
+    const dst = out orelse return 0;
+    const n = @min(runs.len, capacity);
+    for (runs[0..n], 0..) |r, i| {
+        dst[i] = .{
+            .start = r.start,
+            .len = r.len,
+            .x = r.x,
+            .y = r.y,
+            .color = fromColor(r.style.color),
+            .bold = if (r.style.bold) 1 else 0,
+            .italic = if (r.style.italic) 1 else 0,
+            .tag = r.style.tag,
+        };
+    }
+    return @intCast(n);
+}
+
+/// Calcula os trechos do texto rico (métricas de fallback).
+///
+/// `max_width` 0 = sem quebra; > 0 = quebra pela largura. O
+/// alinhamento é 0 = start, 1 = center, 2 = end. `out_runs` recebe os
+/// trechos (o app aloca) e `out_count` devolve quantos foram escritos.
+pub export fn zyntra_text_rich_runs(
+    utf8: ?[*]const u8,
+    utf8_len: usize,
+    size: f32,
+    spans: ?[*]const ct.ZyntraTextSpan,
+    span_count: u32,
+    max_width: f32,
+    origin_x: f32,
+    origin_y: f32,
+    alignment: i32,
+    out_runs: ?[*]ct.ZyntraTextRun,
+    out_capacity: u32,
+    out_count: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    if (!std.math.isFinite(max_width) or max_width < 0) return .invalid_argument;
+    if (!std.math.isFinite(origin_x) or !std.math.isFinite(origin_y)) return .invalid_argument;
+    const count_out = out_count orelse return .invalid_argument;
+    if (utf8_len > 0 and utf8 == null) return .invalid_argument;
+    const align_kind: rich_mod.Align = switch (alignment) {
+        0 => .start,
+        1 => .center,
+        2 => .end,
+        else => return .invalid_argument,
+    };
+    const bytes: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
+
+    var span_buf: [64]rich_mod.Span = undefined;
+    const n_spans = toRichSpans(spans, span_count, &span_buf) catch |err| switch (err) {
+        error.InvalidArgument => return .invalid_argument,
+        error.NoSpaceLeft => return .invalid_argument,
+    };
+
+    const layout = text_layout_mod.Layout.fromMetrics(metrics_mod.FontMetrics.withSize(size)) catch {
+        return .invalid_argument;
+    };
+    var run_buf: [256]rich_mod.Run = undefined;
+    const n = rich_mod.layoutRuns(
+        layout,
+        bytes,
+        span_buf[0..n_spans],
+        max_width,
+        types_mod.Vec2.init(origin_x, origin_y),
+        align_kind,
+        &run_buf,
+    ) catch |err| switch (err) {
+        error.InvalidUtf8 => return .invalid_text,
+        error.InvalidMetrics => return .invalid_argument,
+        error.InvalidArgument => return .invalid_argument,
+        error.NoSpaceLeft => return .invalid_argument,
+        error.OutOfMemory => return .out_of_memory,
+        error.InvalidCommand => return .invalid_command,
+    };
+    const written = fromRichRuns(run_buf[0..n], out_runs, out_capacity);
+    count_out.* = written;
+    return .ok;
+}
+
+/// Calcula os trechos do texto rico com um ATLAS de glifos (fonte
+/// real) — as mesmas regras de `zyntra_text_rich_runs`.
+pub export fn zyntra_text_rich_runs_atlas(
+    atlas: ?*ZyntraFontAtlas,
+    utf8: ?[*]const u8,
+    utf8_len: usize,
+    spans: ?[*]const ct.ZyntraTextSpan,
+    span_count: u32,
+    max_width: f32,
+    origin_x: f32,
+    origin_y: f32,
+    alignment: i32,
+    out_runs: ?[*]ct.ZyntraTextRun,
+    out_capacity: u32,
+    out_count: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const a = atlas orelse return .invalid_argument;
+    const state = toFontAtlas(a);
+    if (!std.math.isFinite(max_width) or max_width < 0) return .invalid_argument;
+    if (!std.math.isFinite(origin_x) or !std.math.isFinite(origin_y)) return .invalid_argument;
+    const count_out = out_count orelse return .invalid_argument;
+    if (utf8_len > 0 and utf8 == null) return .invalid_argument;
+    const align_kind: rich_mod.Align = switch (alignment) {
+        0 => .start,
+        1 => .center,
+        2 => .end,
+        else => return .invalid_argument,
+    };
+    const bytes: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
+
+    var span_buf: [64]rich_mod.Span = undefined;
+    const n_spans = toRichSpans(spans, span_count, &span_buf) catch |err| switch (err) {
+        error.InvalidArgument => return .invalid_argument,
+        error.NoSpaceLeft => return .invalid_argument,
+    };
+
+    const layout = text_layout_mod.Layout.fromAtlas(&state.view) catch return .invalid_argument;
+    var run_buf: [256]rich_mod.Run = undefined;
+    const n = rich_mod.layoutRuns(
+        layout,
+        bytes,
+        span_buf[0..n_spans],
+        max_width,
+        types_mod.Vec2.init(origin_x, origin_y),
+        align_kind,
+        &run_buf,
+    ) catch |err| switch (err) {
+        error.InvalidUtf8 => return .invalid_text,
+        error.InvalidMetrics => return .invalid_argument,
+        error.InvalidArgument => return .invalid_argument,
+        error.NoSpaceLeft => return .invalid_argument,
+        error.OutOfMemory => return .out_of_memory,
+        error.InvalidCommand => return .invalid_command,
+    };
+    const written = fromRichRuns(run_buf[0..n], out_runs, out_capacity);
+    count_out.* = written;
     return .ok;
 }
 
@@ -9130,4 +9301,46 @@ test "C-ABI M164: a árvore de acessibilidade" {
     try stdt.testing.expectEqual(bad, zyntra_a11y_node_at(ctx, 0, null));
     try stdt.testing.expectEqual(bad, zyntra_a11y_node_count(ctx, null));
     try stdt.testing.expectEqual(bad, zyntra_a11y_set_label(ctx, 0, "x", 1));
+}
+
+test "C-ABI M165: os trechos do texto rico" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    const text = "abcdef";
+    const spans = [_]ct.ZyntraTextSpan{.{
+        .start = 2,
+        .len = 2,
+        .color = ct.ZyntraColor{ .r = 255, .g = 0, .b = 0, .a = 255 },
+        .bold = 1,
+        .tag = 7,
+    }};
+    var runs: [8]ct.ZyntraTextRun = undefined;
+    var count: u32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_text_rich_runs(
+        text,
+        text.len,
+        10,
+        &spans,
+        1,
+        0,
+        0,
+        0,
+        0,
+        &runs,
+        8,
+        &count,
+    ));
+    try stdt.testing.expectEqual(@as(u32, 3), count);
+    try stdt.testing.expectEqual(@as(u32, 2), runs[0].len);
+    try stdt.testing.expectEqual(@as(u32, 2), runs[1].start);
+    try stdt.testing.expectEqual(@as(u32, 2), runs[1].len);
+    try stdt.testing.expectEqual(@as(u8, 255), runs[1].color.r);
+    try stdt.testing.expectEqual(@as(u8, 1), runs[1].bold);
+    try stdt.testing.expectEqual(@as(u32, 7), runs[1].tag);
+
+    // Erros.
+    try stdt.testing.expectEqual(bad, zyntra_text_rich_runs(text, text.len, 10, &spans, 1, 0, 0, 0, 9, &runs, 8, &count));
+    try stdt.testing.expectEqual(bad, zyntra_text_rich_runs(text, text.len, 0, &spans, 1, 0, 0, 0, 0, &runs, 8, &count));
+    try stdt.testing.expectEqual(bad, zyntra_text_rich_runs(text, text.len, 10, &spans, 1, 0, 0, 0, 0, &runs, 8, null));
 }
