@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.41.0] - 2026-10-20
+
+MINOR estável, 100% compatível: a ZyntraUI ganha **caminhos vetoriais** —
+ícones e formas desenhados por geometria (curvas, arcos e dados de path
+SVG), preenchidos ou traçados com bordas anti-serrilhadas, sem imagem e
+sem dependência externa. A fronteira C acompanha com
+`zyntra_draw_path`/`zyntra_draw_svg_path`. Nada que já existia mudou de
+assinatura, layout ou comportamento.
+
 ### Adicionado
 
 - `draw`/`software`/`c-abi`: **caminhos vetoriais** (M158–M161, aditivo) —

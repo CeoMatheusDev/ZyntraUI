@@ -29,8 +29,8 @@ int main(void) {
      * release; o CI detecta divergência). major==1 também trava
      * MAJOR acidental (ver M44). */
     assert(zyntra_version_major() == 1);
-    assert(zyntra_version_minor() == 40);
-    assert(zyntra_version_patch() == 1);
+    assert(zyntra_version_minor() == 41);
+    assert(zyntra_version_patch() == 0);
     assert(strcmp(zyntra_version_prerelease(), "") == 0);
 
     ZyntraContext *ctx = NULL;
