@@ -246,6 +246,27 @@ reference rasterizer — draws at the physical resolution. Glyph atlases
 should be built at the same scale (`atlas.scale`), so their regions map
 1:1 to the projected destination.
 
+### IME composition
+
+`text.ime` models the text an input method is still composing (the
+"pre-edit"). The pre-edit buffer belongs to the caller, so the library
+never allocates while typing.
+
+```zig
+var pre: [32]u8 = undefined;
+var comp = zyntra_ui.text.ime.Composition.init(&pre);
+
+// From the platform IME callback:
+try comp.update("にほ", 3); // pre-edit + caret inside it
+comp.commit();             // the confirmed text is pending
+
+// In the widget call: the confirmed text replaces the selection in the
+// edited buffer, and the pre-edit is drawn underlined at the caret.
+try zyntra_ui.widgets.text_input.textInputIme(
+    &ctx, id, bounds, &buffer, &len, &cursor, &anchor, &comp, font, style,
+);
+```
+
 ### Multi-window registry
 
 `WindowRegistry` is a pure, allocation-free model of the UI surfaces an

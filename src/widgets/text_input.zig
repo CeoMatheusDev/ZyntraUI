@@ -28,6 +28,7 @@ const id_mod = @import("../core/id.zig");
 const style_mod = @import("../style/style.zig");
 const metrics_mod = @import("../text/metrics.zig");
 const edit = @import("../text/edit.zig");
+const ime_mod = @import("../text/ime.zig");
 const input = @import("input.zig");
 
 pub const TextInputResult = struct {
@@ -49,6 +50,10 @@ pub const TextInputResult = struct {
 /// re-exportados aqui para preservar a API de `widgets/text_input`.
 pub const Clipboard = edit.Clipboard;
 pub const TextHistory = edit.TextHistory;
+
+/// Estado de composição de IME (M126): o app atualiza a partir do
+/// callback de IME da plataforma e entrega o estado ao widget.
+pub const Composition = ime_mod.Composition;
 
 /// Codifica `codepoint` (0..0x10FFFF, sem surrogates) em UTF-8.
 /// Chamar só após validar a faixa; fora dela retorna erro.
@@ -151,7 +156,7 @@ pub fn textInput(
     font: metrics_mod.FontMetrics,
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextInputResult {
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, null, font, style, void, {}, null);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, null, font, style, void, {}, null, null);
 }
 
 /// Campo de texto com seleção (1.1.0): `anchor` persiste entre frames
@@ -169,7 +174,7 @@ pub fn textInputSelected(
     style: style_mod.TextInputStyle,
 ) context_mod.ContextError!TextInputResult {
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, void, {}, null);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, void, {}, null, null);
 }
 
 /// Campo de texto completo (1.5.0, aditivo): seleção + undo/redo +
@@ -194,7 +199,7 @@ pub fn textInputClipboard(
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
     if (clip.len > clip.buf.len) return error.InvalidArgument;
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, *TextHistory(S, B), hist, clip);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, *TextHistory(S, B), hist, clip, null);
 }
 
 /// Campo de texto com undo/redo (1.5.0, aditivo): `Ctrl+Z` desfaz,
@@ -217,7 +222,30 @@ pub fn textInputHistory(
 ) context_mod.ContextError!TextInputResult {
     if (buffer.len > B) return error.InvalidArgument;
     if (anchor.* > len.*) return error.InvalidArgument;
-    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, *TextHistory(S, B), hist, null);
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, *TextHistory(S, B), hist, null, null);
+}
+
+/// Campo de texto com composição de IME (M126, aditivo).
+///
+/// `comp` é o estado de composição do app: o widget aplica o texto
+/// confirmado (após `Composition.commit`) no buffer, substituindo a
+/// seleção, e desenha o pré-edit na posição do caret enquanto a
+/// composição está ativa. `anchor` (seleção) é do chamador.
+pub fn textInputIme(
+    ctx: *context_mod.Context,
+    id: id_mod.Id,
+    bounds: types.Rect,
+    buffer: []u8,
+    len: *usize,
+    cursor: *usize,
+    anchor: *usize,
+    comp: *Composition,
+    font: metrics_mod.FontMetrics,
+    style: style_mod.TextInputStyle,
+) context_mod.ContextError!TextInputResult {
+    if (anchor.* > len.*) return error.InvalidArgument;
+    if (comp.len > comp.buf.len) return error.InvalidArgument;
+    return textInputInner(ctx, id, bounds, buffer, len, cursor, anchor, font, style, void, {}, null, comp);
 }
 
 fn textInputInner(
@@ -233,6 +261,7 @@ fn textInputInner(
     Hist: type,
     hist: Hist,
     clip: ?*Clipboard,
+    comp: ?*Composition,
 ) context_mod.ContextError!TextInputResult {
     if (id.isNull()) return error.InvalidArgument;
     if (!style.isValid() or !font.isValid()) return error.InvalidArgument;
@@ -570,6 +599,21 @@ fn textInputInner(
             }
         }
     }
+    // Composição de IME (M126): o texto confirmado entra no buffer
+    // (substituindo a seleção). Sem foco, a composição é cancelada.
+    if (comp) |c| {
+        if (c.committed) {
+            c.applyCommit(buffer, len, cursor, anchor) catch |err| switch (err) {
+                error.OutOfSpace => res.overflowed = true,
+                error.InvalidState => {},
+                error.InvalidUtf8 => {},
+                error.BufferTooSmall => {},
+            };
+            if (!c.committed) res.changed = true;
+        } else if (!focused and c.active) {
+            c.cancel();
+        }
+    }
     res.len = len.*;
     if (!ctx.hasFocus(id)) res.focused = false;
     // Seleção só existe com foco; sem foco, widgets veem `selected=false`
@@ -650,12 +694,56 @@ fn textInputInner(
             error.InvalidMetrics => return error.InvalidArgument,
         };
     }
+    // Pré-edit do IME (M126): desenhado na posição do caret, com
+    // sublinhado; durante a composição o caret fica DENTRO do pré-edit.
+    var ime_caret_x: ?f32 = null;
+    if (comp) |c| {
+        if (c.active and c.len > 0) {
+            const pre = c.preedit();
+            const m_pre = metrics_mod.measure(pre, font) catch {
+                return error.InvalidArgument;
+            };
+            const m_cur = metrics_mod.measure(pre[0..c.cursor], font) catch {
+                return error.InvalidArgument;
+            };
+            const m_base = metrics_mod.measure(buffer[0..cursor.*], font) catch {
+                return error.InvalidArgument;
+            };
+            const px = tx + m_base.width;
+            ime_caret_x = px + m_cur.width;
+            ctx.draw.pushText(
+                ctx.allocator,
+                .{ .x = px, .y = bounds.y + (bounds.h - font.lineHeight()) / 2 },
+                style.text,
+                font,
+                pre,
+            ) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidCommand => return error.InvalidCommand,
+                error.InvalidUtf8 => return error.InvalidArgument,
+                error.InvalidMetrics => return error.InvalidArgument,
+            };
+            // Sublinhado do pré-edit (mesma cor do caret).
+            const uy = bounds.y + bounds.h - 5;
+            if (m_pre.width > 0 and uy + 1 <= bounds.y + bounds.h) {
+                ctx.draw.rectFilled(ctx.allocator, .{
+                    .x = px,
+                    .y = uy,
+                    .w = m_pre.width,
+                    .h = 1,
+                }, style.caret) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    error.InvalidCommand => return error.InvalidCommand,
+                };
+            }
+        }
+    }
     if (res.focused) {
         // Caret na posição do cursor (mede o prefixo + padding - offset).
         const m = metrics_mod.measure(buffer[0..cursor.*], font) catch {
             return error.InvalidArgument;
         };
-        const cx = tx + m.width;
+        const cx = ime_caret_x orelse (tx + m.width);
         const top = bounds.y + 4;
         const bottom = bounds.y + bounds.h - 4;
         if (bottom > top) {
@@ -1613,5 +1701,67 @@ test "text_input alimenta o dirty rect (M105): foco marca os bounds" {
     try ctx.pushEvent(.{ .mouse_move = .{ .pos = away } });
     _ = try textInput(&ctx, id, bounds, &buf, &len, &cursor, font, style);
     try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+}
+
+test "textInputIme compõe, desenha o pré-edit e confirma (M126)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const bounds = types.Rect.init(0, 0, 200, 30);
+    const id = id_mod.Id.fromString("test:ti-ime");
+    var buf: [32]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var pre: [16]u8 = undefined;
+    var comp = Composition.init(&pre);
+
+    // Click foca o campo; a composição mostra o pré-edit.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{
+        .button = .left,
+        .pressed = true,
+        .pos = types.Vec2.init(6, 15),
+    } });
+    comp.begin();
+    try comp.update("ni", 2);
+    const r = try textInputIme(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &comp, font, style);
+    try stdt.testing.expect(r.focused);
+    try stdt.testing.expect(!r.changed);
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    // O pré-edit aparece como comando de texto.
+    var saw_preedit = false;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .text and std.mem.eql(u8, ctx.draw.textOf(cmd), "ni")) saw_preedit = true;
+    }
+    try stdt.testing.expect(saw_preedit);
+    ctx.endFrame();
+
+    // Commit: o texto entra no buffer e o cursor avança.
+    ctx.beginFrame();
+    comp.commit();
+    const r2 = try textInputIme(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &comp, font, style);
+    try stdt.testing.expect(r2.changed);
+    try stdt.testing.expectEqual(@as(usize, 2), len);
+    try stdt.testing.expectEqualStrings("ni", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    try stdt.testing.expectEqual(@as(usize, 2), anchor);
+    // A composição terminou: nada mais é desenhado como pré-edit.
+    try stdt.testing.expect(!comp.active);
+    try stdt.testing.expect(!comp.committed);
+    ctx.endFrame();
+
+    // Sem foco, uma composição pendente é cancelada.
+    ctx.beginFrame();
+    comp.begin();
+    try comp.update("abc", 3);
+    ctx.clearFocus();
+    _ = try textInputIme(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &comp, font, style);
+    try stdt.testing.expect(!comp.active);
+    try stdt.testing.expectEqual(@as(usize, 2), len);
     ctx.endFrame();
 }

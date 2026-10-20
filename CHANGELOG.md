@@ -34,6 +34,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   remontados) para renderizar em framebuffer de alta resolução; a região de
   origem das imagens/atlas não escala (o atlas deve estar na resolução do
   destino).
+- `text`/`widgets`: **composição de IME** (M126, aditivo) — `text.ime.Composition`
+  modela o pré-edit de um input method com buffer do chamador (`update`
+  substitui o pré-edit e ajusta o cursor numa fronteira UTF-8, `commit`
+  confirma, `cancel` descarta) e `applyCommit` insere o texto confirmado no
+  buffer editado substituindo a seleção (recusando insert que não cabe).
+  `text_input.textInputIme` aplica a confirmação no campo, desenha o pré-edit
+  sublinhado na posição do caret e mantém o caret dentro do pré-edit durante a
+  composição; sem foco a composição é cancelada. `textarea` ainda não tem
+  variante de IME.
 
 ## [1.35.0] - 2026-10-20
 
