@@ -53,6 +53,8 @@ const dnd_mod = @import("../dnd/service.zig");
 const toolbar_mod = @import("../widgets/toolbar.zig");
 const statusbar_mod = @import("../widgets/statusbar.zig");
 const layout_mod = @import("../layout/layout.zig");
+const graph_view_mod = @import("../widgets/graph_view.zig");
+const graph_mod = @import("../graph/view.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -2974,6 +2976,204 @@ pub export fn zyntra_status_bar_separator(
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Grafo de nós: graph view (M119)
+// ---------------------------------------------------------------------------
+
+/// Buffers temporários da chamada: nós/arestas convertidos e as posições
+/// C para escrever de volta após um arraste.
+const GraphArgs = struct {
+    nodes: []graph_mod.GraphNode,
+    edges: []graph_mod.GraphEdge,
+    c_nodes: ?[*]ct.ZyntraGraphNode,
+    node_count: usize,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *GraphArgs) void {
+        self.allocator.free(self.nodes);
+        self.allocator.free(self.edges);
+    }
+
+    fn writeBack(self: *const GraphArgs) void {
+        if (self.node_count == 0) return;
+        const owners = self.c_nodes.?[0..self.node_count];
+        for (self.nodes, owners) |n, *owner| {
+            owner.pos = .{ .x = n.pos.x, .y = n.pos.y };
+        }
+    }
+};
+
+/// Converte os nós/arestas C para as fatias do modelo Zig. Os títulos são
+/// emprestados só durante a chamada; `pos` é copiado de volta no fim.
+fn graphArgsOf(
+    allocator: std.mem.Allocator,
+    c_nodes: ?[*]ct.ZyntraGraphNode,
+    nodes_len: usize,
+    c_edges: ?[*]const ct.ZyntraGraphEdge,
+    edges_len: usize,
+) !GraphArgs {
+    if (nodes_len > 0 and c_nodes == null) return error.InvalidArgument;
+    if (edges_len > 0 and c_edges == null) return error.InvalidArgument;
+
+    const nodes = try allocator.alloc(graph_mod.GraphNode, nodes_len);
+    errdefer allocator.free(nodes);
+    if (nodes_len > 0) {
+        for (c_nodes.?[0..nodes_len], 0..) |n, i| {
+            const title: []const u8 = if (n.title.len == 0) &.{} else blk: {
+                const p = n.title.ptr orelse return error.InvalidArgument;
+                break :blk p[0..n.title.len];
+            };
+            nodes[i] = .{
+                .pos = .{ .x = n.pos.x, .y = n.pos.y },
+                .size = .{ .x = n.size.x, .y = n.size.y },
+                .title = title,
+                .inputs = n.inputs,
+                .outputs = n.outputs,
+            };
+        }
+    }
+
+    const edges = try allocator.alloc(graph_mod.GraphEdge, edges_len);
+    errdefer allocator.free(edges);
+    if (edges_len > 0) {
+        for (c_edges.?[0..edges_len], 0..) |e, i| {
+            edges[i] = .{
+                .from = e.from,
+                .to = e.to,
+                .from_port = e.from_port,
+                .to_port = e.to_port,
+            };
+        }
+    }
+
+    return .{
+        .nodes = nodes,
+        .edges = edges,
+        .c_nodes = c_nodes,
+        .node_count = nodes_len,
+        .allocator = allocator,
+    };
+}
+
+/// Índice C (-1 = nenhum) → índice Zig.
+fn graphIndex(value: i64) ?usize {
+    if (value < 0) return null;
+    return std.math.cast(usize, value);
+}
+
+fn graphViewStateFromC(s: ct.ZyntraGraphViewState) graph_view_mod.GraphViewState {
+    return .{
+        .transform = .{
+            .pan = .{ .x = s.transform.pan.x, .y = s.transform.pan.y },
+            .zoom = s.transform.zoom,
+        },
+        .selected = graphIndex(s.selected),
+        .drag_node = graphIndex(s.drag_node),
+        .drag_grab = .{ .x = s.drag_grab.x, .y = s.drag_grab.y },
+        .pan_anchor = .{ .x = s.pan_anchor.x, .y = s.pan_anchor.y },
+        .panning = s.panning,
+    };
+}
+
+fn graphViewStateToC(s: *const graph_view_mod.GraphViewState) ct.ZyntraGraphViewState {
+    return .{
+        .transform = .{
+            .pan = .{ .x = s.transform.pan.x, .y = s.transform.pan.y },
+            .zoom = s.transform.zoom,
+        },
+        .selected = fromIndex(s.selected),
+        .drag_node = fromIndex(s.drag_node),
+        .drag_grab = .{ .x = s.drag_grab.x, .y = s.drag_grab.y },
+        .pan_anchor = .{ .x = s.pan_anchor.x, .y = s.pan_anchor.y },
+        .panning = s.panning,
+    };
+}
+
+/// Estilo de grafo do tema embutido.
+pub export fn zyntra_style_graph(kind: i32, out_style: ?*ct.ZyntraGraphStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.graphStyle();
+    return .ok;
+}
+
+/// Inicializa o estado do grafo com os padrões da API Zig (zoom 1, nenhum
+/// nó selecionado/arrastado). Chame antes do primeiro frame.
+pub export fn zyntra_graph_view_state_init(out_state: ?*ct.ZyntraGraphViewState) callconv(.c) ct.ZyntraResult {
+    const out = out_state orelse return .invalid_argument;
+    out.* = .{};
+    return .ok;
+}
+
+/// Preenche as opções de interação com os padrões da API Zig.
+pub export fn zyntra_graph_view_options_default(out_options: ?*ct.ZyntraGraphViewOptions) callconv(.c) ct.ZyntraResult {
+    const out = out_options orelse return .invalid_argument;
+    out.* = .{};
+    return .ok;
+}
+
+/// Desenha e interage com um grafo de nós. `nodes` é mutável: o arraste
+/// atualiza `pos` na memória do chamador. `title` é emprestado só na
+/// chamada. `state` é retido entre frames; índices -1 = nenhum.
+pub export fn zyntra_widget_graph_view(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    nodes: ?[*]ct.ZyntraGraphNode,
+    nodes_len: usize,
+    edges: ?[*]const ct.ZyntraGraphEdge,
+    edges_len: usize,
+    state: ?*ct.ZyntraGraphViewState,
+    options: ?*const ct.ZyntraGraphViewOptions,
+    style: ?*const ct.ZyntraGraphStyle,
+    size: f32,
+    out_result: ?*ct.ZyntraGraphViewResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st_c = state orelse return .invalid_argument;
+    const opts_c = options orelse return .invalid_argument;
+    const sty = style orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+
+    const ctx = toCtx(h);
+    var args = graphArgsOf(ctx.allocator, nodes, nodes_len, edges, edges_len) catch |err| return mapWidgetErr(err);
+    defer args.deinit();
+
+    const opts = graph_view_mod.GraphViewOptions{
+        .min_zoom = opts_c.min_zoom,
+        .max_zoom = opts_c.max_zoom,
+        .zoom_step = opts_c.zoom_step,
+        .pan_step = opts_c.pan_step,
+        .edge_segments = opts_c.edge_segments,
+    };
+    var st = graphViewStateFromC(st_c.*);
+    const outcome = graph_view_mod.graphView(
+        ctx,
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        args.nodes,
+        args.edges,
+        &st,
+        opts,
+        sty.*,
+        metrics_mod.FontMetrics.withSize(size),
+    );
+    args.writeBack();
+    st_c.* = graphViewStateToC(&st);
+    const res = outcome catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{
+        .hovered = fromIndex(res.hovered),
+        .selected = fromIndex(res.selected),
+        .dragging = fromIndex(res.dragging),
+        .drag_delta = .{ .x = res.drag_delta.x, .y = res.drag_delta.y },
+        .pan_delta = .{ .x = res.pan_delta.x, .y = res.pan_delta.y },
+        .zoom_changed = res.zoom_changed,
+        .panning = res.panning,
+        .changed = res.changed,
+    };
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -5258,5 +5458,175 @@ test "C-ABI barras M118: toolbar e statusbar" {
     bad_sbar = sbar;
     bad_sbar.left_cursor = nan;
     try eq(bad, zyntra_status_bar_next_item(&bad_sbar, 10, &r));
+    try eq(ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI grafo M119: estilo, estado, hover, arraste, pan e zoom" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    const nan = std.math.nan(f32);
+
+    var handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 400, .h = 300 }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    var style: ct.ZyntraGraphStyle = undefined;
+    var state: ct.ZyntraGraphViewState = undefined;
+    var options: ct.ZyntraGraphViewOptions = undefined;
+    try eq(ok, zyntra_style_graph(0, &style));
+    try stdt.testing.expect(style.isValid());
+    try eq(bad, zyntra_style_graph(9, &style));
+    try eq(bad, zyntra_style_graph(0, null));
+    try eq(ok, zyntra_graph_view_state_init(&state));
+    try eq(@as(f32, 1), state.transform.zoom);
+    try eq(@as(i64, -1), state.selected);
+    try eq(@as(i64, -1), state.drag_node);
+    try stdt.testing.expect(!state.panning);
+    try eq(ok, zyntra_graph_view_options_default(&options));
+    try stdt.testing.expectEqual(ct.ZyntraGraphViewOptions{}, options);
+    try eq(bad, zyntra_graph_view_state_init(null));
+    try eq(bad, zyntra_graph_view_options_default(null));
+
+    var nodes = [_]ct.ZyntraGraphNode{
+        .{
+            .pos = .{ .x = 0, .y = 0 },
+            .size = .{ .x = 100, .y = 60 },
+            .title = .{ .ptr = "A", .len = 1 },
+            .inputs = 0,
+            .outputs = 1,
+        },
+        .{
+            .pos = .{ .x = 150, .y = 0 },
+            .size = .{ .x = 100, .y = 60 },
+            .title = .{ .ptr = "B", .len = 1 },
+            .inputs = 1,
+            .outputs = 0,
+        },
+    };
+    const edges = [_]ct.ZyntraGraphEdge{.{ .from = 0, .to = 1 }};
+    const bounds = ct.ZyntraRect{ .x = 0, .y = 0, .w = 400, .h = 300 };
+    var res: ct.ZyntraGraphViewResult = undefined;
+    var n_draw: usize = 0;
+
+    // Frame 1: desenho sem cursor.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, -1), res.hovered);
+    try eq(@as(i64, -1), res.selected);
+    try eq(@as(i64, -1), res.dragging);
+    try stdt.testing.expect(!res.changed and !res.panning and !res.zoom_changed);
+    try eq(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expect(n_draw > 0);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 2: hover no nó A.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 50, .y = 30 }));
+    try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, 0), res.hovered);
+    try stdt.testing.expect(!res.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 3: press seleciona e captura o nó A.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 50, .y = 30 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 50, .y = 30 }));
+    try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, 0), res.selected);
+    try eq(@as(i64, 0), res.dragging);
+    try stdt.testing.expect(res.changed);
+    try eq(@as(i64, 0), state.selected);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 4: arraste move o nó em mundo e escreve `pos` de volta no C.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 80, .y = 40 }));
+    try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, 0), res.dragging);
+    try eq(@as(f32, 30), res.drag_delta.x);
+    try eq(@as(f32, 10), res.drag_delta.y);
+    try eq(@as(f32, 30), nodes[0].pos.x);
+    try eq(@as(f32, 10), nodes[0].pos.y);
+    try stdt.testing.expect(res.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 5: release encerra o arraste, mantendo a seleção.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 80, .y = 40 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 80, .y = 40 }));
+    try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try eq(@as(i64, -1), res.dragging);
+    try eq(@as(i64, 0), res.selected);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 6: press no vazio inicia o pan.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 300, .y = 200 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 300, .y = 200 }));
+    try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try stdt.testing.expect(res.panning);
+    try eq(@as(i64, -1), res.hovered);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 7: pan incremental.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 310, .y = 220 }));
+    try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try eq(@as(f32, 10), res.pan_delta.x);
+    try eq(@as(f32, 20), res.pan_delta.y);
+    try eq(@as(f32, 10), state.transform.pan.x);
+    try eq(@as(f32, 20), state.transform.pan.y);
+    try stdt.testing.expect(res.panning and res.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 8: release do pan.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 310, .y = 220 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 310, .y = 220 }));
+    try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try stdt.testing.expect(!res.panning);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Frame 9: roda dá zoom (passo 1.25) mantendo o cursor como âncora.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 200, .y = 150 }));
+    try eq(ok, zyntra_context_push_mouse_wheel(handle, 0, 1, .{ .x = 200, .y = 150 }));
+    try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try stdt.testing.expect(res.zoom_changed);
+    try eq(@as(f32, 1.25), state.transform.zoom);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Inválidos: handle/id/ponteiros/geometria/estado/opções/fonte.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(bad, zyntra_widget_graph_view(null, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_graph_view(handle, 0, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, null, 1, &edges, edges.len, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, null, 1, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, .{ .x = 0, .y = 0, .w = 0, .h = 300 }, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, null, &options, &style, 10, &res));
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, null, &style, 10, &res));
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, null, 10, &res));
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, 0, &res));
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &options, &style, nan, &res));
+
+    var bad_nodes = nodes;
+    bad_nodes[0].size.x = 0;
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, &bad_nodes, bad_nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+    bad_nodes = nodes;
+    bad_nodes[0].title = .{ .ptr = null, .len = 1 };
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, &bad_nodes, bad_nodes.len, &edges, edges.len, &state, &options, &style, 10, &res));
+
+    var bad_state = state;
+    bad_state.transform.zoom = 0;
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &bad_state, &options, &style, 10, &res));
+
+    var bad_options = options;
+    bad_options.edge_segments = 0;
+    try eq(bad, zyntra_widget_graph_view(handle, 0x6101, bounds, &nodes, nodes.len, &edges, edges.len, &state, &bad_options, &style, 10, &res));
+
+    // Conjunto vazio é aceito e `out_result` nulo é válido.
+    try eq(ok, zyntra_widget_graph_view(handle, 0x6101, bounds, null, 0, null, 0, &state, &options, &style, 10, null));
     try eq(ok, zyntra_context_end_frame(handle));
 }

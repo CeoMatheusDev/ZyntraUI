@@ -1156,6 +1156,98 @@ ZyntraResult zyntra_status_bar_text(ZyntraContext *handle, ZyntraStatusBar *bar,
 ZyntraResult zyntra_status_bar_separator(ZyntraContext *handle,
     ZyntraStatusBar *bar, const ZyntraSeparatorStyle *style);
 
+/* ------------------------------------------------------------------ */
+/* Grafo de nós (M119)                                                */
+/* ------------------------------------------------------------------ */
+
+typedef struct ZyntraGraphStyle {
+    ZyntraColor bg;
+    ZyntraColor grid;
+    float grid_target_px;
+    ZyntraColor node_bg;
+    ZyntraColor node_header;
+    ZyntraColor node_border;
+    ZyntraColor node_selected;
+    float node_border_width;
+    float node_selected_width;
+    float node_radius;
+    float header_height;
+    ZyntraColor title;
+    float title_pad;
+    ZyntraColor edge;
+    float edge_width;
+    ZyntraColor port;
+    float port_radius;
+} ZyntraGraphStyle;
+
+/* Nó em espaço-mundo; `title` é emprestado só durante a chamada. */
+typedef struct ZyntraGraphNode {
+    ZyntraVec2 pos;
+    ZyntraVec2 size;
+    ZyntraStr title;
+    uint32_t inputs;
+    uint32_t outputs;
+} ZyntraGraphNode;
+
+/* Aresta dirigida entre nós (índices em ZyntraGraphNode[]). */
+typedef struct ZyntraGraphEdge {
+    uint32_t from;
+    uint32_t to;
+    uint32_t from_port;
+    uint32_t to_port;
+} ZyntraGraphEdge;
+
+/* tela = mundo * zoom + pan. */
+typedef struct ZyntraGraphTransform {
+    ZyntraVec2 pan;
+    float zoom;
+} ZyntraGraphTransform;
+
+/* Estado retido entre frames. Índices -1 = nenhum. Inicie com
+ * zyntra_graph_view_state_init (o zero de C deixa zoom == 0). */
+typedef struct ZyntraGraphViewState {
+    ZyntraGraphTransform transform;
+    int64_t selected;
+    int64_t drag_node;
+    ZyntraVec2 drag_grab;
+    ZyntraVec2 pan_anchor;
+    bool panning;
+} ZyntraGraphViewState;
+
+/* Inicie com zyntra_graph_view_options_default. */
+typedef struct ZyntraGraphViewOptions {
+    float min_zoom;
+    float max_zoom;
+    float zoom_step;
+    float pan_step;
+    uint32_t edge_segments;
+} ZyntraGraphViewOptions;
+
+typedef struct ZyntraGraphViewResult {
+    int64_t hovered;  /* -1 = nenhum */
+    int64_t selected; /* -1 = nenhum */
+    int64_t dragging; /* -1 = nenhum */
+    ZyntraVec2 drag_delta;
+    ZyntraVec2 pan_delta;
+    bool zoom_changed;
+    bool panning;
+    bool changed;
+} ZyntraGraphViewResult;
+
+ZyntraResult zyntra_style_graph(int32_t theme_kind, ZyntraGraphStyle *out_style);
+ZyntraResult zyntra_graph_view_state_init(ZyntraGraphViewState *out_state);
+ZyntraResult zyntra_graph_view_options_default(ZyntraGraphViewOptions *out_options);
+
+/* Desenha e interage. `nodes` é mutável (o arraste atualiza `pos`); os
+ * títulos são emprestados só na chamada. `state` é retido entre frames.
+ * `out_result` é opcional. */
+ZyntraResult zyntra_widget_graph_view(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, ZyntraGraphNode *nodes, size_t nodes_len,
+    const ZyntraGraphEdge *edges, size_t edges_len,
+    ZyntraGraphViewState *state, const ZyntraGraphViewOptions *options,
+    const ZyntraGraphStyle *style, float size,
+    ZyntraGraphViewResult *out_result);
+
 #ifdef __cplusplus
 }
 #endif

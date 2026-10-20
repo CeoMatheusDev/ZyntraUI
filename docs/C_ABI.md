@@ -621,6 +621,58 @@ zyntra_toolbar_remaining(&bar, &restante);
   geometria sem área ou não-finita, estilo inválido, `text` nulo com
   `len > 0`, texto não-UTF8 e fonte (`size`) ≤ 0/não-finita.
 
+### Décimo primeiro lote (M119): grafo de nós
+
+```c
+ZyntraGraphStyle gs;
+zyntra_style_graph(ZYNTRA_THEME_DARK, &gs);
+
+ZyntraGraphViewState state;
+zyntra_graph_view_state_init(&state);       /* zoom 1, nada selecionado */
+
+ZyntraGraphViewOptions opt;
+zyntra_graph_view_options_default(&opt);
+
+ZyntraGraphNode nodes[2] = {
+    {.pos = {20, 20}, .size = {100, 60}, .title = {"A", 1},
+     .inputs = 0, .outputs = 1},
+    {.pos = {140, 20}, .size = {100, 60}, .title = {"B", 1},
+     .inputs = 1, .outputs = 0},
+};
+ZyntraGraphEdge edge = {.from = 0, .to = 1};
+
+ZyntraGraphViewResult res;
+zyntra_widget_graph_view(ctx, graph_id, bounds, nodes, 2, &edge, 1,
+    &state, &opt, &gs, 12, &res);
+```
+
+* `ZyntraGraphNode`/`ZyntraGraphEdge`/`ZyntraGraphTransform` espelham o
+  modelo: posição/tamanho em **espaço-mundo**, pinos de entrada à esquerda e
+  saída à direita, arestas por índice. `title` é **emprestado só durante a
+  chamada** (como nos demais widgets); vazio ⇒ sem título. Arestas com índice
+  fora de faixa são ignoradas no desenho.
+* `ZyntraGraphViewState` pertence ao chamador e é retido entre frames:
+  transform (`pan`/`zoom`), seleção e estado transiente de arraste/pan.
+  **Inicie com `zyntra_graph_view_state_init`** — o zero de C deixa `zoom == 0`
+  (inválido) e todos os índices em 0. Índices opcionais usam `-1` para
+  “nenhum”.
+* Interação: press sobre um nó seleciona e arrasta pela “pega”; press no vazio
+  faz pan; roda com hover dá zoom em torno do cursor (sinal de `dy`, passo
+  `zoom_step`, clamp `[min_zoom, max_zoom]`); setas/Home/Page Up/Page Down e
+  Tab seguem o comportamento da API Zig. O arraste **atualiza `nodes[i].pos`
+  na memória do chamador**.
+* `ZyntraGraphViewResult` reporta `hovered`/`selected`/`dragging` (`-1` =
+  nenhum), `drag_delta`/`pan_delta` do frame, `zoom_changed`, `panning` e
+  `changed`. `out_result` é opcional.
+* Memória: o wrapper converte nós/arestas para buffers temporários no
+  alocador do `Context` a cada chamada (o chamador não precisa montar structs
+  internas). Falha de alocação ⇒ `ZYNTRA_OUT_OF_MEMORY`.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle/id/estado/opções/estilo nulos,
+  geometria sem área ou não-finita, nó com `size` ≤ 0/não-finito, `title` com
+  ponteiro nulo e `len > 0`, transform inválido (`zoom` ≤ 0/não-finito),
+  opções inválidas (`0 < min_zoom <= max_zoom`, `zoom_step > 0`, `pan_step >= 0`,
+  `edge_segments >= 1`) e fonte (`size`) ≤ 0/não-finita.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -676,6 +728,10 @@ zyntra_toolbar_remaining(&bar, &restante);
   valores de `dnd.AcceptResult`).
 * M118: também travados `ZyntraToolbar=32` e `ZyntraStatusBar=36` (estados
   de posicionamento do chamador).
+* M119: também travados `ZyntraGraphStyle=68`, `ZyntraGraphNode=40`,
+  `ZyntraGraphEdge=16`, `ZyntraGraphTransform=12`,
+  `ZyntraGraphViewState=56`, `ZyntraGraphViewOptions=20` e
+  `ZyntraGraphViewResult=48`.
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -696,5 +752,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..."
 ```

@@ -94,6 +94,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `zyntra_style_toolbar`/`zyntra_style_status_bar`; o consumidor C ganhou
   os frames 84–88 (chrome com pixels, itens/separador, overflow, texto e
   estado corrompido).
+- `c-abi`: **grafo de nós na fronteira C** (M119, aditivo) —
+  `zyntra_widget_graph_view` desenha e interage com `ZyntraGraphNode[]`/
+  `ZyntraGraphEdge[]` e `ZyntraGraphViewState` do chamador (pan, zoom,
+  seleção e arraste com write-back de `pos`). `ZyntraGraphViewOptions`/
+  `ZyntraGraphViewResult` reportam deltas e flags do frame; estado e opções
+  têm inicializadores (`zyntra_graph_view_state_init`/
+  `_options_default`) e o estilo vem do tema via `zyntra_style_graph`.
+  Travas de ABI: `GraphStyle=68`, `GraphNode=40`, `GraphEdge=16`,
+  `GraphTransform=12`, `GraphViewState=56`, `GraphViewOptions=20`,
+  `GraphViewResult=48`. O consumidor C ganhou os frames 89–95 (pixel do nó,
+  hover, seleção, arraste com write-back, release, zoom e inválidos).
 
 ## [1.34.0] - 2026-10-18
 

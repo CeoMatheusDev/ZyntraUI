@@ -2624,6 +2624,180 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 89-95: grafo de nós (M119) — desenho/pixel, hover, seleção,
+     * arraste com write-back, pan/zoom e inválidos. */
+    int c119_node_px = 0, c119_hover = 0, c119_drag = 0;
+    int c119_changed = 0, c119_writeback = 0, c119_zoom = 0;
+    {
+        ZyntraGraphStyle c_gs;
+        ZyntraGraphViewState c_gstate;
+        ZyntraGraphViewOptions c_gopt;
+        ZyntraGraphViewResult c_gres;
+        ZyntraGraphNode c_nodes[2] = {
+            {.pos = {20, 20}, .size = {100, 60}, .title = {"A", 1},
+                .inputs = 0, .outputs = 1},
+            {.pos = {140, 20}, .size = {100, 60}, .title = {"B", 1},
+                .inputs = 1, .outputs = 0},
+        };
+        const ZyntraGraphEdge c_edges[1] = {{0, 1, 0, 0}};
+
+        _Static_assert(sizeof(ZyntraGraphStyle) == 68, "ZyntraGraphStyle ABI");
+        _Static_assert(sizeof(ZyntraGraphNode) == 40, "ZyntraGraphNode ABI");
+        _Static_assert(sizeof(ZyntraGraphEdge) == 16, "ZyntraGraphEdge ABI");
+        _Static_assert(sizeof(ZyntraGraphTransform) == 12, "ZyntraGraphTransform ABI");
+        _Static_assert(sizeof(ZyntraGraphViewState) == 56, "ZyntraGraphViewState ABI");
+        _Static_assert(sizeof(ZyntraGraphViewOptions) == 20, "ZyntraGraphViewOptions ABI");
+        _Static_assert(sizeof(ZyntraGraphViewResult) == 48, "ZyntraGraphViewResult ABI");
+
+        CHECK(zyntra_style_graph(ZYNTRA_THEME_DARK, &c_gs));
+        assert(zyntra_style_graph(9, &c_gs) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_graph(0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_graph_view_state_init(&c_gstate));
+        assert(c_gstate.transform.zoom == 1.0f);
+        assert(c_gstate.selected == -1 && c_gstate.drag_node == -1);
+        CHECK(zyntra_graph_view_options_default(&c_gopt));
+        assert(c_gopt.min_zoom == 0.25f && c_gopt.edge_segments == 12);
+        assert(zyntra_graph_view_state_init(NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_graph_view_options_default(NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+        ZyntraFramebuffer *c119fb = NULL;
+        CHECK(zyntra_framebuffer_create(240, 180, &c119fb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 240, 180}));
+        ZyntraThemeColors c119cols;
+        CHECK(zyntra_theme_colors(ZYNTRA_THEME_DARK, &c119cols));
+        ZyntraColor cp = {0, 0, 0, 0};
+        const ZyntraRect c119b = {0, 0, 240, 180};
+        const ZyntraId c119id = zyntra_id_from_string("c:graph", 7);
+
+        /* Frame 89: desenho e pixel do corpo do nó A. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, c119cols.bg));
+        CHECK(zyntra_widget_graph_view(ctx, c119id, c119b,
+            c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f, &c_gres));
+        assert(c_gres.hovered == -1 && c_gres.selected == -1);
+        assert(c_gres.dragging == -1 && !c_gres.changed);
+        CHECK(zyntra_framebuffer_render(c119fb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(c119fb, 30, 60, &cp));
+        c119_node_px = (cp.r == c_gs.node_bg.r && cp.g == c_gs.node_bg.g &&
+            cp.b == c_gs.node_bg.b);
+        assert(c119_node_px);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 90: hover no nó A. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){50, 50}));
+        CHECK(zyntra_widget_graph_view(ctx, c119id, c119b,
+            c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f, &c_gres));
+        assert(c_gres.hovered == 0);
+        c119_hover = (c_gres.hovered == 0);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 91: press seleciona/captura o nó A. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){50, 50}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){50, 50}));
+        CHECK(zyntra_widget_graph_view(ctx, c119id, c119b,
+            c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f, &c_gres));
+        assert(c_gres.selected == 0 && c_gres.dragging == 0);
+        assert(c_gres.changed);
+        c119_changed = c_gres.changed;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 92: arraste move 20/10 e escreve pos de volta no C. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){70, 60}));
+        CHECK(zyntra_widget_graph_view(ctx, c119id, c119b,
+            c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f, &c_gres));
+        assert(c_gres.dragging == 0);
+        assert(c_gres.drag_delta.x == 20.0f && c_gres.drag_delta.y == 10.0f);
+        assert(c_nodes[0].pos.x == 40.0f && c_nodes[0].pos.y == 30.0f);
+        c119_drag = (c_gres.dragging == 0 && c_gres.drag_delta.x == 20.0f &&
+            c_gres.drag_delta.y == 10.0f);
+        c119_writeback = (c_nodes[0].pos.x == 40.0f && c_nodes[0].pos.y == 30.0f);
+        assert(c119_drag && c119_writeback);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 93: release encerra o arraste e mantém a seleção. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){70, 60}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){70, 60}));
+        CHECK(zyntra_widget_graph_view(ctx, c119id, c119b,
+            c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f, &c_gres));
+        assert(c_gres.dragging == -1 && c_gres.selected == 0);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 94: roda dá zoom 1.25 em torno do cursor. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){100, 100}));
+        CHECK(zyntra_context_push_mouse_wheel(ctx, 0, 1, (ZyntraVec2){100, 100}));
+        CHECK(zyntra_widget_graph_view(ctx, c119id, c119b,
+            c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f, &c_gres));
+        assert(c_gres.zoom_changed);
+        assert(c_gstate.transform.zoom == 1.25f);
+        c119_zoom = (c_gres.zoom_changed && c_gstate.transform.zoom == 1.25f);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 95: inválidos e conjunto vazio. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        {
+            ZyntraGraphViewState gbad = c_gstate;
+            ZyntraGraphViewOptions gopt_bad = c_gopt;
+            ZyntraGraphNode gnode_bad = c_nodes[0];
+            assert(zyntra_widget_graph_view(NULL, c119id, c119b,
+                c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_graph_view(ctx, 0, c119b,
+                c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_graph_view(ctx, c119id, c119b,
+                NULL, 1, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_graph_view(ctx, c119id, c119b,
+                c_nodes, 2, NULL, 1, &c_gstate, &c_gopt, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_graph_view(ctx, c119id, (ZyntraRect){0, 0, 0, 180},
+                c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_graph_view(ctx, c119id, c119b,
+                c_nodes, 2, c_edges, 1, NULL, &c_gopt, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_graph_view(ctx, c119id, c119b,
+                c_nodes, 2, c_edges, 1, &c_gstate, NULL, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_graph_view(ctx, c119id, c119b,
+                c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, NULL, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_graph_view(ctx, c119id, c119b,
+                c_nodes, 2, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 0.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            gnode_bad.size.x = 0.0f;
+            assert(zyntra_widget_graph_view(ctx, c119id, c119b,
+                &gnode_bad, 1, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            gnode_bad = c_nodes[0];
+            gnode_bad.title.ptr = NULL;
+            gnode_bad.title.len = 1;
+            assert(zyntra_widget_graph_view(ctx, c119id, c119b,
+                &gnode_bad, 1, c_edges, 1, &c_gstate, &c_gopt, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            gbad.transform.zoom = 0.0f;
+            assert(zyntra_widget_graph_view(ctx, c119id, c119b,
+                c_nodes, 2, c_edges, 1, &gbad, &c_gopt, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            gopt_bad.edge_segments = 0;
+            assert(zyntra_widget_graph_view(ctx, c119id, c119b,
+                c_nodes, 2, c_edges, 1, &c_gstate, &gopt_bad, &c_gs, 10.0f,
+                &c_gres) == ZYNTRA_INVALID_ARGUMENT);
+            /* Conjunto vazio e `out_result` nulo são válidos. */
+            CHECK(zyntra_widget_graph_view(ctx, c119id, c119b,
+                NULL, 0, NULL, 0, &c_gstate, &c_gopt, &c_gs, 10.0f, NULL));
+        }
+        CHECK(zyntra_context_end_frame(ctx));
+
+        zyntra_framebuffer_destroy(c119fb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -2687,6 +2861,9 @@ int main(void) {
     printf("C-ABI bars toolbar=%d/%d sec=%d status=%d text=%d/%d\n",
         c118_bar_px, c118_tb_overflow, c118_sep_px, c118_status_px,
         c118_status_text, c118_sb_overflow);
+    printf("C-ABI graph px=%d hover=%d drag=%d change=%d write=%d zoom=%d\n",
+        c119_node_px, c119_hover, c119_drag, c119_changed, c119_writeback,
+        c119_zoom);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

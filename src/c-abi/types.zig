@@ -250,6 +250,8 @@ pub const ZyntraDragGhostStyle = style_mod.DragGhostStyle;
 /// Estilos das barras de composição (M118): toolbar e statusbar.
 pub const ZyntraToolbarStyle = style_mod.ToolbarStyle;
 pub const ZyntraStatusBarStyle = style_mod.StatusBarStyle;
+/// Estilo do grafo de nós (M119).
+pub const ZyntraGraphStyle = style_mod.GraphStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -468,6 +470,64 @@ pub const ZyntraStatusBar = extern struct {
     overflowed: bool = false,
 };
 
+/// Nó do grafo (M119), em espaço-mundo. `title` é emprestado só durante a
+/// chamada de `zyntra_widget_graph_view`.
+pub const ZyntraGraphNode = extern struct {
+    pos: ZyntraVec2 = .{},
+    size: ZyntraVec2 = .{ .x = 120, .y = 48 },
+    title: ZyntraStr = .{},
+    inputs: u32 = 0,
+    outputs: u32 = 0,
+};
+
+/// Aresta dirigida entre nós (índices em `ZyntraGraphNode[]`).
+pub const ZyntraGraphEdge = extern struct {
+    from: u32 = 0,
+    to: u32 = 0,
+    from_port: u32 = 0,
+    to_port: u32 = 0,
+};
+
+/// Transformação mundo↔tela do grafo (`tela = mundo * zoom + pan`).
+pub const ZyntraGraphTransform = extern struct {
+    pan: ZyntraVec2 = .{},
+    zoom: f32 = 1.0,
+};
+
+/// Estado do grafo (M119), do chamador e retido entre frames. Índices
+/// opcionais usam -1 para "nenhum". Inicie com
+/// `zyntra_graph_view_state_init` (o zero de C deixa `zoom == 0`).
+pub const ZyntraGraphViewState = extern struct {
+    transform: ZyntraGraphTransform = .{},
+    selected: i64 = -1,
+    drag_node: i64 = -1,
+    drag_grab: ZyntraVec2 = .{},
+    pan_anchor: ZyntraVec2 = .{},
+    panning: bool = false,
+};
+
+/// Opções de interação do grafo (M119). Inicie com
+/// `zyntra_graph_view_options_default`.
+pub const ZyntraGraphViewOptions = extern struct {
+    min_zoom: f32 = 0.25,
+    max_zoom: f32 = 4.0,
+    zoom_step: f32 = 1.25,
+    pan_step: f32 = 24.0,
+    edge_segments: u32 = 12,
+};
+
+/// Resultado do frame do grafo (M119). Índices -1 significam "nenhum".
+pub const ZyntraGraphViewResult = extern struct {
+    hovered: i64 = -1,
+    selected: i64 = -1,
+    dragging: i64 = -1,
+    drag_delta: ZyntraVec2 = .{},
+    pan_delta: ZyntraVec2 = .{},
+    zoom_changed: bool = false,
+    panning: bool = false,
+    changed: bool = false,
+};
+
 /// Zona de acoplamento de um drop (espelha `dock.DockZone`; mesmos valores).
 pub const ZyntraDockZone = enum(c_int) {
     left = 0,
@@ -601,6 +661,13 @@ comptime {
     if (@sizeOf(ZyntraDragGhostResult) != 36 or @alignOf(ZyntraDragGhostResult) != 4) @compileError("ZyntraDragGhostResult ABI drift");
     if (@sizeOf(ZyntraToolbar) != 32 or @alignOf(ZyntraToolbar) != 4) @compileError("ZyntraToolbar ABI drift");
     if (@sizeOf(ZyntraStatusBar) != 36 or @alignOf(ZyntraStatusBar) != 4) @compileError("ZyntraStatusBar ABI drift");
+    if (@sizeOf(ZyntraGraphStyle) != 68 or @alignOf(ZyntraGraphStyle) != 4) @compileError("ZyntraGraphStyle ABI drift");
+    if (@sizeOf(ZyntraGraphNode) != 40 or @alignOf(ZyntraGraphNode) != 8) @compileError("ZyntraGraphNode ABI drift");
+    if (@sizeOf(ZyntraGraphEdge) != 16 or @alignOf(ZyntraGraphEdge) != 4) @compileError("ZyntraGraphEdge ABI drift");
+    if (@sizeOf(ZyntraGraphTransform) != 12 or @alignOf(ZyntraGraphTransform) != 4) @compileError("ZyntraGraphTransform ABI drift");
+    if (@sizeOf(ZyntraGraphViewState) != 56 or @alignOf(ZyntraGraphViewState) != 8) @compileError("ZyntraGraphViewState ABI drift");
+    if (@sizeOf(ZyntraGraphViewOptions) != 20 or @alignOf(ZyntraGraphViewOptions) != 4) @compileError("ZyntraGraphViewOptions ABI drift");
+    if (@sizeOf(ZyntraGraphViewResult) != 48 or @alignOf(ZyntraGraphViewResult) != 8) @compileError("ZyntraGraphViewResult ABI drift");
     if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
         @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
     {
@@ -669,6 +736,14 @@ test "C-ABI tipos: tamanhos e ok==0" {
     // Barras de composição M118.
     try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraToolbar));
     try stdt.testing.expectEqual(@as(usize, 36), @sizeOf(ZyntraStatusBar));
+    // Grafo M119.
+    try stdt.testing.expectEqual(@as(usize, 68), @sizeOf(ZyntraGraphStyle));
+    try stdt.testing.expectEqual(@as(usize, 40), @sizeOf(ZyntraGraphNode));
+    try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraGraphEdge));
+    try stdt.testing.expectEqual(@as(usize, 12), @sizeOf(ZyntraGraphTransform));
+    try stdt.testing.expectEqual(@as(usize, 56), @sizeOf(ZyntraGraphViewState));
+    try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraGraphViewOptions));
+    try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraGraphViewResult));
     // Docking: espelhos do modelo e do resultado da área interativa.
     try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));
     try stdt.testing.expectEqual(@as(usize, 28), @sizeOf(ZyntraDockPaneInfo));
