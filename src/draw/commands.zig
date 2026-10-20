@@ -1638,3 +1638,57 @@ test "DrawList translateInto/scaledInto copiam os glifos do run (M146)" {
     const scaled = out.glyphsOf(out.items()[0]);
     try stdt.testing.expectEqual(@as(f32, 8), scaled[1].dx);
 }
+
+test "fuzz glyphRun: sem crash, comando sempre válido" {
+    try std.testing.fuzz({}, fuzzGlyphRun, .{});
+}
+
+fn fuzzGlyphRun(_: void, smith: *std.testing.Smith) !void {
+    var bytes: [96]u8 = undefined;
+    smith.bytes(&bytes);
+    const gpa = std.testing.allocator;
+
+    var img_bytes: [16 * 16 * 4]u8 = undefined;
+    for (&img_bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = try image_mod.Image.init(16, 16, &img_bytes);
+
+    var refs: [8]GlyphRef = undefined;
+    const n = @min(refs.len, bytes[0] % 9);
+    for (0..n) |i| {
+        const sx = bytes[1 + i * 4] % 15;
+        const sy = bytes[2 + i * 4] % 15;
+        const sw = 1 + bytes[3 + i * 4] % 2;
+        const sh = 1 + bytes[4 + i * 4] % 2;
+        refs[i] = .{
+            .src_x = sx,
+            .src_y = sy,
+            .src_w = sw,
+            .src_h = sh,
+            .dx = @as(f32, @floatFromInt(bytes[5 + i * 4] % 32)),
+            .dy = @as(f32, @floatFromInt(bytes[6 + i * 4] % 32)),
+        };
+    }
+
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    const scale = 1.0 + @as(f32, @floatFromInt(bytes[7] % 4));
+    dl.glyphRun(
+        gpa,
+        types.Vec2.init(1, 2),
+        types.Color.rgb(255, 255, 255),
+        img,
+        refs[0..n],
+        scale,
+    ) catch |err| switch (err) {
+        // Região fora da imagem ou escala inválida: recusado, sem comando.
+        error.InvalidCommand => {
+            try std.testing.expectEqual(@as(usize, 0), dl.len());
+            return;
+        },
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    try std.testing.expectEqual(@as(usize, 1), dl.len());
+    try std.testing.expect(dl.items()[0].isValid());
+    const got = dl.glyphsOf(dl.items()[0]);
+    try std.testing.expectEqual(n, got.len);
+}

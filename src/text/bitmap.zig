@@ -90,3 +90,39 @@ test "BitmapFont deriva o avanço e exige monoespaçada" {
     defer atlas2.deinit(gpa);
     try stdt.testing.expectError(error.NotMonospace, BitmapFont.init(&atlas2));
 }
+
+test "fuzz BitmapFont: monoespaçada ou recusada, nunca incoerente" {
+    try std.testing.fuzz({}, fuzzBitmapFont, .{});
+}
+
+fn fuzzBitmapFont(_: void, smith: *std.testing.Smith) !void {
+    var bytes: [32]u8 = undefined;
+    smith.bytes(&bytes);
+    const gpa = std.testing.allocator;
+
+    var b = atlas_mod.Builder.init(32, 32, 1);
+    defer b.deinit(gpa);
+    const adv_a = @as(f32, @floatFromInt(bytes[0] % 16)) + 1.0;
+    const adv_b = @as(f32, @floatFromInt(bytes[1] % 16)) + 1.0;
+    _ = b.addGlyph(gpa, 'A', 4, 8, .{ .advance = adv_a, .bearing_y = -8, .height = 8 }) catch return;
+    _ = b.addGlyph(gpa, 'B', 4, 8, .{ .advance = adv_b, .bearing_y = -8, .height = 8 }) catch return;
+    var img_bytes: [32 * 32 * 4]u8 = undefined;
+    for (&img_bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = image_mod.Image.init(32, 32, &img_bytes) catch return;
+    var atlas = b.finish(gpa, img) catch return;
+    defer atlas.deinit(gpa);
+
+    const font = BitmapFont.init(&atlas) catch |err| switch (err) {
+        // Fonte proporcional ⇒ recusada (e o atlas segue intacto).
+        error.NotMonospace => {
+            try std.testing.expect(atlas.glyphs.len == 2);
+            return;
+        },
+        error.InvalidGlyph => return,
+        error.InvalidMetrics => return,
+    };
+    // Monoespaçada: o avanço é o do primeiro glifo e casa com as métricas
+    // do mesmo avanço.
+    try std.testing.expectEqual(atlas.glyphs[0].metrics.advance, font.advance);
+    try std.testing.expect(font.hasGlyph('A'));
+}

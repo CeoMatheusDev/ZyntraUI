@@ -315,3 +315,48 @@ test "Layout.draw usa o atlas (blits) ou o fallback (comando de texto)" {
     // O segundo glifo avança pelo avanço real (5 px).
     try stdt.testing.expectEqual(@as(f32, 5), refs[1].dx);
 }
+
+test "fuzz layout: sem crash e coerente com o atlas" {
+    try std.testing.fuzz({}, fuzzLayoutAtlas, .{});
+}
+
+fn fuzzLayoutAtlas(_: void, smith: *std.testing.Smith) !void {
+    var bytes: [64]u8 = undefined;
+    smith.bytes(&bytes);
+    const gpa = std.testing.allocator;
+
+    // Atlas com 2 glifos de avanço arbitrário (finito e > 0).
+    const adv_a = @as(f32, @floatFromInt(bytes[0] % 16)) + 1.0;
+    const adv_b = @as(f32, @floatFromInt(bytes[1] % 16)) + 1.0;
+    var b = atlas_mod.Builder.init(32, 32, 1);
+    defer b.deinit(gpa);
+    _ = b.addGlyph(gpa, 'A', 4, 8, .{ .advance = adv_a, .bearing_y = -8, .height = 8 }) catch return;
+    _ = b.addGlyph(gpa, 'B', 4, 8, .{ .advance = adv_b, .bearing_y = -8, .height = 8 }) catch return;
+    var img_bytes: [32 * 32 * 4]u8 = undefined;
+    for (&img_bytes, 0..) |*p, i| p.* = @truncate(i);
+    const img = image_mod.Image.init(32, 32, &img_bytes) catch return;
+    var atlas = b.finish(gpa, img) catch return;
+    defer atlas.deinit(gpa);
+
+    const l = Layout.fromAtlas(&atlas) catch return;
+    // Texto ASCII aleatório (UTF-8 válido).
+    var text: [32]u8 = undefined;
+    const n = bytes[2] % 32;
+    for (0..n) |i| text[i] = 'A' + (bytes[3 + i] % 2); // 'A' ou 'B'
+    const slice = text[0..n];
+
+    const w = l.advance(slice) catch |err| switch (err) {
+        error.InvalidUtf8 => return,
+        else => return err,
+    };
+    try std.testing.expect(w >= 0);
+    const m = l.measure(slice) catch return;
+    try std.testing.expect(m.width >= 0);
+    try std.testing.expect(m.lines >= 1);
+    // O corte respeita a largura e a fronteira de codepoint.
+    const cut = l.truncateToWidth(slice, w) catch return;
+    try std.testing.expect(cut <= slice.len);
+    // O offset do clique é coerente com o texto.
+    const off = l.offsetAtX(slice, w * 0.5);
+    try std.testing.expect(off <= slice.len);
+}

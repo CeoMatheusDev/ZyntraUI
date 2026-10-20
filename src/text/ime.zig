@@ -245,3 +245,49 @@ test "applyCommit recusa insert que não cabe" {
     try stdt.testing.expectEqual(@as(usize, 3), len);
     try stdt.testing.expect(c.committed);
 }
+
+test "fuzz IME: sem crash, pré-edit sempre UTF-8 e coerente" {
+    try std.testing.fuzz({}, fuzzIme, .{});
+}
+
+fn fuzzIme(_: void, smith: *std.testing.Smith) !void {
+    var buf: [64]u8 = undefined;
+    smith.bytes(&buf);
+    var c = Composition.init(&buf);
+
+    // Sequência aleatória de operações.
+    var i: usize = 0;
+    while (i < buf.len) : (i += 1) {
+        const op = buf[i] % 4;
+        const n = @as(usize, buf[(i + 1) % buf.len]) % 32;
+        const cursor = @as(usize, buf[(i + 2) % buf.len]) % 64;
+        switch (op) {
+            0 => c.update("abc", cursor) catch |err| switch (err) {
+                error.InvalidUtf8 => {},
+                error.BufferTooSmall => {},
+                else => return err,
+            },
+            1 => {
+                // Bytes arbitrários: UTF-8 inválido é recusado.
+                c.update(buf[0..n], cursor) catch |err| switch (err) {
+                    error.InvalidUtf8 => {},
+                    error.BufferTooSmall => {},
+                    else => return err,
+                };
+            },
+            2 => c.commit(),
+            else => c.cancel(),
+        }
+        // Invariantes: o pré-edit é UTF-8 válido, o cursor está dentro
+        // dele e o estado é coerente.
+        const pre = c.preedit();
+        var k: usize = 0;
+        while (k < pre.len) {
+            const d = metrics_mod.decodeOne(pre[k..]) catch return error.TestUnexpectedResult;
+            k += d.len;
+        }
+        try std.testing.expect(c.cursor <= c.len);
+        try std.testing.expect(c.len <= buf.len);
+        if (!c.committed) try std.testing.expect(c.len == 0 or c.active);
+    }
+}

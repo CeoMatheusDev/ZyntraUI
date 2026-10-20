@@ -48,6 +48,12 @@ existia mudou de assinatura ou layout.
   comum do texto com atlas/fonte de bitmap), o rasterizador copia o pixel
   direto, sem amostragem bilinear. A cor resultante é idêntica à do
   caminho geral (mesma matemática de tint e mistura).
+- `text`/`draw`: **fuzz dos módulos novos** (M148, aditivo) — testes de
+  fuzz para a composição de IME (pré-edit sempre UTF-8, cursor coerente),
+  o layout de texto com atlas (medida/corte/offset coerentes), o run de
+  glifos (comando sempre válido) e a fonte de bitmap (monoespaçada ou
+  recusada). Nenhum crash e as invariantes valem para entradas
+  arbitrárias.
 - `widgets`: **bloco de texto multilinha** (M147, aditivo) —
   `widgets.text_block.textBlock` (métricas de fallback) e
   `textBlockAtlas` (fonte real) desenham texto de parágrafo com quebra
