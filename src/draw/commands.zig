@@ -38,6 +38,20 @@ pub const DrawCommand = union(enum) {
         radius: f32,
         color: types.Color,
     },
+    circle_outline: extern struct {
+        center: types.Vec2,
+        radius: f32,
+        color: types.Color,
+        thickness: f32,
+    },
+    circle_dashed: extern struct {
+        center: types.Vec2,
+        radius: f32,
+        color: types.Color,
+        thickness: f32,
+        dash_len: f32,
+        gap_len: f32,
+    },
     /// Define clip retangular (scissor) para comandos seguintes.
     /// `null_rect=true` remove o clip.
     clip: extern struct {
@@ -76,6 +90,36 @@ pub const DrawCommand = union(enum) {
         p1: types.Vec2,
         color0: types.Color,
         color1: types.Color,
+    },
+    /// Preenchimento em gradiente RADIAL: `color0` no centro do
+    /// `rect`, `color1` na borda (raio `radius` a partir do centro).
+    /// Gradiente contido em `rect` (clamp nas bordas).
+    rect_gradient_radial: extern struct {
+        rect: types.Rect,
+        radius: f32,
+        color0: types.Color,
+        color1: types.Color,
+    },
+    /// Preenchimento em gradiente CONÍCO: `color0` no ângulo `start_angle`
+    /// (radianos, medido desde +X, sentido anti-horário), `color1` em
+    /// `start_angle + sweep`. O centro é o centro de `rect`.
+    rect_gradient_conic: extern struct {
+        rect: types.Rect,
+        center: types.Vec2,
+        start_angle: f32,
+        sweep: f32,
+        color0: types.Color,
+        color1: types.Color,
+    },
+    /// Reta tracejada: `dash_len` px de traço, `gap_len` px de vazio,
+    /// ao longo de `p0→p1`. Fase 0 em `p0`.
+    line_dashed: extern struct {
+        p0: types.Vec2,
+        p1: types.Vec2,
+        color: types.Color,
+        thickness: f32,
+        dash_len: f32,
+        gap_len: f32,
     },
     /// Sombra projetada de um retângulo de cantos arredondados: a
     /// silhueta `rect` é deslocada por `offset` e atenuada em `blur` px
@@ -125,6 +169,18 @@ pub const DrawCommand = union(enum) {
                 return finite(c.center.x) and finite(c.center.y) and
                     finite(c.radius) and c.radius >= 0;
             },
+            .circle_outline => |c| {
+                return finite(c.center.x) and finite(c.center.y) and
+                    finite(c.radius) and c.radius >= 0 and
+                    finite(c.thickness) and c.thickness > 0;
+            },
+            .circle_dashed => |c| {
+                return finite(c.center.x) and finite(c.center.y) and
+                    finite(c.radius) and c.radius >= 0 and
+                    finite(c.thickness) and c.thickness > 0 and
+                    finite(c.dash_len) and c.dash_len > 0 and
+                    finite(c.gap_len) and c.gap_len > 0;
+            },
             .clip => |c| {
                 if (c.null_rect) return true;
                 return finite(c.rect.x) and finite(c.rect.y) and
@@ -148,6 +204,26 @@ pub const DrawCommand = union(enum) {
                     c.rect.w >= 0 and c.rect.h >= 0 and
                     finite(c.p0.x) and finite(c.p0.y) and
                     finite(c.p1.x) and finite(c.p1.y);
+            },
+            .rect_gradient_radial => |c| {
+                return finite(c.rect.x) and finite(c.rect.y) and
+                    finite(c.rect.w) and finite(c.rect.h) and
+                    c.rect.w >= 0 and c.rect.h >= 0 and
+                    finite(c.radius) and c.radius >= 0;
+            },
+            .rect_gradient_conic => |c| {
+                return finite(c.rect.x) and finite(c.rect.y) and
+                    finite(c.rect.w) and finite(c.rect.h) and
+                    c.rect.w >= 0 and c.rect.h >= 0 and
+                    finite(c.center.x) and finite(c.center.y) and
+                    finite(c.start_angle) and finite(c.sweep);
+            },
+            .line_dashed => |c| {
+                return finite(c.p0.x) and finite(c.p0.y) and
+                    finite(c.p1.x) and finite(c.p1.y) and
+                    finite(c.thickness) and c.thickness > 0 and
+                    finite(c.dash_len) and c.dash_len > 0 and
+                    finite(c.gap_len) and c.gap_len > 0;
             },
             .rect_shadow => |c| {
                 return finite(c.rect.x) and finite(c.rect.y) and
@@ -186,6 +262,15 @@ pub const DrawCommand = union(enum) {
             .rect_filled => |*c| moveRect(&c.rect, dx, dy),
             .rect_outline => |*c| moveRect(&c.rect, dx, dy),
             .rect_rounded => |*c| moveRect(&c.rect, dx, dy),
+            .rect_gradient_radial => |*c| moveRect(&c.rect, dx, dy),
+            .rect_gradient_conic => |*c| {
+                moveRect(&c.rect, dx, dy);
+                moveVec(&c.center, dx, dy);
+            },
+            .line_dashed => |*c| {
+                moveVec(&c.p0, dx, dy);
+                moveVec(&c.p1, dx, dy);
+            },
             .rect_gradient => |*c| {
                 moveRect(&c.rect, dx, dy);
                 moveVec(&c.p0, dx, dy);
@@ -198,6 +283,8 @@ pub const DrawCommand = union(enum) {
                 moveVec(&c.p1, dx, dy);
             },
             .circle_filled => |*c| moveVec(&c.center, dx, dy),
+            .circle_outline => |*c| moveVec(&c.center, dx, dy),
+            .circle_dashed => |*c| moveVec(&c.center, dx, dy),
             .text => |*c| moveVec(&c.pos, dx, dy),
         }
         return out;
@@ -322,6 +409,14 @@ pub const DrawList = struct {
         try self.push(gpa, .{ .circle_filled = .{ .center = center, .color = color, .radius = radius } });
     }
 
+    pub fn circleOutline(self: *Self, gpa: std.mem.Allocator, center: types.Vec2, radius: f32, color: types.Color, thickness: f32) !void {
+        try self.push(gpa, .{ .circle_outline = .{ .center = center, .color = color, .radius = radius, .thickness = thickness } });
+    }
+
+    pub fn circleDashed(self: *Self, gpa: std.mem.Allocator, center: types.Vec2, radius: f32, color: types.Color, thickness: f32, dash_len: f32, gap_len: f32) !void {
+        try self.push(gpa, .{ .circle_dashed = .{ .center = center, .color = color, .radius = radius, .thickness = thickness, .dash_len = dash_len, .gap_len = gap_len } });
+    }
+
     /// Retângulo de cantos arredondados (bordas AA no backend de referência).
     pub fn rectRounded(self: *Self, gpa: std.mem.Allocator, rect: types.Rect, radius: f32, color: types.Color) !void {
         try self.push(gpa, .{ .rect_rounded = .{ .rect = rect, .radius = radius, .color = color } });
@@ -347,6 +442,66 @@ pub const DrawList = struct {
     }
 
     /// Sombra projetada de um retângulo arredondado (`off` desloca, `blur` atenua).
+    /// Preenchimento em gradiente radial: `color0` no centro, `color1` na borda,
+    /// contido em `rect`.
+    pub fn rectGradientRadial(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        rect: types.Rect,
+        radius: f32,
+        color0: types.Color,
+        color1: types.Color,
+    ) !void {
+        try self.push(gpa, .{ .rect_gradient_radial = .{
+            .rect = rect,
+            .radius = radius,
+            .color0 = color0,
+            .color1 = color1,
+        } });
+    }
+
+    /// Gradiente cônico: `color0` em `start_angle` (rad desde +X),
+    /// `color1` em `start_angle + sweep`.
+    pub fn rectGradientConic(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        rect: types.Rect,
+        center: types.Vec2,
+        start_angle: f32,
+        sweep: f32,
+        color0: types.Color,
+        color1: types.Color,
+    ) !void {
+        try self.push(gpa, .{ .rect_gradient_conic = .{
+            .rect = rect,
+            .center = center,
+            .start_angle = start_angle,
+            .sweep = sweep,
+            .color0 = color0,
+            .color1 = color1,
+        } });
+    }
+
+    /// Reta tracejada: `dash_len` px de traço alternando com `gap_len`.
+    pub fn lineDashed(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        p0: types.Vec2,
+        p1: types.Vec2,
+        color: types.Color,
+        thickness: f32,
+        dash_len: f32,
+        gap_len: f32,
+    ) !void {
+        try self.push(gpa, .{ .line_dashed = .{
+            .p0 = p0,
+            .p1 = p1,
+            .color = color,
+            .thickness = thickness,
+            .dash_len = dash_len,
+            .gap_len = gap_len,
+        } });
+    }
     pub fn rectShadow(
         self: *Self,
         gpa: std.mem.Allocator,
@@ -691,4 +846,137 @@ test "DrawList translateInto desloca geometria e remonta o texto" {
             try std.testing.expect(std.meta.eql(a.translated(0, 0), b));
         }
     }
+}
+
+test "DrawList rectGradientRadial + circleOutline + circleDashed + validação" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    // Gradiente radial válido.
+    try dl.rectGradientRadial(
+        gpa,
+        types.Rect.init(0, 0, 8, 8),
+        4,
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+    );
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    try stdt.testing.expect(dl.items()[0].isValid());
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 8, 8), dl.items()[0].rect_gradient_radial.rect);
+
+    // Raio negativo é rejeitado.
+    try stdt.testing.expectError(error.InvalidCommand, dl.rectGradientRadial(
+        gpa,
+        types.Rect.init(0, 0, 8, 8),
+        -1,
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+    ));
+
+    // Contorno de círculo.
+    try dl.circleOutline(gpa, types.Vec2.init(4, 4), 3, types.Color.rgb(255, 255, 255), 1.5);
+    try stdt.testing.expectEqual(@as(usize, 2), dl.len());
+    try stdt.testing.expect(dl.items()[1].isValid());
+
+    // Espessura não-positiva é rejeitada.
+    try stdt.testing.expectError(error.InvalidCommand, dl.circleOutline(
+        gpa,
+        types.Vec2.init(4, 4),
+        3,
+        types.Color.rgb(255, 255, 255),
+        0,
+    ));
+
+    // Círculo tracejado.
+    try dl.circleDashed(gpa, types.Vec2.init(4, 4), 3, types.Color.rgb(255, 255, 255), 1, 2, 1);
+    try stdt.testing.expectEqual(@as(usize, 3), dl.len());
+    try stdt.testing.expect(dl.items()[2].isValid());
+
+    // dash/gap não-positivos são rejeitados.
+    try stdt.testing.expectError(error.InvalidCommand, dl.circleDashed(
+        gpa,
+        types.Vec2.init(4, 4),
+        3,
+        types.Color.rgb(255, 255, 255),
+        1,
+        0,
+        1,
+    ));
+    try stdt.testing.expectError(error.InvalidCommand, dl.circleDashed(
+        gpa,
+        types.Vec2.init(4, 4),
+        3,
+        types.Color.rgb(255, 255, 255),
+        1,
+        2,
+        0,
+    ));
+    try stdt.testing.expectEqual(@as(usize, 3), dl.len());
+}
+
+test "DrawList rectGradientConic + lineDashed + validação" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    // Gradiente cônico válido.
+    try dl.rectGradientConic(
+        gpa,
+        types.Rect.init(0, 0, 8, 8),
+        types.Vec2.init(4, 4),
+        0,
+        6.2831855,
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+    );
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    try stdt.testing.expect(dl.items()[0].isValid());
+
+    // Ângulo não-finito é rejeitado.
+    try stdt.testing.expectError(error.InvalidCommand, dl.rectGradientConic(
+        gpa,
+        types.Rect.init(0, 0, 8, 8),
+        types.Vec2.init(4, 4),
+        std.math.nan(f32),
+        1,
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+    ));
+
+    // Linha tracejada válida.
+    try dl.lineDashed(
+        gpa,
+        types.Vec2.init(0, 0),
+        types.Vec2.init(10, 10),
+        types.Color.rgb(255, 255, 255),
+        2,
+        3,
+        1,
+    );
+    try stdt.testing.expectEqual(@as(usize, 2), dl.len());
+    try stdt.testing.expect(dl.items()[1].isValid());
+
+    // dash/gap não-positivos são rejeitados.
+    try stdt.testing.expectError(error.InvalidCommand, dl.lineDashed(
+        gpa,
+        types.Vec2.init(0, 0),
+        types.Vec2.init(10, 10),
+        types.Color.rgb(255, 255, 255),
+        2,
+        0,
+        1,
+    ));
+    try stdt.testing.expectError(error.InvalidCommand, dl.lineDashed(
+        gpa,
+        types.Vec2.init(0, 0),
+        types.Vec2.init(10, 10),
+        types.Color.rgb(255, 255, 255),
+        2,
+        3,
+        0,
+    ));
+    try stdt.testing.expectEqual(@as(usize, 2), dl.len());
 }

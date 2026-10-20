@@ -83,6 +83,29 @@ pub const SoftwareFramebuffer = struct {
         self.pixels[i + 3] = @intCast((sa * 255 + d3 * ia + 127) / 255);
     }
 
+    /// Escreve `c` com cobertura fracionária `cov` (0..1) — usado por
+    /// bordas anti-serrilhadas (SDF). `cov == 1` equivale a `set`.
+    fn setAlpha(self: *Self, x: u32, y: u32, c: types.Color, cov: f32) void {
+        if (cov <= 0) return;
+        if (cov >= 1) {
+            self.set(x, y, c);
+            return;
+        }
+        const a = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(c.a)) * cov)));
+        if (a == 0) return;
+        const i = (@as(usize, y) * self.w + x) * 4;
+        const sa = a;
+        const ia: u32 = 255 - sa;
+        const d0: u32 = self.pixels[i];
+        const d1: u32 = self.pixels[i + 1];
+        const d2: u32 = self.pixels[i + 2];
+        const d3: u32 = self.pixels[i + 3];
+        self.pixels[i] = @intCast((@as(u32, c.r) * sa + d0 * ia + 127) / 255);
+        self.pixels[i + 1] = @intCast((@as(u32, c.g) * sa + d1 * ia + 127) / 255);
+        self.pixels[i + 2] = @intCast((@as(u32, c.b) * sa + d2 * ia + 127) / 255);
+        self.pixels[i + 3] = @intCast((sa * 255 + d3 * ia + 127) / 255);
+    }
+
     pub fn clear(self: *Self, c: types.Color) void {
         var i: usize = 0;
         while (i < self.pixels.len) : (i += 4) {
@@ -213,6 +236,92 @@ pub const SoftwareFramebuffer = struct {
                 if (@sqrt(dx * dx + dy * dy) <= radius) {
                     self.set(@intCast(x), @intCast(y), c);
                 }
+            }
+        }
+    }
+
+    /// Contorno circular de `thickness` px: anel entre `radius - t/2` e
+    /// `radius + t/2` (cobertura AA por distância radial).
+    pub fn strokeCircle(self: *Self, center: types.Vec2, radius: f32, thickness: f32, clip: ?types.Rect, c: types.Color) void {
+        if (!std.math.isFinite(center.x) or !std.math.isFinite(center.y) or
+            !std.math.isFinite(radius) or radius < 0 or
+            !std.math.isFinite(thickness) or thickness <= 0) return;
+        const half = thickness / 2;
+        const outer = radius + half;
+        const inner = @max(0, radius - half);
+        var y = @max(0, @as(i64, @intFromFloat(@floor(center.y - outer))));
+        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(center.y + outer))));
+        while (y < y_end) : (y += 1) {
+            var x = @max(0, @as(i64, @intFromFloat(@floor(center.x - outer))));
+            const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(center.x + outer))));
+            while (x < x_end) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                const cx: f32 = @floatFromInt(x);
+                const cy: f32 = @floatFromInt(y);
+                const dx = (cx + 0.5) - center.x;
+                const dy = (cy + 0.5) - center.y;
+                const d = @sqrt(dx * dx + dy * dy);
+                // Cobertura do anel: 1 dentro de [inner, outer], borda AA.
+                const cov = @min(
+                    std.math.clamp(outer - d, 0, 1),
+                    std.math.clamp(d - inner, 0, 1),
+                );
+                if (cov > 0) {
+                    self.setAlpha(@intCast(x), @intCast(y), c, cov);
+                }
+            }
+        }
+    }
+
+    /// Contorno circular tracejado: alterna `dash_len` px de arco
+    /// (desenhados) e `gap_len` px (vazados), medidos ao longo da
+    /// circunferência. Fase 0 no ângulo 0 (eixo +X).
+    pub fn strokeCircleDashed(
+        self: *Self,
+        center: types.Vec2,
+        radius: f32,
+        thickness: f32,
+        dash_len: f32,
+        gap_len: f32,
+        clip: ?types.Rect,
+        c: types.Color,
+    ) void {
+        if (!std.math.isFinite(center.x) or !std.math.isFinite(center.y) or
+            !std.math.isFinite(radius) or radius < 0 or
+            !std.math.isFinite(thickness) or thickness <= 0 or
+            !std.math.isFinite(dash_len) or dash_len <= 0 or
+            !std.math.isFinite(gap_len) or gap_len <= 0) return;
+        const half = thickness / 2;
+        const outer = radius + half;
+        const inner = @max(0, radius - half);
+        const period = dash_len + gap_len;
+        const circumference = 2 * std.math.pi * radius;
+        // Se o perímetro cabe num único dash, desenha o anel inteiro.
+        const full_dash = circumference <= dash_len;
+        var y = @max(0, @as(i64, @intFromFloat(@floor(center.y - outer))));
+        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(center.y + outer))));
+        while (y < y_end) : (y += 1) {
+            var x = @max(0, @as(i64, @intFromFloat(@floor(center.x - outer))));
+            const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(center.x + outer))));
+            while (x < x_end) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                const cx: f32 = @floatFromInt(x);
+                const cy: f32 = @floatFromInt(y);
+                const dx = (cx + 0.5) - center.x;
+                const dy = (cy + 0.5) - center.y;
+                const d = @sqrt(dx * dx + dy * dy);
+                const cov = @min(
+                    std.math.clamp(outer - d, 0, 1),
+                    std.math.clamp(d - inner, 0, 1),
+                );
+                if (cov <= 0) continue;
+                // Fase ao longo do arco: ângulo medido desde +X.
+                const ang = std.math.atan2(dy, dx);
+                var arc = if (ang < 0) ang + 2 * std.math.pi else ang;
+                arc = arc * radius; // comprimento de arco
+                const phase = @mod(arc, period);
+                if (!full_dash and phase > dash_len) continue;
+                self.setAlpha(@intCast(x), @intCast(y), c, cov);
             }
         }
     }
@@ -443,6 +552,174 @@ pub const SoftwareFramebuffer = struct {
         }
     }
 
+    /// Preenchimento em gradiente RADIAL: `color0` no centro do `rect`,
+    /// `color1` na borda (distância `radius` do centro). Distâncias
+    /// acima de `radius` saturam em `color1`.
+    pub fn fillGradientRadial(
+        self: *Self,
+        r: types.Rect,
+        radius: f32,
+        color0: types.Color,
+        color1: types.Color,
+        clip: ?types.Rect,
+    ) void {
+        if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
+            !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
+            !std.math.isFinite(radius) or radius < 0) return;
+        if (r.w <= 0 or r.h <= 0) return;
+        const cx = r.x + r.w / 2;
+        const cy = r.y + r.h / 2;
+        // Raio efetivo: o maior entre o pedido e a meia-diagonal
+        // (para cobrir os cantos do rect).
+        const half_diag = @sqrt((r.w / 2) * (r.w / 2) + (r.h / 2) * (r.h / 2));
+        const eff_radius = if (radius > 0) radius else half_diag;
+        const x0 = @max(0, @as(i64, @intFromFloat(@floor(r.x))));
+        const y0 = @max(0, @as(i64, @intFromFloat(@floor(r.y))));
+        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(r.x + r.w))));
+        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(r.y + r.h))));
+        var y = y0;
+        while (y < y_end) : (y += 1) {
+            var x = x0;
+            while (x < x_end) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                const fx: f32 = @floatFromInt(x);
+                const fy: f32 = @floatFromInt(y);
+                const dx = (fx + 0.5) - cx;
+                const dy = (fy + 0.5) - cy;
+                const dist = @sqrt(dx * dx + dy * dy);
+                const t: f32 = if (eff_radius <= 0) 0 else std.math.clamp(dist / eff_radius, 0, 1);
+                const tq: u32 = @intFromFloat(@round(t * 255.0));
+                const c = types.Color{
+                    .r = lerpChannel(color0.r, color1.r, tq),
+                    .g = lerpChannel(color0.g, color1.g, tq),
+                    .b = lerpChannel(color0.b, color1.b, tq),
+                    .a = lerpChannel(color0.a, color1.a, tq),
+                };
+                self.set(@intCast(x), @intCast(y), c);
+            }
+        }
+    }
+
+    /// Preenchimento em gradiente CÔNICO: `color0` no ângulo
+    /// `start_angle` (rad desde +X, anti-horário), `color1` em
+    /// `start_angle + sweep`. O ângulo é projetado em [0, 2π).
+    pub fn fillGradientConic(
+        self: *Self,
+        r: types.Rect,
+        center: types.Vec2,
+        start_angle: f32,
+        sweep: f32,
+        color0: types.Color,
+        color1: types.Color,
+        clip: ?types.Rect,
+    ) void {
+        if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
+            !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
+            !std.math.isFinite(center.x) or !std.math.isFinite(center.y) or
+            !std.math.isFinite(start_angle) or !std.math.isFinite(sweep)) return;
+        if (r.w <= 0 or r.h <= 0) return;
+        const two_pi = 2 * std.math.pi;
+        // Normaliza o sweep para [0, 2π]. Um sweep de volta completa
+        // (|sweep| >= 2π) equivale a 2π (não 0) — evita que `@mod` de
+        // exatamente 2π por 2π resulte em zero.
+        var sw: f32 = undefined;
+        if (@abs(sweep) >= two_pi) {
+            sw = two_pi;
+        } else {
+            sw = @mod(sweep, two_pi);
+            if (sw < 0) sw += two_pi;
+        }
+        const x0 = @max(0, @as(i64, @intFromFloat(@floor(r.x))));
+        const y0 = @max(0, @as(i64, @intFromFloat(@floor(r.y))));
+        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(r.x + r.w))));
+        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(r.y + r.h))));
+        var y = y0;
+        while (y < y_end) : (y += 1) {
+            var x = x0;
+            while (x < x_end) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                const fx: f32 = @floatFromInt(x);
+                const fy: f32 = @floatFromInt(y);
+                const dx = (fx + 0.5) - center.x;
+                const dy = (fy + 0.5) - center.y;
+                // Ângulo anti-horário desde +X: atan2(dy, dx).
+                var ang = std.math.atan2(dy, dx);
+                if (ang < 0) ang += two_pi;
+                // Desloca para o ângulo inicial e normaliza.
+                var rel = @mod(ang - start_angle, two_pi);
+                if (rel < 0) rel += two_pi;
+                const t: f32 = if (sw <= 0) 0 else std.math.clamp(rel / sw, 0, 1);
+                const tq: u32 = @intFromFloat(@round(t * 255.0));
+                const c = types.Color{
+                    .r = lerpChannel(color0.r, color1.r, tq),
+                    .g = lerpChannel(color0.g, color1.g, tq),
+                    .b = lerpChannel(color0.b, color1.b, tq),
+                    .a = lerpChannel(color0.a, color1.a, tq),
+                };
+                self.set(@intCast(x), @intCast(y), c);
+            }
+        }
+    }
+
+    /// Reta tracejada entre `p0` e `p1`: alterna `dash_len` px de traço
+    /// e `gap_len` px de vazio, medidos ao longo da reta. Fase 0 em `p0`.
+    pub fn strokeLineDashed(
+        self: *Self,
+        p0: types.Vec2,
+        p1: types.Vec2,
+        thickness: f32,
+        dash_len: f32,
+        gap_len: f32,
+        clip: ?types.Rect,
+        c: types.Color,
+    ) void {
+        if (!std.math.isFinite(p0.x) or !std.math.isFinite(p0.y) or
+            !std.math.isFinite(p1.x) or !std.math.isFinite(p1.y) or
+            !std.math.isFinite(thickness) or thickness <= 0 or
+            !std.math.isFinite(dash_len) or dash_len <= 0 or
+            !std.math.isFinite(gap_len) or gap_len <= 0) return;
+        const dx = p1.x - p0.x;
+        const dy = p1.y - p0.y;
+        const len = @sqrt(dx * dx + dy * dy);
+        if (len <= 0) return;
+        const half = thickness / 2;
+        // Bounds: caixa da reta expandida pela meia-espessura.
+        const min_x = @min(p0.x, p1.x) - half;
+        const min_y = @min(p0.y, p1.y) - half;
+        const max_x = @max(p0.x, p1.x) + half;
+        const max_y = @max(p0.y, p1.y) + half;
+        const x0 = @max(0, @as(i64, @intFromFloat(@floor(min_x))));
+        const y0 = @max(0, @as(i64, @intFromFloat(@floor(min_y))));
+        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(max_x))));
+        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(max_y))));
+        const period = dash_len + gap_len;
+        var y = y0;
+        while (y < y_end) : (y += 1) {
+            var x = x0;
+            while (x < x_end) : (x += 1) {
+                if (!inClip(x, y, clip)) continue;
+                const fx: f32 = @as(f32, @floatFromInt(x)) + 0.5;
+                const fy: f32 = @as(f32, @floatFromInt(y)) + 0.5;
+                // Projeção do pixel na reta (t em [0,1]).
+                const t = std.math.clamp(
+                    ((fx - p0.x) * dx + (fy - p0.y) * dy) / (len * len),
+                    0,
+                    1,
+                );
+                // Distância perpendicular à reta.
+                const px = p0.x + dx * t;
+                const py = p0.y + dy * t;
+                const dist = @sqrt((fx - px) * (fx - px) + (fy - py) * (fy - py));
+                if (dist > half) continue;
+                // Fase do tracejado ao longo da reta.
+                const arc = t * len;
+                const phase = @mod(arc, period);
+                if (phase > dash_len) continue;
+                self.set(@intCast(x), @intCast(y), c);
+            }
+        }
+    }
+
     pub fn strokeRect(self: *Self, r: types.Rect, thickness: f32, clip: ?types.Rect, c: types.Color) void {
         if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
             !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
@@ -558,8 +835,13 @@ fn renderInternal(
                     .rect_outline => |c| fb.strokeRect(c.rect, c.thickness, mergeClip(clip, area), c.color),
                     .line => |c| fb.strokeLine(c.p0, c.p1, c.thickness, mergeClip(clip, area), c.color),
                     .circle_filled => |c| fb.fillCircle(c.center, c.radius, mergeClip(clip, area), c.color),
+                    .circle_outline => |c| fb.strokeCircle(c.center, c.radius, c.thickness, mergeClip(clip, area), c.color),
+                    .circle_dashed => |c| fb.strokeCircleDashed(c.center, c.radius, c.thickness, c.dash_len, c.gap_len, mergeClip(clip, area), c.color),
                     .rect_rounded => |c| fb.fillRoundRect(c.rect, c.radius, mergeClip(clip, area), c.color),
                     .rect_gradient => |c| fb.fillGradient(c.rect, c.p0, c.p1, c.color0, c.color1, mergeClip(clip, area)),
+                    .rect_gradient_radial => |c| fb.fillGradientRadial(c.rect, c.radius, c.color0, c.color1, mergeClip(clip, area)),
+                    .rect_gradient_conic => |c| fb.fillGradientConic(c.rect, c.center, c.start_angle, c.sweep, c.color0, c.color1, mergeClip(clip, area)),
+                    .line_dashed => |c| fb.strokeLineDashed(c.p0, c.p1, c.thickness, c.dash_len, c.gap_len, mergeClip(clip, area), c.color),
                     .rect_shadow => |c| fb.fillShadow(c.rect, c.radius, c.offset, c.blur, mergeClip(clip, area), c.color),
                     .blur => |c| fb.blurRegion(c.rect, c.radius, mergeClip(clip, area)),
                     else => unreachable,
@@ -1313,4 +1595,213 @@ test "renderRegion com região == viewport == framebuffer equivale ao integral" 
             try stdt.testing.expectEqual(full.get(x, y), region.get(x, y));
         }
     }
+}
+
+test "raster gradiente radial: centro→borda, clamp e degenerado" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+
+    // 5x5, centro (2,2), radius 2: t = dist/2.
+    var fb = try SoftwareFramebuffer.init(gpa, 5, 5);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+    fb.fillGradientRadial(
+        types.Rect.init(0, 0, 5, 5),
+        2,
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+        null,
+    );
+    // Centro: dist ~0 → preto.
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(2, 2));
+    // Borda do rect: dist >= 2 → branco saturado.
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb.get(0, 2));
+    // Ponto intermediário: dist ~1.41 → t ~0.707 → ~180.
+    const mid = fb.get(1, 2);
+    try stdt.testing.expect(mid[0] > 120 and mid[0] < 220);
+
+    // Raio 0 → color0 sólido em todo o rect.
+    var fb2 = try SoftwareFramebuffer.init(gpa, 3, 3);
+    defer fb2.deinit(gpa);
+    fb2.clear(types.Color.rgb(255, 255, 255));
+    fb2.fillGradientRadial(
+        types.Rect.init(0, 0, 3, 3),
+        0,
+        types.Color.rgb(10, 20, 30),
+        types.Color.rgb(200, 200, 200),
+        null,
+    );
+    try stdt.testing.expectEqual([4]u8{ 10, 20, 30, 255 }, fb2.get(1, 1));
+
+    // Entradas não-finitas saturam em no-op (framebuffer intacto).
+    var fb3 = try SoftwareFramebuffer.init(gpa, 2, 2);
+    defer fb3.deinit(gpa);
+    fb3.clear(types.Color.rgb(7, 8, 9));
+    fb3.fillGradientRadial(
+        types.Rect.init(0, 0, 2, 2),
+        std.math.nan(f32),
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+        null,
+    );
+    try stdt.testing.expectEqual([4]u8{ 7, 8, 9, 255 }, fb3.get(0, 0));
+}
+
+test "raster contorno de círculo e tracejado" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+
+    // Anel: centro vazado, borda pintada (espessura 3 → banda sólida
+    // entre r-1.5 e r+1.5).
+    var fb = try SoftwareFramebuffer.init(gpa, 9, 9);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+    fb.strokeCircle(types.Vec2.init(4, 4), 3, 3, null, types.Color.rgb(255, 255, 255));
+    // Centro (4,4) não é pintado (dist 0 < inner 1.5).
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(4, 4));
+    // Borda (4,1): dist ~2.55 → dentro da banda sólida.
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb.get(4, 1));
+
+    // Espessura 0 é no-op.
+    var fb2 = try SoftwareFramebuffer.init(gpa, 4, 4);
+    defer fb2.deinit(gpa);
+    fb2.clear(types.Color.rgb(0, 0, 0));
+    fb2.strokeCircle(types.Vec2.init(2, 2), 1, 0, null, types.Color.rgb(255, 255, 255));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb2.get(2, 0));
+
+    // Tracejado: pinta algum pixel do anel e deixa outro vazado.
+    var fb3 = try SoftwareFramebuffer.init(gpa, 21, 21);
+    defer fb3.deinit(gpa);
+    fb3.clear(types.Color.rgb(0, 0, 0));
+    fb3.strokeCircleDashed(types.Vec2.init(10, 10), 8, 1, 2, 4, null, types.Color.rgb(255, 255, 255));
+    var painted: usize = 0;
+    var y: usize = 0;
+    while (y < 21) : (y += 1) {
+        var x: usize = 0;
+        while (x < 21) : (x += 1) {
+            if (fb3.get(@intCast(x), @intCast(y))[0] > 0) painted += 1;
+        }
+    }
+    try stdt.testing.expect(painted > 0);
+    try stdt.testing.expect(painted < 21 * 21); // não preenche tudo
+
+    // dash_len 0 é no-op.
+    var fb4 = try SoftwareFramebuffer.init(gpa, 6, 6);
+    defer fb4.deinit(gpa);
+    fb4.clear(types.Color.rgb(0, 0, 0));
+    fb4.strokeCircleDashed(types.Vec2.init(3, 3), 2, 1, 0, 1, null, types.Color.rgb(255, 255, 255));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb4.get(3, 1));
+}
+
+test "raster gradiente cônico: ângulo inicial e sweep" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+
+    // 5x5, centro (2,2): ângulo 0 = +X (direita), sweep 2π.
+    var fb = try SoftwareFramebuffer.init(gpa, 5, 5);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+    fb.fillGradientConic(
+        types.Rect.init(0, 0, 5, 5),
+        types.Vec2.init(2, 2),
+        0,
+        2 * std.math.pi,
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+        null,
+    );
+    // Centro exato do gradiente (2,2) → ângulo indefinido; usa o
+    // fallback t=0 (color0).
+    // Pixel à direita (4,2): centro do pixel em (4.5,2.5) → ângulo
+    // ~0.197 rad → t ~0.031 → valor baixo (~8).
+    const right = fb.get(4, 2);
+    try stdt.testing.expect(right[0] < 20);
+    // Pixel acima (2,4): ângulo ~1.373 rad → t ~0.219 → ~56.
+    const up = fb.get(2, 4);
+    try stdt.testing.expect(up[0] > 40 and up[0] < 90);
+
+    // Sweep zero → color0 sólido.
+    var fb2 = try SoftwareFramebuffer.init(gpa, 3, 3);
+    defer fb2.deinit(gpa);
+    fb2.clear(types.Color.rgb(255, 255, 255));
+    fb2.fillGradientConic(
+        types.Rect.init(0, 0, 3, 3),
+        types.Vec2.init(1, 1),
+        0,
+        0,
+        types.Color.rgb(10, 20, 30),
+        types.Color.rgb(200, 200, 200),
+        null,
+    );
+    try stdt.testing.expectEqual([4]u8{ 10, 20, 30, 255 }, fb2.get(2, 0));
+
+    // Entradas não-finitas saturam em no-op.
+    var fb3 = try SoftwareFramebuffer.init(gpa, 2, 2);
+    defer fb3.deinit(gpa);
+    fb3.clear(types.Color.rgb(7, 8, 9));
+    fb3.fillGradientConic(
+        types.Rect.init(0, 0, 2, 2),
+        types.Vec2.init(1, 1),
+        std.math.nan(f32),
+        1,
+        types.Color.rgb(0, 0, 0),
+        types.Color.rgb(255, 255, 255),
+        null,
+    );
+    try stdt.testing.expectEqual([4]u8{ 7, 8, 9, 255 }, fb3.get(0, 0));
+}
+
+test "raster linha tracejada: alternância e no-op" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+
+    // Reta horizontal 0..8, dash 2, gap 2: pixels em x=0,1 (dash),
+    // x=2,3 (gap), x=4,5 (dash)...
+    var fb = try SoftwareFramebuffer.init(gpa, 8, 1);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+    fb.strokeLineDashed(
+        types.Vec2.init(0, 0),
+        types.Vec2.init(8, 0),
+        1,
+        2,
+        2,
+        null,
+        types.Color.rgb(255, 255, 255),
+    );
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb.get(1, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(2, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(3, 0));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb.get(4, 0));
+
+    // dash_len 0 é no-op.
+    var fb2 = try SoftwareFramebuffer.init(gpa, 4, 1);
+    defer fb2.deinit(gpa);
+    fb2.clear(types.Color.rgb(0, 0, 0));
+    fb2.strokeLineDashed(
+        types.Vec2.init(0, 0),
+        types.Vec2.init(4, 0),
+        1,
+        0,
+        2,
+        null,
+        types.Color.rgb(255, 255, 255),
+    );
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb2.get(0, 0));
+
+    // p0 == p1 (len 0) é no-op.
+    var fb3 = try SoftwareFramebuffer.init(gpa, 4, 1);
+    defer fb3.deinit(gpa);
+    fb3.clear(types.Color.rgb(0, 0, 0));
+    fb3.strokeLineDashed(
+        types.Vec2.init(1, 0),
+        types.Vec2.init(1, 0),
+        1,
+        2,
+        2,
+        null,
+        types.Color.rgb(255, 255, 255),
+    );
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb3.get(1, 0));
 }

@@ -113,6 +113,61 @@ pub export fn zyntra_version_prerelease() callconv(.c) [*:0]const u8 {
     return types_mod.version_prerelease;
 }
 
+// ---------------------------------------------------------------------------
+// Docking System C-API function declarations (M113)
+// ---------------------------------------------------------------------------
+pub extern fn zyntra_dock_create(layout: c_int, out: *?void) callconv(.c) ct.ZyntraResult;
+pub extern fn zyntra_dock_destroy(handle: ?*void) callconv(.c) void;
+pub extern fn zyntra_dock_zone(zone: c_int) callconv(.c) ct.ZyntraDockZone;
+pub extern fn zyntra_dock_style(style: *ct.ZyntraDockStyle) callconv(.c) void;
+
+// ---------------------------------------------------------------------------
+// Draw moderno API function declarations (M114)
+// ---------------------------------------------------------------------------
+/// Preenchimento em gradiente radial: `color0` no centro, `color1` na borda,
+/// contido em `rect`.
+pub export fn zyntra_draw_gradient_radial(
+    handle: ?*ZyntraContext,
+    rect: ct.ZyntraRect,
+    radius: f32,
+    color0: ct.ZyntraColor,
+    color1: ct.ZyntraColor,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const ctx = toCtx(h);
+    return pushDraw(ctx.draw.rectGradientRadial(
+        ctx.allocator,
+        toRect(rect),
+        radius,
+        toColor(color0),
+        toColor(color1),
+    ));
+}
+
+/// Preenchimento em gradiente cônico: `color0` no ângulo `start_angle`
+/// (radianos desde +X, anti-horário), `color1` em `start_angle + sweep`.
+pub export fn zyntra_draw_gradient_conic(
+    handle: ?*ZyntraContext,
+    rect: ct.ZyntraRect,
+    center: ct.ZyntraVec2,
+    start_angle: f32,
+    sweep: f32,
+    color0: ct.ZyntraColor,
+    color1: ct.ZyntraColor,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const ctx = toCtx(h);
+    return pushDraw(ctx.draw.rectGradientConic(
+        ctx.allocator,
+        toRect(rect),
+        toVec2(center),
+        start_angle,
+        sweep,
+        toColor(color0),
+        toColor(color1),
+    ));
+}
+
 pub export fn zyntra_context_create(viewport: ct.ZyntraRect, out_handle: ?*?*ZyntraContext) callconv(.c) ct.ZyntraResult {
     const out = out_handle orelse return .invalid_argument;
     if (viewport.w < 0 or viewport.h < 0) return .invalid_argument;
@@ -358,6 +413,30 @@ pub export fn zyntra_draw_line(
     ));
 }
 
+/// Reta tracejada entre `p0` e `p1`: `dash_len` px de traço alternando
+/// com `gap_len` px de vazio.
+pub export fn zyntra_draw_line_dashed(
+    handle: ?*ZyntraContext,
+    p0: ct.ZyntraVec2,
+    p1: ct.ZyntraVec2,
+    color: ct.ZyntraColor,
+    thickness: f32,
+    dash_len: f32,
+    gap_len: f32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const ctx = toCtx(h);
+    return pushDraw(ctx.draw.lineDashed(
+        ctx.allocator,
+        toVec2(p0),
+        toVec2(p1),
+        toColor(color),
+        thickness,
+        dash_len,
+        gap_len,
+    ));
+}
+
 pub export fn zyntra_draw_circle_filled(
     handle: ?*ZyntraContext,
     center: ct.ZyntraVec2,
@@ -367,6 +446,34 @@ pub export fn zyntra_draw_circle_filled(
     const h = checkHandle(handle) catch return .invalid_argument;
     const ctx = toCtx(h);
     return pushDraw(ctx.draw.circleFilled(ctx.allocator, toVec2(center), radius, toColor(color)));
+}
+
+/// Círculo com contorno de `thickness` px.
+pub export fn zyntra_draw_circle_outline(
+    handle: ?*ZyntraContext,
+    center: ct.ZyntraVec2,
+    radius: f32,
+    color: ct.ZyntraColor,
+    thickness: f32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const ctx = toCtx(h);
+    return pushDraw(ctx.draw.circleOutline(ctx.allocator, toVec2(center), radius, toColor(color), thickness));
+}
+
+/// Círculo tracejado: `dash_len` px ligados, `gap_len` px desligados.
+pub export fn zyntra_draw_circle_dashed(
+    handle: ?*ZyntraContext,
+    center: ct.ZyntraVec2,
+    radius: f32,
+    color: ct.ZyntraColor,
+    thickness: f32,
+    dash_len: f32,
+    gap_len: f32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const ctx = toCtx(h);
+    return pushDraw(ctx.draw.circleDashed(ctx.allocator, toVec2(center), radius, toColor(color), thickness, dash_len, gap_len));
 }
 
 /// Retângulo de cantos arredondados (`radius` clampado a `min(w,h)/2`);
@@ -2827,4 +2934,137 @@ test "C-ABI campos de texto: digitação, caret e seleção" {
     try eq(bad, zyntra_widget_text_area(handle, ta_id, ta_bounds, &ta_buf, ta_buf.len, &ta_len, &ta_cursor, &ta_anchor, null, 10, &tis, null));
     try eq(bad, zyntra_widget_text_area(handle, ta_id, ta_bounds, &ta_buf, ta_buf.len, &ta_len, &ta_cursor, &ta_anchor, &ta_scroll, 10, null, null));
     try eq(bad, zyntra_widget_text_area(handle, ta_id, ta_bounds, &ta_buf, ta_buf.len, &ta_len, null, &ta_anchor, &ta_scroll, 10, &tis, null));
+}
+
+// ---------------------------------------------------------------------------
+// M114 — Draw moderno: gradiente radial, contorno e círculo tracejado
+// ---------------------------------------------------------------------------
+
+test "C-ABI draw: gradiente radial aceita e rejeita entradas inválidas" {
+    const stdt = @import("std");
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_context_create(.{ .x = 0, .y = 0, .w = 200, .h = 100 }, &handle),
+    );
+    defer zyntra_context_destroy(handle);
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_begin_frame(handle));
+
+    const white: ct.ZyntraColor = .{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    const dark: ct.ZyntraColor = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
+    const rect: ct.ZyntraRect = .{ .x = 10, .y = 10, .w = 40, .h = 40 };
+
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_draw_gradient_radial(handle, rect, 20, white, dark),
+    );
+    // Handle nulo é invalid_argument.
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_argument,
+        zyntra_draw_gradient_radial(null, rect, 20, white, dark),
+    );
+    // Raio negativo é invalid_command (rejeitado pelo isValid).
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_command,
+        zyntra_draw_gradient_radial(handle, rect, -1, white, dark),
+    );
+
+    var n: usize = 0;
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_draw_count(handle, &n));
+    try stdt.testing.expectEqual(@as(usize, 1), n);
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI draw: contorno e círculo tracejado" {
+    const stdt = @import("std");
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_context_create(.{ .x = 0, .y = 0, .w = 200, .h = 100 }, &handle),
+    );
+    defer zyntra_context_destroy(handle);
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_begin_frame(handle));
+
+    const white: ct.ZyntraColor = .{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    const center: ct.ZyntraVec2 = .{ .x = 30, .y = 20 };
+
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_draw_circle_outline(handle, center, 10, white, 2),
+    );
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_draw_circle_dashed(handle, center, 12, white, 1.5, 4, 2),
+    );
+
+    // Inválidos rejeitados sem enfileirar:
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_command,
+        zyntra_draw_circle_outline(handle, center, 10, white, 0),
+    );
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_command,
+        zyntra_draw_circle_dashed(handle, center, 12, white, 1, 0, 2),
+    );
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_command,
+        zyntra_draw_circle_dashed(handle, center, 12, white, 1, 4, -1),
+    );
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_argument,
+        zyntra_draw_circle_outline(null, center, 10, white, 2),
+    );
+
+    var n: usize = 0;
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_draw_count(handle, &n));
+    try stdt.testing.expectEqual(@as(usize, 2), n);
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI draw: gradiente cônico e linha tracejada" {
+    const stdt = @import("std");
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_context_create(.{ .x = 0, .y = 0, .w = 200, .h = 100 }, &handle),
+    );
+    defer zyntra_context_destroy(handle);
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_begin_frame(handle));
+
+    const white: ct.ZyntraColor = .{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    const dark: ct.ZyntraColor = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
+    const rect: ct.ZyntraRect = .{ .x = 0, .y = 0, .w = 40, .h = 40 };
+    const center: ct.ZyntraVec2 = .{ .x = 20, .y = 20 };
+
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_draw_gradient_conic(handle, rect, center, 0, 6.2831855, white, dark),
+    );
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.ok,
+        zyntra_draw_line_dashed(handle, .{ .x = 0, .y = 0 }, .{ .x = 40, .y = 40 }, white, 2, 4, 2),
+    );
+
+    // Inválidos rejeitados:
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_command,
+        zyntra_draw_gradient_conic(handle, rect, center, std.math.nan(f32), 1, white, dark),
+    );
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_command,
+        zyntra_draw_line_dashed(handle, .{ .x = 0, .y = 0 }, .{ .x = 40, .y = 40 }, white, 2, 0, 2),
+    );
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_command,
+        zyntra_draw_line_dashed(handle, .{ .x = 0, .y = 0 }, .{ .x = 40, .y = 40 }, white, 2, 4, -1),
+    );
+    try stdt.testing.expectEqual(
+        ct.ZyntraResult.invalid_argument,
+        zyntra_draw_gradient_conic(null, rect, center, 0, 1, white, dark),
+    );
+
+    var n: usize = 0;
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_draw_count(handle, &n));
+    try stdt.testing.expectEqual(@as(usize, 2), n);
+    try stdt.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_end_frame(handle));
 }

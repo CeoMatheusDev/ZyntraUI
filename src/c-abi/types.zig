@@ -11,6 +11,7 @@ const raster_mod = @import("../software/raster.zig");
 const metrics_mod = @import("../text/metrics.zig");
 const style_mod = @import("../style/style.zig");
 const event_mod = @import("../event/event.zig");
+const dock_layout_mod = @import("../dock/layout.zig");
 
 /// Teclas normalizadas na fronteira C (espelha `event.Key`): os valores são
 /// os mesmos da API Zig e estáveis — teclas novas entram depois das atuais.
@@ -51,6 +52,16 @@ comptime {
             @compileError("ZyntraKey sem par em event.Key: " ++ name);
         if (@backingInt(zig_key) != value) {
             @compileError("ZyntraKey com valor divergente de event.Key: " ++ name);
+        }
+    }
+    // Trava: toda zona da fronteira C tem o mesmo nome e valor em `DockZone`.
+    @setEvalBranchQuota(50_000);
+    const dinfo = @typeInfo(ZyntraDockZone).@"enum";
+    for (dinfo.field_names, dinfo.field_values) |name, value| {
+        const zig_zone = std.meta.stringToEnum(dock_layout_mod.DockZone, name) orelse
+            @compileError("ZyntraDockZone sem par em DockZone: " ++ name);
+        if (@backingInt(zig_zone) != value) {
+            @compileError("ZyntraDockZone com valor divergente de DockZone: " ++ name);
         }
     }
     // Trava: as máscaras documentadas coincidem com os bits de `Modifiers`.
@@ -318,6 +329,78 @@ pub const ZyntraTextAreaResult = extern struct {
     len: usize = 0,
 };
 
+/// Zona de acoplamento de um drop (espelha `dock.DockZone`; mesmos valores).
+pub const ZyntraDockZone = enum(c_int) {
+    left = 0,
+    right = 1,
+    top = 2,
+    bottom = 3,
+    center = 4,
+};
+
+/// Grupo de painéis acoplados como abas (espelha `dock.DockGroup`):
+/// `panes[0..count]` em ordem e `active` é o índice da aba visível.
+pub const ZyntraDockGroup = extern struct {
+    panes: [dock_layout_mod.DockGroup.max_tabs]u16 = .{ 0, 0, 0, 0 },
+    count: u8 = 0,
+    active: u8 = 0,
+};
+
+/// Grupo da folha `node` + rect onde o chamador desenha o corpo/abas
+/// (espelha `dock.DockPaneInfo`).
+pub const ZyntraDockPaneInfo = extern struct {
+    /// Índice do nó da folha (aceito por `zyntra_dock_group`/
+    /// `zyntra_dock_set_active_tab`).
+    node: u8 = 0,
+    group: ZyntraDockGroup = .{},
+    rect: ZyntraRect = .{},
+};
+
+/// Divisória de um split (espelha `dock.DockSplitInfo`). `orientation` usa
+/// os valores de `ZYNTRA_HORIZONTAL`/`ZYNTRA_VERTICAL` (1 byte, como no
+/// layout interno).
+pub const ZyntraDockSplitInfo = extern struct {
+    node: u8 = 0,
+    orientation: u8 = 0,
+    ratio: f32 = 0,
+    rect: ZyntraRect = .{},
+    divider: ZyntraRect = .{},
+};
+
+/// Prévia/aplicação de um drop de painel: `pane` arrastado sobre `target`
+/// na `zone`, com o rect do realce.
+pub const ZyntraDockDrop = extern struct {
+    pane: u16 = 0,
+    target: u16 = 0,
+    zone: ZyntraDockZone = .center,
+    rect: ZyntraRect = .{},
+};
+
+/// Resultado do frame de `zyntra_widget_dock_view`. Índices opcionais são
+/// `i64` com `-1` = nenhum; `drop`/`dropped` valem só com `has_drop`/
+/// `has_dropped` verdadeiros.
+pub const ZyntraDockViewResult = extern struct {
+    /// Grupos escritos no buffer de panes do chamador.
+    pane_count: usize = 0,
+    /// Divisórias do layout (uma por split).
+    split_count: usize = 0,
+    /// A geometria mudou neste frame (arraste/teclado/drop).
+    changed: bool = false,
+    has_drop: bool = false,
+    has_dropped: bool = false,
+    /// Índice (ordem de `zyntra_dock_splits`) da divisória sob o mouse.
+    hovered: i64 = -1,
+    /// Índice da divisória em arraste.
+    dragging: i64 = -1,
+    /// Zona de acoplamento sob o cursor (prévia), se houver.
+    drop: ZyntraDockDrop = .{},
+    /// Drop aplicado neste frame (o chamador limpa o estado de arraste).
+    dropped: ZyntraDockDrop = .{},
+};
+
+/// Estilo do docking (mesmo `DockStyle` do tema embutido).
+pub const ZyntraDockStyle = style_mod.DockStyle;
+
 // Trava de ABI: falhe o build se o layout mudar.
 comptime {
     if (@sizeOf(ZyntraResult) != @sizeOf(c_int)) @compileError("ZyntraResult ABI drift");
@@ -359,6 +442,16 @@ comptime {
     if (@sizeOf(ZyntraTextInputStyle) != 32 or @alignOf(ZyntraTextInputStyle) != 4) @compileError("ZyntraTextInputStyle ABI drift");
     if (@sizeOf(ZyntraTextInputResult) != 16 or @alignOf(ZyntraTextInputResult) != 8) @compileError("ZyntraTextInputResult ABI drift");
     if (@sizeOf(ZyntraTextAreaResult) != 16 or @alignOf(ZyntraTextAreaResult) != 8) @compileError("ZyntraTextAreaResult ABI drift");
+    if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
+        @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
+    {
+        @compileError("ZyntraDockGroup ABI drift");
+    }
+    if (@sizeOf(ZyntraDockPaneInfo) != 28 or @alignOf(ZyntraDockPaneInfo) != 4) @compileError("ZyntraDockPaneInfo ABI drift");
+    if (@sizeOf(ZyntraDockSplitInfo) != 40 or @alignOf(ZyntraDockSplitInfo) != 4) @compileError("ZyntraDockSplitInfo ABI drift");
+    if (@sizeOf(ZyntraDockDrop) != 24 or @alignOf(ZyntraDockDrop) != 4) @compileError("ZyntraDockDrop ABI drift");
+    if (@sizeOf(ZyntraDockViewResult) != 88 or @alignOf(ZyntraDockViewResult) != 8) @compileError("ZyntraDockViewResult ABI drift");
+    if (@sizeOf(ZyntraDockStyle) != 36 or @alignOf(ZyntraDockStyle) != 4) @compileError("ZyntraDockStyle ABI drift");
     if (@sizeOf(ZyntraVec2) != 8 or @alignOf(ZyntraVec2) != 4) @compileError("ZyntraVec2 ABI drift");
     if (@sizeOf(ZyntraSize) != 8 or @alignOf(ZyntraSize) != 4) @compileError("ZyntraSize ABI drift");
     if (@sizeOf(ZyntraRect) != 16 or @alignOf(ZyntraRect) != 4) @compileError("ZyntraRect ABI drift");
@@ -393,6 +486,16 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraTextInputStyle));
     try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraTextInputResult));
     try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraTextAreaResult));
+    // Docking: espelhos do modelo e do resultado da área interativa.
+    try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));
+    try stdt.testing.expectEqual(@as(usize, 28), @sizeOf(ZyntraDockPaneInfo));
+    try stdt.testing.expectEqual(@as(usize, 40), @sizeOf(ZyntraDockSplitInfo));
+    try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraDockDrop));
+    try stdt.testing.expectEqual(@as(usize, 88), @sizeOf(ZyntraDockViewResult));
+    try stdt.testing.expectEqual(@as(usize, 36), @sizeOf(ZyntraDockStyle));
+    try stdt.testing.expectEqual(@as(i32, 0), @backingInt(ZyntraDockZone.left));
+    try stdt.testing.expectEqual(@as(i32, 4), @backingInt(ZyntraDockZone.center));
+    try stdt.testing.expect(std.enums.fromInt(ZyntraDockZone, 9) == null);
     try stdt.testing.expectEqual(@as(c_int, 0), @backingInt(ZyntraResult.ok));
     try stdt.testing.expectEqual(@as(i32, 0), @backingInt(ZyntraThemeKind.dark));
     try stdt.testing.expectEqual(@as(i32, 1), @backingInt(ZyntraThemeKind.light));

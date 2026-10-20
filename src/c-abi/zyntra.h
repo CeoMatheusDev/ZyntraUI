@@ -140,8 +140,17 @@ ZyntraResult zyntra_draw_rect_outline(ZyntraContext *handle, ZyntraRect rect, Zy
     float thickness);
 ZyntraResult zyntra_draw_line(ZyntraContext *handle, ZyntraVec2 p0, ZyntraVec2 p1,
     ZyntraColor color, float thickness);
+/* Reta tracejada: dash_len px de traço alternando com gap_len px de vazio. */
+ZyntraResult zyntra_draw_line_dashed(ZyntraContext *handle, ZyntraVec2 p0, ZyntraVec2 p1,
+    ZyntraColor color, float thickness, float dash_len, float gap_len);
 ZyntraResult zyntra_draw_circle_filled(ZyntraContext *handle, ZyntraVec2 center, float radius,
     ZyntraColor color);
+/* Contorno circular de thickness px (banda entre r-t/2 e r+t/2). */
+ZyntraResult zyntra_draw_circle_outline(ZyntraContext *handle, ZyntraVec2 center, float radius,
+    ZyntraColor color, float thickness);
+/* Círculo tracejado: dash_len px ligados, gap_len px desligados. */
+ZyntraResult zyntra_draw_circle_dashed(ZyntraContext *handle, ZyntraVec2 center, float radius,
+    ZyntraColor color, float thickness, float dash_len, float gap_len);
 /* Cantos arredondados (SDF anti-serrilhado no backend de referência);
  * radius é clampado a min(w,h)/2. */
 ZyntraResult zyntra_draw_rect_rounded(ZyntraContext *handle, ZyntraRect rect, float radius,
@@ -149,6 +158,13 @@ ZyntraResult zyntra_draw_rect_rounded(ZyntraContext *handle, ZyntraRect rect, fl
 /* Gradiente linear: color0 em p0, color1 em p1, contido em rect. */
 ZyntraResult zyntra_draw_rect_gradient(ZyntraContext *handle, ZyntraRect rect, ZyntraVec2 p0,
     ZyntraVec2 p1, ZyntraColor color0, ZyntraColor color1);
+/* Gradiente radial: color0 no centro do rect, color1 na borda (radius). */
+ZyntraResult zyntra_draw_gradient_radial(ZyntraContext *handle, ZyntraRect rect, float radius,
+    ZyntraColor color0, ZyntraColor color1);
+/* Gradiente cônico: color0 no ângulo start_angle (rad desde +X, anti-horário),
+ * color1 em start_angle + sweep. */
+ZyntraResult zyntra_draw_gradient_conic(ZyntraContext *handle, ZyntraRect rect,
+    ZyntraVec2 center, float start_angle, float sweep, ZyntraColor color0, ZyntraColor color1);
 /* Sombra projetada da silhueta arredondada (não desenha a forma). */
 ZyntraResult zyntra_draw_rect_shadow(ZyntraContext *handle, ZyntraRect rect, float radius,
     ZyntraVec2 offset, float blur, ZyntraColor color);

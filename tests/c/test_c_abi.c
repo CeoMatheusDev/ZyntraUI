@@ -117,16 +117,27 @@ int main(void) {
         CHECK(zyntra_draw_rect_outline(ctx, box, white, 1.5f));
         CHECK(zyntra_draw_line(ctx, l0, l1, white, 2.0f));
         CHECK(zyntra_draw_circle_filled(ctx, c, 8.0f, white));
+        CHECK(zyntra_draw_circle_outline(ctx, c, 8.0f, white, 2.0f));
+        CHECK(zyntra_draw_circle_dashed(ctx, c, 10.0f, white, 1.5f, 4.0f, 2.0f));
+        CHECK(zyntra_draw_gradient_radial(ctx, box, 20.0f, white, dark));
+        CHECK(zyntra_draw_gradient_conic(ctx, box, c, 0.0f, 6.2831855f, white, dark));
+        CHECK(zyntra_draw_line_dashed(ctx, l0, l1, white, 2.0f, 4.0f, 2.0f));
         CHECK(zyntra_draw_blur(ctx, box, 3.0f));
         CHECK(zyntra_draw_clip_reset(ctx));
 
         /* Inválidos não enfileiram (contagem preservada). */
         assert(zyntra_draw_rect_rounded(ctx, box, -1.0f, white) == ZYNTRA_INVALID_COMMAND);
         assert(zyntra_draw_rect_outline(ctx, box, white, 0.0f) == ZYNTRA_INVALID_COMMAND);
+        assert(zyntra_draw_circle_outline(ctx, c, 8.0f, white, 0.0f) == ZYNTRA_INVALID_COMMAND);
+        assert(zyntra_draw_circle_dashed(ctx, c, 8.0f, white, 1.0f, 0.0f, 2.0f) == ZYNTRA_INVALID_COMMAND);
+        assert(zyntra_draw_circle_dashed(ctx, c, 8.0f, white, 1.0f, 4.0f, 0.0f) == ZYNTRA_INVALID_COMMAND);
+        assert(zyntra_draw_gradient_radial(ctx, box, -1.0f, white, dark) == ZYNTRA_INVALID_COMMAND);
+        assert(zyntra_draw_gradient_conic(ctx, box, c, 0.0f, 0.0f / 0.0f, white, dark) == ZYNTRA_INVALID_COMMAND);
+        assert(zyntra_draw_line_dashed(ctx, l0, l1, white, 2.0f, 0.0f, 2.0f) == ZYNTRA_INVALID_COMMAND);
         assert(zyntra_draw_blur(ctx, box, 3.0f) == ZYNTRA_OK);
 
         CHECK(zyntra_draw_count(ctx, &modern));
-        assert(modern == 11); /* 10 + o blur extra acima */
+        assert(modern == 16); /* 10 base + circle_outline + circle_dashed + radial + conic + dashed + blur */
 
         CHECK(zyntra_text_measure("abc", 3, 10.0f, &mw, &mh));
         assert(mw > 0.0f && mh > 0.0f);

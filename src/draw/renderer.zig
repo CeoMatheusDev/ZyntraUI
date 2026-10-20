@@ -51,6 +51,33 @@ pub fn commandBounds(cmd: commands.DrawCommand) ?types.Rect {
                 .h = c.radius * 2,
             };
         },
+        .circle_outline => |c| {
+            const r = c.radius + c.thickness / 2;
+            return .{
+                .x = c.center.x - r,
+                .y = c.center.y - r,
+                .w = r * 2,
+                .h = r * 2,
+            };
+        },
+        .circle_dashed => |c| {
+            const r = c.radius + c.thickness / 2;
+            return .{
+                .x = c.center.x - r,
+                .y = c.center.y - r,
+                .w = r * 2,
+                .h = r * 2,
+            };
+        },
+        .rect_gradient_radial => |c| return c.rect,
+        .rect_gradient_conic => |c| return c.rect,
+        .line_dashed => |c| {
+            const x = @min(c.p0.x, c.p1.x);
+            const y = @min(c.p0.y, c.p1.y);
+            const w = @abs(c.p1.x - c.p0.x) + c.thickness;
+            const h = @abs(c.p1.y - c.p0.y) + c.thickness;
+            return .{ .x = x - c.thickness / 2, .y = y - c.thickness / 2, .w = w, .h = h };
+        },
         .clip => |c| {
             if (c.null_rect) return null;
             return c.rect;
