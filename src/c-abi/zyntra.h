@@ -1072,6 +1072,90 @@ ZyntraResult zyntra_widget_drag_ghost(ZyntraContext *handle,
     const ZyntraDragGhostStyle *style, float size,
     ZyntraDragGhostResult *out_result);
 
+/* ------------------------------------------------------------------ */
+/* Barras de composição (M118): toolbar e statusbar                   */
+/* ------------------------------------------------------------------ */
+
+/* Estado de posicionamento do chamador. Não edite os campos: receba de
+ * zyntra_widget_toolbar e passe de volta aos helpers zyntra_toolbar_*. */
+typedef struct ZyntraToolbar {
+    ZyntraRect content;
+    float item_h;
+    float spacing;
+    float cursor;
+    bool overflowed;
+} ZyntraToolbar;
+
+/* Estado de posicionamento do chamador (cursores esquerdo/direito). */
+typedef struct ZyntraStatusBar {
+    ZyntraRect content;
+    float item_h;
+    float spacing;
+    float left_cursor;
+    float right_x;
+    bool overflowed;
+} ZyntraStatusBar;
+
+typedef struct ZyntraToolbarStyle {
+    ZyntraColor bg;
+    ZyntraColor border;
+    float border_width;
+    float padding_x;
+    float padding_y;
+    float spacing;
+    float item_height;
+} ZyntraToolbarStyle;
+
+typedef struct ZyntraStatusBarStyle {
+    ZyntraColor bg;
+    ZyntraColor border;
+    float border_width;
+    float padding_x;
+    float padding_y;
+    float spacing;
+    float item_height;
+} ZyntraStatusBarStyle;
+
+ZyntraResult zyntra_style_toolbar(int32_t theme_kind, ZyntraToolbarStyle *out_style);
+ZyntraResult zyntra_style_status_bar(int32_t theme_kind, ZyntraStatusBarStyle *out_style);
+
+/* Desenha o chrome e devolve o estado de posicionamento em `out_bar`. */
+ZyntraResult zyntra_widget_toolbar(ZyntraContext *handle, ZyntraRect bounds,
+    const ZyntraToolbarStyle *style, ZyntraToolbar *out_bar);
+
+/* Próximo item: `width` é clampada ao restante; inválida/maior marca
+ * `overflowed`. `out_rect` é obrigatório. */
+ZyntraResult zyntra_toolbar_next_item(ZyntraToolbar *bar, float width,
+    ZyntraRect *out_rect);
+
+/* Espaço horizontal restante na faixa de itens. */
+ZyntraResult zyntra_toolbar_remaining(const ZyntraToolbar *bar,
+    float *out_remaining);
+
+/* Divisor vertical entre grupos (reusa o separador), avançando o estado. */
+ZyntraResult zyntra_toolbar_separator(ZyntraContext *handle,
+    ZyntraToolbar *bar, const ZyntraSeparatorStyle *style);
+
+ZyntraResult zyntra_widget_status_bar(ZyntraContext *handle, ZyntraRect bounds,
+    const ZyntraStatusBarStyle *style, ZyntraStatusBar *out_bar);
+
+ZyntraResult zyntra_status_bar_next_item(ZyntraStatusBar *bar, float width,
+    ZyntraRect *out_rect);
+ZyntraResult zyntra_status_bar_next_right(ZyntraStatusBar *bar, float width,
+    ZyntraRect *out_rect);
+ZyntraResult zyntra_status_bar_remaining(const ZyntraStatusBar *bar,
+    float *out_remaining);
+
+/* Segmento de texto (1 linha) à esquerda; `text` é emprestado só na chamada
+ * e `out_rect` é opcional. */
+ZyntraResult zyntra_status_bar_text(ZyntraContext *handle, ZyntraStatusBar *bar,
+    const char *text, size_t text_len, float size, ZyntraColor color,
+    ZyntraRect *out_rect);
+
+/* Divisor vertical entre segmentos (lado esquerdo), avançando o estado. */
+ZyntraResult zyntra_status_bar_separator(ZyntraContext *handle,
+    ZyntraStatusBar *bar, const ZyntraSeparatorStyle *style);
+
 #ifdef __cplusplus
 }
 #endif

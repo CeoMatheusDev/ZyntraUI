@@ -574,6 +574,53 @@ zyntra_widget_drag_ghost(ctx, &gs, 12, &gres);
   não-UTF8 ou com ponteiro nulo e `len > 0`, estilo inválido e fonte
   (`size`) ≤ 0/não-finita.
 
+### Décimo lote (M118): toolbar e statusbar
+
+As barras são **composição leve**: desenham o chrome, devolvem a área útil e
+um estado de posicionamento **detido pelo chamador**; o conteúdo dos itens
+continua sendo desenhado por `button`, `label`, `text_input`, etc.
+
+```c
+ZyntraToolbarStyle ts;
+zyntra_style_toolbar(ZYNTRA_THEME_DARK, &ts);
+
+ZyntraToolbar bar;
+zyntra_widget_toolbar(ctx, (ZyntraRect){0, 0, 200, 40}, &ts, &bar);
+
+ZyntraRect item;
+zyntra_toolbar_next_item(&bar, 50, &item);   /* item em (8, 6, 50, 28) */
+zyntra_button(ctx, btn_id, item, "Abrir", ...);
+
+zyntra_toolbar_separator(ctx, &bar, &sep);
+zyntra_toolbar_next_item(&bar, 30, &item);   /* … */
+
+float restante;
+zyntra_toolbar_remaining(&bar, &restante);
+```
+
+* `zyntra_widget_toolbar`/`zyntra_widget_status_bar` desenham fundo + borda e
+  preenchem `ZyntraToolbar`/`ZyntraStatusBar` (não edite os campos; passe o
+  mesmo estado aos helpers). A altura dos itens é `min(style.item_height,
+  altura do conteúdo)`.
+* Toolbar: `zyntra_toolbar_next_item` posiciona da esquerda para a direita
+  com `spacing`; a largura é **clampada** ao restante e `overflowed` é
+  marcado quando não couber (largura inválida vira 0). `zyntra_toolbar_remaining`
+  devolve o espaço restante; `zyntra_toolbar_separator` reusa o separador
+  vertical entre grupos e avança o cursor.
+* Statusbar: `zyntra_status_bar_next_item` posiciona à esquerda e
+  `zyntra_status_bar_next_right` ancora à direita (os lados **nunca se
+  sobrepõem**; ambos clampam e marcam `overflowed`). `zyntra_status_bar_remaining`
+  devolve o vão livre entre os cursores. `zyntra_status_bar_text` mede, avança
+  e emite 1 linha (`out_rect` opcional); `zyntra_status_bar_separator` reusa o
+  divisor vertical.
+* O estado é por valor (sem alocação e sem handle opaco): cada barra é
+  independente e pode viver na pilha do chamador. Chamar um helper com estado
+  corrompido (campo não-finito, conteúdo negativo, espaçamento negativo) ⇒
+  `ZYNTRA_INVALID_ARGUMENT`.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle/estado/saída obrigatória nula,
+  geometria sem área ou não-finita, estilo inválido, `text` nulo com
+  `len > 0`, texto não-UTF8 e fonte (`size`) ≤ 0/não-finita.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -627,6 +674,8 @@ zyntra_widget_drag_ghost(ctx, &gs, 12, &gres);
 * M117: também travados `ZyntraDragGhostStyle=48`, `ZyntraDndDrop=64`,
   `ZyntraDragGhostResult=36` e o enum `ZyntraDndAccept` (0..2, mesmos
   valores de `dnd.AcceptResult`).
+* M118: também travados `ZyntraToolbar=32` e `ZyntraStatusBar=36` (estados
+  de posicionamento do chamador).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -647,5 +696,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..."
 ```

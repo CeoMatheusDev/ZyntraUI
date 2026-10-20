@@ -50,6 +50,9 @@ const popup_mod = @import("../widgets/popup.zig");
 const modal_mod = @import("../widgets/modal.zig");
 const drag_ghost_mod = @import("../widgets/drag_ghost.zig");
 const dnd_mod = @import("../dnd/service.zig");
+const toolbar_mod = @import("../widgets/toolbar.zig");
+const statusbar_mod = @import("../widgets/statusbar.zig");
+const layout_mod = @import("../layout/layout.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -2705,6 +2708,272 @@ pub export fn zyntra_widget_drag_ghost(
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Barras de composição: toolbar e statusbar (M118)
+// ---------------------------------------------------------------------------
+
+/// Reconstrói o posicionador da toolbar a partir do estado C (o `area` é
+/// derivado de `content`/`item_h`, como no widget Zig). Estado corrompido
+/// (não-finito/negativo) ⇒ `null`.
+fn toolbarFromC(s: *const ct.ZyntraToolbar) ?toolbar_mod.Toolbar {
+    const content = toRect(s.content);
+    if (!std.math.isFinite(content.x) or !std.math.isFinite(content.y) or
+        !std.math.isFinite(content.w) or !std.math.isFinite(content.h) or
+        content.w < 0 or content.h < 0)
+    {
+        return null;
+    }
+    if (!std.math.isFinite(s.item_h) or s.item_h < 0) return null;
+    if (!std.math.isFinite(s.spacing) or s.spacing < 0) return null;
+    if (!std.math.isFinite(s.cursor)) return null;
+    const strip = types_mod.Rect{
+        .x = content.x,
+        .y = content.y + @max(0, (content.h - s.item_h) * 0.5),
+        .w = content.w,
+        .h = s.item_h,
+    };
+    var placer = layout_mod.StackPlacer.init(strip, .horizontal, s.spacing);
+    placer.cursor = s.cursor;
+    return .{
+        .content = content,
+        .item_h = s.item_h,
+        .placer = placer,
+        .overflowed = s.overflowed,
+    };
+}
+
+fn toolbarToC(tb: *const toolbar_mod.Toolbar) ct.ZyntraToolbar {
+    return .{
+        .content = fromRect(tb.content),
+        .item_h = tb.item_h,
+        .spacing = tb.placer.spacing,
+        .cursor = tb.placer.cursor,
+        .overflowed = tb.overflowed,
+    };
+}
+
+/// Reconstrói o posicionador da statusbar a partir do estado C. Estado
+/// corrompido (não-finito/negativo) ⇒ `null`.
+fn statusBarFromC(s: *const ct.ZyntraStatusBar) ?statusbar_mod.StatusBar {
+    const content = toRect(s.content);
+    if (!std.math.isFinite(content.x) or !std.math.isFinite(content.y) or
+        !std.math.isFinite(content.w) or !std.math.isFinite(content.h) or
+        content.w < 0 or content.h < 0)
+    {
+        return null;
+    }
+    if (!std.math.isFinite(s.item_h) or s.item_h < 0) return null;
+    if (!std.math.isFinite(s.spacing) or s.spacing < 0) return null;
+    if (!std.math.isFinite(s.left_cursor) or !std.math.isFinite(s.right_x)) return null;
+    const strip = types_mod.Rect{
+        .x = content.x,
+        .y = content.y + @max(0, (content.h - s.item_h) * 0.5),
+        .w = content.w,
+        .h = s.item_h,
+    };
+    var left = layout_mod.StackPlacer.init(strip, .horizontal, s.spacing);
+    left.cursor = s.left_cursor;
+    return .{
+        .content = content,
+        .item_h = s.item_h,
+        .spacing = s.spacing,
+        .left = left,
+        .right_x = s.right_x,
+        .overflowed = s.overflowed,
+    };
+}
+
+fn statusBarToC(sb: *const statusbar_mod.StatusBar) ct.ZyntraStatusBar {
+    return .{
+        .content = fromRect(sb.content),
+        .item_h = sb.item_h,
+        .spacing = sb.spacing,
+        .left_cursor = sb.left.cursor,
+        .right_x = sb.right_x,
+        .overflowed = sb.overflowed,
+    };
+}
+
+/// Estilo de toolbar do tema embutido.
+pub export fn zyntra_style_toolbar(kind: i32, out_style: ?*ct.ZyntraToolbarStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.toolbarStyle();
+    return .ok;
+}
+
+/// Estilo de statusbar do tema embutido.
+pub export fn zyntra_style_status_bar(kind: i32, out_style: ?*ct.ZyntraStatusBarStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.statusBarStyle();
+    return .ok;
+}
+
+/// Desenha o chrome da toolbar e devolve em `out_bar` o estado de
+/// posicionamento (do chamador) para os `zyntra_toolbar_*`.
+pub export fn zyntra_widget_toolbar(
+    handle: ?*ZyntraContext,
+    bounds: ct.ZyntraRect,
+    style: ?*const ct.ZyntraToolbarStyle,
+    out_bar: ?*ct.ZyntraToolbar,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const out = out_bar orelse return .invalid_argument;
+    const res = toolbar_mod.toolbar(toCtx(h), toRect(bounds), st.*) catch |err| return mapWidgetErr(err);
+    out.* = toolbarToC(&res);
+    return .ok;
+}
+
+/// Próximo item da toolbar com `width` pedida (clampada ao restante; largura
+/// inválida/maior marca `overflowed`). `out_rect` é obrigatório.
+pub export fn zyntra_toolbar_next_item(
+    bar: ?*ct.ZyntraToolbar,
+    width: f32,
+    out_rect: ?*ct.ZyntraRect,
+) callconv(.c) ct.ZyntraResult {
+    const b = bar orelse return .invalid_argument;
+    const out = out_rect orelse return .invalid_argument;
+    var tb = toolbarFromC(b) orelse return .invalid_argument;
+    const r = tb.nextItem(width);
+    b.* = toolbarToC(&tb);
+    out.* = fromRect(r);
+    return .ok;
+}
+
+/// Espaço horizontal restante na faixa de itens.
+pub export fn zyntra_toolbar_remaining(
+    bar: ?*const ct.ZyntraToolbar,
+    out_remaining: ?*f32,
+) callconv(.c) ct.ZyntraResult {
+    const b = bar orelse return .invalid_argument;
+    const out = out_remaining orelse return .invalid_argument;
+    const tb = toolbarFromC(b) orelse return .invalid_argument;
+    out.* = tb.remaining();
+    return .ok;
+}
+
+/// Posiciona e desenha um divisor vertical entre grupos (reusa o separador),
+/// avançando o estado da toolbar.
+pub export fn zyntra_toolbar_separator(
+    handle: ?*ZyntraContext,
+    bar: ?*ct.ZyntraToolbar,
+    style: ?*const ct.ZyntraSeparatorStyle,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const b = bar orelse return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    var tb = toolbarFromC(b) orelse return .invalid_argument;
+    toolbar_mod.toolbarSeparator(toCtx(h), &tb, st.*) catch |err| return mapWidgetErr(err);
+    b.* = toolbarToC(&tb);
+    return .ok;
+}
+
+/// Desenha o chrome da statusbar e devolve em `out_bar` o estado de
+/// posicionamento (do chamador) para os `zyntra_status_bar_*`.
+pub export fn zyntra_widget_status_bar(
+    handle: ?*ZyntraContext,
+    bounds: ct.ZyntraRect,
+    style: ?*const ct.ZyntraStatusBarStyle,
+    out_bar: ?*ct.ZyntraStatusBar,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const out = out_bar orelse return .invalid_argument;
+    const res = statusbar_mod.statusBar(toCtx(h), toRect(bounds), st.*) catch |err| return mapWidgetErr(err);
+    out.* = statusBarToC(&res);
+    return .ok;
+}
+
+/// Próximo segmento à esquerda; clampa ao espaço livre (inclui a reserva do
+/// lado direito) e marca `overflowed` quando não couber.
+pub export fn zyntra_status_bar_next_item(
+    bar: ?*ct.ZyntraStatusBar,
+    width: f32,
+    out_rect: ?*ct.ZyntraRect,
+) callconv(.c) ct.ZyntraResult {
+    const b = bar orelse return .invalid_argument;
+    const out = out_rect orelse return .invalid_argument;
+    var sb = statusBarFromC(b) orelse return .invalid_argument;
+    const r = sb.nextItem(width);
+    b.* = statusBarToC(&sb);
+    out.* = fromRect(r);
+    return .ok;
+}
+
+/// Próximo segmento ancorado à direita (nunca invade o lado esquerdo).
+pub export fn zyntra_status_bar_next_right(
+    bar: ?*ct.ZyntraStatusBar,
+    width: f32,
+    out_rect: ?*ct.ZyntraRect,
+) callconv(.c) ct.ZyntraResult {
+    const b = bar orelse return .invalid_argument;
+    const out = out_rect orelse return .invalid_argument;
+    var sb = statusBarFromC(b) orelse return .invalid_argument;
+    const r = sb.nextRight(width);
+    b.* = statusBarToC(&sb);
+    out.* = fromRect(r);
+    return .ok;
+}
+
+/// Espaço horizontal livre entre os dois lados.
+pub export fn zyntra_status_bar_remaining(
+    bar: ?*const ct.ZyntraStatusBar,
+    out_remaining: ?*f32,
+) callconv(.c) ct.ZyntraResult {
+    const b = bar orelse return .invalid_argument;
+    const out = out_remaining orelse return .invalid_argument;
+    const sb = statusBarFromC(b) orelse return .invalid_argument;
+    out.* = sb.remaining();
+    return .ok;
+}
+
+/// Segmento de texto (1 linha) à esquerda: mede, posiciona e emite o texto.
+/// `text` é emprestado só na chamada; `out_rect` é opcional.
+pub export fn zyntra_status_bar_text(
+    handle: ?*ZyntraContext,
+    bar: ?*ct.ZyntraStatusBar,
+    text: ?[*]const u8,
+    text_len: usize,
+    size: f32,
+    color: ct.ZyntraColor,
+    out_rect: ?*ct.ZyntraRect,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const b = bar orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    if (text_len > 0 and text == null) return .invalid_argument;
+    const bytes: []const u8 = if (text_len == 0) &.{} else text.?[0..text_len];
+    var sb = statusBarFromC(b) orelse return .invalid_argument;
+    const r = statusbar_mod.statusBarText(
+        toCtx(h),
+        &sb,
+        bytes,
+        metrics_mod.FontMetrics.withSize(size),
+        toColor(color),
+    ) catch |err| return mapWidgetErr(err);
+    b.* = statusBarToC(&sb);
+    if (out_rect) |o| o.* = fromRect(r);
+    return .ok;
+}
+
+/// Posiciona e desenha um divisor vertical entre segmentos (lado esquerdo),
+/// avançando o estado da statusbar.
+pub export fn zyntra_status_bar_separator(
+    handle: ?*ZyntraContext,
+    bar: ?*ct.ZyntraStatusBar,
+    style: ?*const ct.ZyntraSeparatorStyle,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const b = bar orelse return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    var sb = statusBarFromC(b) orelse return .invalid_argument;
+    statusbar_mod.statusBarSeparator(toCtx(h), &sb, st.*) catch |err| return mapWidgetErr(err);
+    b.* = statusBarToC(&sb);
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -4831,5 +5100,163 @@ test "C-ABI DnD M117: begin, accept, drop, cancel e drag ghost" {
     try eq(bad, zyntra_dnd_drag_distance(null, &dist));
     try eq(bad, zyntra_dnd_drag_exceeds(null, 1, &exceeds));
     try eq(bad, zyntra_dnd_drag_exceeds(handle, 1, null));
+    try eq(ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI barras M118: toolbar e statusbar" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    const nan = std.math.nan(f32);
+
+    var handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 300, .h = 200 }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    var tbs: ct.ZyntraToolbarStyle = undefined;
+    var sbs: ct.ZyntraStatusBarStyle = undefined;
+    var ses: ct.ZyntraSeparatorStyle = undefined;
+    try eq(ok, zyntra_style_toolbar(0, &tbs));
+    try eq(ok, zyntra_style_status_bar(1, &sbs));
+    try eq(ok, zyntra_style_separator(0, &ses));
+    try stdt.testing.expect(tbs.isValid() and sbs.isValid() and ses.isValid());
+    try eq(bad, zyntra_style_toolbar(9, &tbs));
+    try eq(bad, zyntra_style_status_bar(0, null));
+    ses.thickness = 2;
+
+    // Toolbar: chrome, conteúdo, itens, separador e overflow.
+    var tbar: ct.ZyntraToolbar = undefined;
+    var r: ct.ZyntraRect = undefined;
+    var rem: f32 = -1;
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_widget_toolbar(handle, .{ .x = 0, .y = 0, .w = 200, .h = 40 }, &tbs, &tbar));
+    try eq(ct.ZyntraRect{ .x = 8, .y = 6, .w = 184, .h = 28 }, tbar.content);
+    try eq(@as(f32, 28), tbar.item_h);
+    try eq(@as(f32, 6), tbar.spacing);
+    try stdt.testing.expect(!tbar.overflowed);
+    try eq(ok, zyntra_toolbar_next_item(&tbar, 50, &r));
+    try eq(ct.ZyntraRect{ .x = 8, .y = 6, .w = 50, .h = 28 }, r);
+    try eq(ok, zyntra_toolbar_next_item(&tbar, 30, &r));
+    try eq(ct.ZyntraRect{ .x = 64, .y = 6, .w = 30, .h = 28 }, r);
+    try eq(ok, zyntra_toolbar_remaining(&tbar, &rem));
+    try eq(@as(f32, 92), rem);
+    try eq(ok, zyntra_toolbar_separator(handle, &tbar, &ses));
+    try eq(@as(f32, 108), tbar.cursor);
+    try eq(ok, zyntra_toolbar_remaining(&tbar, &rem));
+    try eq(@as(f32, 84), rem);
+    try stdt.testing.expect(!tbar.overflowed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Overflow: segundo item pede 60, só restam 18.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_widget_toolbar(handle, .{ .x = 0, .y = 0, .w = 100, .h = 40 }, &tbs, &tbar));
+    try eq(ok, zyntra_toolbar_next_item(&tbar, 60, &r));
+    try eq(@as(f32, 60), r.w);
+    try eq(ok, zyntra_toolbar_next_item(&tbar, 60, &r));
+    try eq(@as(f32, 18), r.w);
+    try stdt.testing.expect(tbar.overflowed);
+    try eq(ok, zyntra_toolbar_remaining(&tbar, &rem));
+    try eq(@as(f32, 0), rem);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Statusbar: esquerda, direita, texto e separador.
+    var sbar: ct.ZyntraStatusBar = undefined;
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_widget_status_bar(handle, .{ .x = 0, .y = 0, .w = 200, .h = 28 }, &sbs, &sbar));
+    try eq(ct.ZyntraRect{ .x = 8, .y = 4, .w = 184, .h = 20 }, sbar.content);
+    try eq(@as(f32, 20), sbar.item_h);
+    try eq(ok, zyntra_status_bar_next_item(&sbar, 50, &r));
+    try eq(ct.ZyntraRect{ .x = 8, .y = 4, .w = 50, .h = 20 }, r);
+    try eq(ok, zyntra_status_bar_next_right(&sbar, 30, &r));
+    try eq(ct.ZyntraRect{ .x = 162, .y = 4, .w = 30, .h = 20 }, r);
+    try eq(ok, zyntra_status_bar_remaining(&sbar, &rem));
+    try eq(@as(f32, 92), rem);
+    try stdt.testing.expect(!sbar.overflowed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Texto "OK" (2 glifos × 6 = 12) posiciona e emite 1 comando.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_widget_status_bar(handle, .{ .x = 0, .y = 0, .w = 200, .h = 28 }, &sbs, &sbar));
+    var n0: usize = 0;
+    var n1: usize = 0;
+    try eq(ok, zyntra_draw_count(handle, &n0));
+    try eq(ok, zyntra_status_bar_text(handle, &sbar, "OK", 2, 10, .{ .r = 255, .g = 255, .b = 255, .a = 255 }, &r));
+    try eq(ct.ZyntraRect{ .x = 8, .y = 4, .w = 12, .h = 20 }, r);
+    try eq(ok, zyntra_draw_count(handle, &n1));
+    try eq(n0 + 1, n1);
+    try eq(@as(f32, 26), sbar.left_cursor);
+    // `out_rect` nulo é válido (só desenha).
+    try eq(ok, zyntra_status_bar_text(handle, &sbar, "!", 1, 10, .{ .r = 255, .g = 255, .b = 255, .a = 255 }, null));
+    try eq(ok, zyntra_status_bar_separator(handle, &sbar, &ses));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Overflow dos dois lados: nunca se sobrepõem.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_widget_status_bar(handle, .{ .x = 0, .y = 0, .w = 100, .h = 28 }, &sbs, &sbar));
+    try eq(ok, zyntra_status_bar_next_item(&sbar, 60, &r));
+    try eq(@as(f32, 60), r.w);
+    try eq(ok, zyntra_status_bar_next_right(&sbar, 60, &r));
+    try eq(@as(f32, 18), r.w);
+    try eq(@as(f32, 74), r.x);
+    try stdt.testing.expect(sbar.overflowed);
+    try eq(ok, zyntra_status_bar_remaining(&sbar, &rem));
+    try eq(@as(f32, 0), rem);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Inválidos: handle/out/estado corrompido/fonte/texto.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(bad, zyntra_widget_toolbar(null, .{ .x = 0, .y = 0, .w = 100, .h = 40 }, &tbs, &tbar));
+    try eq(bad, zyntra_widget_toolbar(handle, .{ .x = 0, .y = 0, .w = 100, .h = 40 }, null, &tbar));
+    try eq(bad, zyntra_widget_toolbar(handle, .{ .x = 0, .y = 0, .w = 0, .h = 40 }, &tbs, &tbar));
+    try eq(bad, zyntra_widget_toolbar(handle, .{ .x = 0, .y = 0, .w = 100, .h = 40 }, &tbs, null));
+    var bad_ts = tbs;
+    bad_ts.spacing = -1;
+    try eq(bad, zyntra_widget_toolbar(handle, .{ .x = 0, .y = 0, .w = 100, .h = 40 }, &bad_ts, &tbar));
+    try eq(ok, zyntra_widget_toolbar(handle, .{ .x = 0, .y = 0, .w = 200, .h = 40 }, &tbs, &tbar));
+    try eq(bad, zyntra_toolbar_next_item(null, 10, &r));
+    try eq(bad, zyntra_toolbar_next_item(&tbar, 10, null));
+    try eq(bad, zyntra_toolbar_remaining(null, &rem));
+    try eq(bad, zyntra_toolbar_remaining(&tbar, null));
+    try eq(bad, zyntra_toolbar_separator(null, &tbar, &ses));
+    try eq(bad, zyntra_toolbar_separator(handle, null, &ses));
+    try eq(bad, zyntra_toolbar_separator(handle, &tbar, null));
+    var bad_bar = tbar;
+    bad_bar.item_h = nan;
+    try eq(bad, zyntra_toolbar_next_item(&bad_bar, 10, &r));
+    bad_bar = tbar;
+    bad_bar.cursor = nan;
+    try eq(bad, zyntra_toolbar_next_item(&bad_bar, 10, &r));
+    bad_bar = tbar;
+    bad_bar.content.w = -1;
+    try eq(bad, zyntra_toolbar_remaining(&bad_bar, &rem));
+    var bad_sep = ses;
+    bad_sep.thickness = 0;
+    try eq(bad, zyntra_toolbar_separator(handle, &tbar, &bad_sep));
+
+    try eq(bad, zyntra_widget_status_bar(null, .{ .x = 0, .y = 0, .w = 100, .h = 28 }, &sbs, &sbar));
+    try eq(bad, zyntra_widget_status_bar(handle, .{ .x = 0, .y = 0, .w = 100, .h = 28 }, null, &sbar));
+    try eq(bad, zyntra_widget_status_bar(handle, .{ .x = 0, .y = 0, .w = 100, .h = 28 }, &sbs, null));
+    try eq(ok, zyntra_widget_status_bar(handle, .{ .x = 0, .y = 0, .w = 200, .h = 28 }, &sbs, &sbar));
+    try eq(bad, zyntra_status_bar_next_item(null, 10, &r));
+    try eq(bad, zyntra_status_bar_next_item(&sbar, 10, null));
+    try eq(bad, zyntra_status_bar_next_right(null, 10, &r));
+    try eq(bad, zyntra_status_bar_next_right(&sbar, 10, null));
+    try eq(bad, zyntra_status_bar_remaining(null, &rem));
+    try eq(bad, zyntra_status_bar_remaining(&sbar, null));
+    try eq(bad, zyntra_status_bar_text(null, &sbar, "T", 1, 10, .{}, &r));
+    try eq(bad, zyntra_status_bar_text(handle, null, "T", 1, 10, .{}, &r));
+    try eq(bad, zyntra_status_bar_text(handle, &sbar, "T", 1, 0, .{}, &r));
+    try eq(bad, zyntra_status_bar_text(handle, &sbar, null, 1, 10, .{}, &r));
+    try eq(bad, zyntra_status_bar_text(handle, &sbar, "\xff", 1, 10, .{}, &r));
+    try eq(bad, zyntra_status_bar_separator(null, &sbar, &ses));
+    try eq(bad, zyntra_status_bar_separator(handle, null, &ses));
+    try eq(bad, zyntra_status_bar_separator(handle, &sbar, null));
+    var bad_sbar = sbar;
+    bad_sbar.right_x = nan;
+    try eq(bad, zyntra_status_bar_next_right(&bad_sbar, 10, &r));
+    bad_sbar = sbar;
+    bad_sbar.left_cursor = nan;
+    try eq(bad, zyntra_status_bar_next_item(&bad_sbar, 10, &r));
     try eq(ok, zyntra_context_end_frame(handle));
 }

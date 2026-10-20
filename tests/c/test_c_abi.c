@@ -3,6 +3,7 @@
  * (ou contra a lib estática direta). Retorna 0 em sucesso.
  */
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "zyntra.h"
@@ -2385,6 +2386,244 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 84-88: barras de composição (M118) — toolbar/statusbar com
+     * posicionamento, overflow, texto e checagens de pixel. */
+    int c118_bar_px = 0, c118_sep_px = 0, c118_tb_overflow = 0;
+    int c118_status_px = 0, c118_status_text = 0, c118_sb_overflow = 0;
+    {
+        ZyntraToolbarStyle c_tbs;
+        ZyntraStatusBarStyle c_sbs;
+        ZyntraSeparatorStyle c_ses;
+        ZyntraToolbar c_tb;
+        ZyntraStatusBar c_sb;
+        ZyntraRect c_r;
+
+        _Static_assert(sizeof(ZyntraToolbar) == 32, "ZyntraToolbar ABI");
+        _Static_assert(sizeof(ZyntraStatusBar) == 36, "ZyntraStatusBar ABI");
+
+        CHECK(zyntra_style_toolbar(ZYNTRA_THEME_DARK, &c_tbs));
+        CHECK(zyntra_style_status_bar(ZYNTRA_THEME_DARK, &c_sbs));
+        CHECK(zyntra_style_separator(ZYNTRA_THEME_DARK, &c_ses));
+        assert(zyntra_style_toolbar(9, &c_tbs) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_status_bar(0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        c_ses.thickness = 2.0f;
+
+        ZyntraFramebuffer *c118fb = NULL;
+        CHECK(zyntra_framebuffer_create(220, 120, &c118fb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 220, 120}));
+        ZyntraThemeColors c118cols;
+        CHECK(zyntra_theme_colors(ZYNTRA_THEME_DARK, &c118cols));
+        ZyntraColor cp = {0, 0, 0, 0};
+
+        /* Frame 84: toolbar 200×40, itens 50/30, separador e pixels. */
+        {
+            float rem = -1.0f;
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_draw_clear(ctx, c118cols.bg));
+            CHECK(zyntra_widget_toolbar(ctx, (ZyntraRect){0, 0, 200, 40},
+                &c_tbs, &c_tb));
+            assert(c_tb.content.x == 8.0f && c_tb.content.y == 6.0f);
+            assert(c_tb.content.w == 184.0f && c_tb.content.h == 28.0f);
+            assert(c_tb.item_h == 28.0f && c_tb.spacing == 6.0f);
+            assert(!c_tb.overflowed);
+            CHECK(zyntra_toolbar_next_item(&c_tb, 50.0f, &c_r));
+            assert(c_r.x == 8.0f && c_r.y == 6.0f && c_r.w == 50.0f);
+            CHECK(zyntra_toolbar_next_item(&c_tb, 30.0f, &c_r));
+            assert(c_r.x == 64.0f && c_r.w == 30.0f);
+            CHECK(zyntra_toolbar_remaining(&c_tb, &rem));
+            assert(rem == 92.0f);
+            CHECK(zyntra_toolbar_separator(ctx, &c_tb, &c_ses));
+            assert(c_tb.cursor == 108.0f);
+            CHECK(zyntra_toolbar_remaining(&c_tb, &rem));
+            assert(rem == 84.0f);
+            CHECK(zyntra_framebuffer_render(c118fb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(c118fb, 4, 20, &cp));
+            c118_bar_px = (cp.r == c_tbs.bg.r && cp.g == c_tbs.bg.g &&
+                cp.b == c_tbs.bg.b);
+            assert(c118_bar_px);
+            CHECK(zyntra_framebuffer_pixel(c118fb, 100, 20, &cp));
+            c118_sep_px = (cp.r == c_ses.color.r && cp.g == c_ses.color.g &&
+                cp.b == c_ses.color.b);
+            assert(c118_sep_px);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 85: overflow da toolbar (60 pedidos, 18 restantes). */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_widget_toolbar(ctx, (ZyntraRect){0, 0, 100, 40},
+            &c_tbs, &c_tb));
+        CHECK(zyntra_toolbar_next_item(&c_tb, 60.0f, &c_r));
+        assert(c_r.w == 60.0f);
+        CHECK(zyntra_toolbar_next_item(&c_tb, 60.0f, &c_r));
+        assert(c_r.w == 18.0f && c_tb.overflowed);
+        c118_tb_overflow = c_tb.overflowed;
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 86: statusbar — texto, separador, item e lado direito. */
+        {
+            float rem = -1.0f;
+            size_t n0 = 0, n1 = 0;
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_draw_clear(ctx, c118cols.bg));
+            CHECK(zyntra_widget_status_bar(ctx, (ZyntraRect){0, 0, 200, 28},
+                &c_sbs, &c_sb));
+            assert(c_sb.content.x == 8.0f && c_sb.content.y == 4.0f);
+            assert(c_sb.content.w == 184.0f && c_sb.content.h == 20.0f);
+            assert(c_sb.item_h == 20.0f && c_sb.left_cursor == 8.0f);
+            assert(c_sb.right_x == 192.0f);
+            CHECK(zyntra_draw_count(ctx, &n0));
+            CHECK(zyntra_status_bar_text(ctx, &c_sb, "OK", 2, 10.0f,
+                c118cols.text, &c_r));
+            assert(c_r.x == 8.0f && c_r.y == 4.0f);
+            assert(c_r.w == 12.0f && c_r.h == 20.0f);
+            CHECK(zyntra_draw_count(ctx, &n1));
+            c118_status_text = (n1 == n0 + 1 && c_sb.left_cursor == 26.0f);
+            assert(c118_status_text);
+            CHECK(zyntra_status_bar_separator(ctx, &c_sb, &c_ses));
+            assert(c_sb.left_cursor == 34.0f);
+            CHECK(zyntra_status_bar_next_item(&c_sb, 30.0f, &c_r));
+            assert(c_r.x == 34.0f && c_r.w == 30.0f);
+            CHECK(zyntra_status_bar_next_right(&c_sb, 30.0f, &c_r));
+            assert(c_r.x == 162.0f && c_r.w == 30.0f);
+            CHECK(zyntra_status_bar_remaining(&c_sb, &rem));
+            assert(rem == 86.0f);
+            assert(!c_sb.overflowed);
+            CHECK(zyntra_framebuffer_render(c118fb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(c118fb, 4, 14, &cp));
+            c118_status_px = (cp.r == c_sbs.bg.r && cp.g == c_sbs.bg.g &&
+                cp.b == c_sbs.bg.b);
+            assert(c118_status_px);
+            CHECK(zyntra_framebuffer_pixel(c118fb, 26, 14, &cp));
+            assert(cp.r == c_ses.color.r && cp.g == c_ses.color.g &&
+                cp.b == c_ses.color.b);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 87: overflow dos dois lados da statusbar (não se sobrepõem). */
+        {
+            float rem = -1.0f;
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_widget_status_bar(ctx, (ZyntraRect){0, 0, 100, 28},
+                &c_sbs, &c_sb));
+            CHECK(zyntra_status_bar_next_item(&c_sb, 60.0f, &c_r));
+            assert(c_r.w == 60.0f);
+            CHECK(zyntra_status_bar_next_right(&c_sb, 60.0f, &c_r));
+            assert(c_r.x == 74.0f && c_r.w == 18.0f);
+            assert(c_sb.overflowed);
+            CHECK(zyntra_status_bar_remaining(&c_sb, &rem));
+            assert(rem == 0.0f);
+            c118_sb_overflow = c_sb.overflowed;
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 88: inválidos das barras, estado corrompido e estilo. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        {
+            float rem = 0.0f;
+            ZyntraToolbarStyle bad_ts = c_tbs;
+            ZyntraStatusBar sb_bad;
+            assert(zyntra_widget_toolbar(NULL, (ZyntraRect){0, 0, 100, 40},
+                &c_tbs, &c_tb) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_toolbar(ctx, (ZyntraRect){0, 0, 100, 40},
+                NULL, &c_tb) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_toolbar(ctx, (ZyntraRect){0, 0, 100, 40},
+                &c_tbs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_toolbar(ctx, (ZyntraRect){0, 0, 0, 40},
+                &c_tbs, &c_tb) == ZYNTRA_INVALID_ARGUMENT);
+            bad_ts.spacing = -1.0f;
+            assert(zyntra_widget_toolbar(ctx, (ZyntraRect){0, 0, 100, 40},
+                &bad_ts, &c_tb) == ZYNTRA_INVALID_ARGUMENT);
+            CHECK(zyntra_widget_toolbar(ctx, (ZyntraRect){0, 0, 200, 40},
+                &c_tbs, &c_tb));
+            assert(zyntra_toolbar_next_item(NULL, 10.0f, &c_r)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_toolbar_next_item(&c_tb, 10.0f, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_toolbar_remaining(NULL, &rem)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_toolbar_remaining(&c_tb, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_toolbar_separator(NULL, &c_tb, &c_ses)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_toolbar_separator(ctx, NULL, &c_ses)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_toolbar_separator(ctx, &c_tb, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            {
+                ZyntraToolbar tb_bad = c_tb;
+                tb_bad.item_h = NAN;
+                assert(zyntra_toolbar_next_item(&tb_bad, 10.0f, &c_r)
+                    == ZYNTRA_INVALID_ARGUMENT);
+                tb_bad = c_tb;
+                tb_bad.cursor = NAN;
+                assert(zyntra_toolbar_next_item(&tb_bad, 10.0f, &c_r)
+                    == ZYNTRA_INVALID_ARGUMENT);
+                tb_bad = c_tb;
+                tb_bad.content.w = -1.0f;
+                assert(zyntra_toolbar_remaining(&tb_bad, &rem)
+                    == ZYNTRA_INVALID_ARGUMENT);
+            }
+            {
+                ZyntraSeparatorStyle bad_sep = c_ses;
+                bad_sep.thickness = 0.0f;
+                assert(zyntra_toolbar_separator(ctx, &c_tb, &bad_sep)
+                    == ZYNTRA_INVALID_ARGUMENT);
+            }
+
+            assert(zyntra_widget_status_bar(NULL, (ZyntraRect){0, 0, 100, 28},
+                &c_sbs, &c_sb) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_status_bar(ctx, (ZyntraRect){0, 0, 100, 28},
+                NULL, &c_sb) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_status_bar(ctx, (ZyntraRect){0, 0, 100, 28},
+                &c_sbs, NULL) == ZYNTRA_INVALID_ARGUMENT);
+            CHECK(zyntra_widget_status_bar(ctx, (ZyntraRect){0, 0, 200, 28},
+                &c_sbs, &c_sb));
+            assert(zyntra_status_bar_next_item(NULL, 10.0f, &c_r)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_next_item(&c_sb, 10.0f, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_next_right(NULL, 10.0f, &c_r)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_next_right(&c_sb, 10.0f, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_remaining(NULL, &rem)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_remaining(&c_sb, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_text(NULL, &c_sb, "T", 1, 10.0f,
+                c118cols.text, &c_r) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_text(ctx, NULL, "T", 1, 10.0f,
+                c118cols.text, &c_r) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_text(ctx, &c_sb, "T", 1, 0.0f,
+                c118cols.text, &c_r) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_text(ctx, &c_sb, NULL, 1, 10.0f,
+                c118cols.text, &c_r) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_text(ctx, &c_sb, "\xff", 1, 10.0f,
+                c118cols.text, &c_r) == ZYNTRA_INVALID_ARGUMENT);
+            /* `out_rect` nulo é válido. */
+            CHECK(zyntra_status_bar_text(ctx, &c_sb, "T", 1, 10.0f,
+                c118cols.text, NULL));
+            assert(zyntra_status_bar_separator(NULL, &c_sb, &c_ses)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_separator(ctx, NULL, &c_ses)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_status_bar_separator(ctx, &c_sb, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            sb_bad = c_sb;
+            sb_bad.left_cursor = NAN;
+            assert(zyntra_status_bar_next_item(&sb_bad, 10.0f, &c_r)
+                == ZYNTRA_INVALID_ARGUMENT);
+            sb_bad = c_sb;
+            sb_bad.right_x = NAN;
+            assert(zyntra_status_bar_next_right(&sb_bad, 10.0f, &c_r)
+                == ZYNTRA_INVALID_ARGUMENT);
+        }
+        CHECK(zyntra_context_end_frame(ctx));
+
+        zyntra_framebuffer_destroy(c118fb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -2445,6 +2684,9 @@ int main(void) {
         c116_px_scroll_wheel);
     printf("C-ABI dnd ghost=%d hover=%d dropped=%d cancelled=%d no_drop=%d\n",
         c117_ghost_px, c117_hover, c117_dropped, c117_cancelled, c117_no_drop);
+    printf("C-ABI bars toolbar=%d/%d sec=%d status=%d text=%d/%d\n",
+        c118_bar_px, c118_tb_overflow, c118_sep_px, c118_status_px,
+        c118_status_text, c118_sb_overflow);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

@@ -83,6 +83,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   consumidor C ganhou os frames 77–83 (arraste com distância, hover,
   ghost com checagem de pixel, solto no alvo, expiração em um frame,
   cancelamento e inválidos).
+- `c-abi`: **toolbar e statusbar na fronteira C** (M118, aditivo) —
+  `zyntra_widget_toolbar`/`_status_bar` desenham o chrome e devolvem um
+  estado de posicionamento por valor (`ZyntraToolbar=32`,
+  `ZyntraStatusBar=36`) para os helpers `zyntra_toolbar_next_item`/
+  `_remaining`/`_separator` e `zyntra_status_bar_next_item`/`_next_right`/
+  `_remaining`/`_text`/`_separator`. Reusa o layout do núcleo (sem
+  reimplementação): itens clampados, `overflowed`, dois lados que nunca se
+  sobrepõem e texto medido/emitido em 1 linha. Estilos do tema via
+  `zyntra_style_toolbar`/`zyntra_style_status_bar`; o consumidor C ganhou
+  os frames 84–88 (chrome com pixels, itens/separador, overflow, texto e
+  estado corrompido).
 
 ## [1.34.0] - 2026-10-18
 

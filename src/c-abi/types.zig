@@ -247,6 +247,9 @@ pub const ZyntraPopupStyle = style_mod.PopupStyle;
 pub const ZyntraModalStyle = style_mod.ModalStyle;
 /// Estilo do fantasma do arraste (M117).
 pub const ZyntraDragGhostStyle = style_mod.DragGhostStyle;
+/// Estilos das barras de composição (M118): toolbar e statusbar.
+pub const ZyntraToolbarStyle = style_mod.ToolbarStyle;
+pub const ZyntraStatusBarStyle = style_mod.StatusBarStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -443,6 +446,28 @@ pub const ZyntraDragGhostResult = extern struct {
     metrics: ZyntraTextMetrics = .{},
 };
 
+/// Estado de posicionamento da toolbar (M118), do chamador. O chamador não
+/// deve editar os campos: recebe de `zyntra_widget_toolbar` e passa de volta
+/// aos helpers `zyntra_toolbar_*`.
+pub const ZyntraToolbar = extern struct {
+    content: ZyntraRect = .{},
+    item_h: f32 = 0,
+    spacing: f32 = 0,
+    cursor: f32 = 0,
+    overflowed: bool = false,
+};
+
+/// Estado de posicionamento da statusbar (M118), do chamador. Dois cursores
+/// (esquerda e direita) nunca se sobrepõem.
+pub const ZyntraStatusBar = extern struct {
+    content: ZyntraRect = .{},
+    item_h: f32 = 0,
+    spacing: f32 = 0,
+    left_cursor: f32 = 0,
+    right_x: f32 = 0,
+    overflowed: bool = false,
+};
+
 /// Zona de acoplamento de um drop (espelha `dock.DockZone`; mesmos valores).
 pub const ZyntraDockZone = enum(c_int) {
     left = 0,
@@ -574,6 +599,8 @@ comptime {
     if (@sizeOf(ZyntraDragGhostStyle) != 48 or @alignOf(ZyntraDragGhostStyle) != 4) @compileError("ZyntraDragGhostStyle ABI drift");
     if (@sizeOf(ZyntraDndDrop) != 64 or @alignOf(ZyntraDndDrop) != 8) @compileError("ZyntraDndDrop ABI drift");
     if (@sizeOf(ZyntraDragGhostResult) != 36 or @alignOf(ZyntraDragGhostResult) != 4) @compileError("ZyntraDragGhostResult ABI drift");
+    if (@sizeOf(ZyntraToolbar) != 32 or @alignOf(ZyntraToolbar) != 4) @compileError("ZyntraToolbar ABI drift");
+    if (@sizeOf(ZyntraStatusBar) != 36 or @alignOf(ZyntraStatusBar) != 4) @compileError("ZyntraStatusBar ABI drift");
     if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
         @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
     {
@@ -639,6 +666,9 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraDragGhostStyle));
     try stdt.testing.expectEqual(@as(usize, 64), @sizeOf(ZyntraDndDrop));
     try stdt.testing.expectEqual(@as(usize, 36), @sizeOf(ZyntraDragGhostResult));
+    // Barras de composição M118.
+    try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraToolbar));
+    try stdt.testing.expectEqual(@as(usize, 36), @sizeOf(ZyntraStatusBar));
     // Docking: espelhos do modelo e do resultado da área interativa.
     try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));
     try stdt.testing.expectEqual(@as(usize, 28), @sizeOf(ZyntraDockPaneInfo));
