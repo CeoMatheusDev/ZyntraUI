@@ -266,6 +266,45 @@ ZyntraResult zyntra_framebuffer_render_metrics(ZyntraFramebuffer *fb,
     ZyntraContext *ctx, ZyntraRenderStats *out_stats,
     ZyntraRasterMetrics *out_metrics);
 
+/* ------------------------------------------------------------------ */
+/* Viewport 3D (M146): rasterizador em software + cena de cubos        */
+/* ------------------------------------------------------------------ */
+
+/* Viewport 3D opaco: renderiza a cena num framebuffer interno; o app
+ * apresenta os pixels com `zyntra_draw_image` (ou com o widget de
+ * viewport). Destroy com `zyntra_vp3d_destroy`. */
+typedef struct ZyntraViewport3D ZyntraViewport3D;
+
+ZyntraResult zyntra_vp3d_create(uint32_t width, uint32_t height,
+    ZyntraViewport3D **out_vp);
+ZyntraResult zyntra_vp3d_destroy(ZyntraViewport3D *vp);
+ZyntraResult zyntra_vp3d_resize(ZyntraViewport3D *vp, uint32_t width,
+    uint32_t height);
+/* Câmera: distância, órbita em Y e X (radianos) e alvo. */
+ZyntraResult zyntra_vp3d_camera(ZyntraViewport3D *vp, float distance,
+    float yaw, float pitch, float target_x, float target_y, float target_z);
+ZyntraResult zyntra_vp3d_orbit(ZyntraViewport3D *vp, float d_yaw,
+    float d_pitch);
+ZyntraResult zyntra_vp3d_zoom(ZyntraViewport3D *vp, float delta);
+ZyntraResult zyntra_vp3d_add_object(ZyntraViewport3D *vp, uint32_t id,
+    float x, float y, float z, float size, uint8_t r, uint8_t g, uint8_t b);
+ZyntraResult zyntra_vp3d_clear_objects(ZyntraViewport3D *vp);
+ZyntraResult zyntra_vp3d_render(ZyntraViewport3D *vp);
+/* Pica o objeto sob a posição de tela (pixels do viewport); 0 = nenhum. */
+ZyntraResult zyntra_vp3d_pick(ZyntraViewport3D *vp, float screen_x,
+    float screen_y, uint32_t *out_id);
+/* Pixels do viewport (RGBA8, emprestados) + dimensões e stride. */
+ZyntraResult zyntra_vp3d_pixels(ZyntraViewport3D *vp,
+    const uint8_t **out_pixels, uint32_t *out_width, uint32_t *out_height,
+    uint32_t *out_stride);
+
+/* Modos de ajuste da imagem: 0 = stretch, 1 = contain, 2 = cover,
+ * 3 = none. Devolve o rect de destino e a região de origem. */
+ZyntraResult zyntra_image_fit_rect(ZyntraRect bounds, uint32_t img_w,
+    uint32_t img_h, int32_t mode, ZyntraRect *out_dest,
+    uint32_t *out_src_x, uint32_t *out_src_y, uint32_t *out_src_w,
+    uint32_t *out_src_h);
+
 /* Widgets (M107): primeira superfície C. Os estilos são os mesmos `extern
  * struct` da API Zig (uma definição só por widget; as travas de layout em
  * src/c-abi/types.zig falham o build se mudarem). `ZyntraId` é o `u64`

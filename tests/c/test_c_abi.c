@@ -3751,6 +3751,63 @@ int main(void) {
         c139_atlas = (w == 8.0f && lh == 7.0f);
     }
 
+    /* Viewport 3D em C (M146): cria, renderiza, pica e apresenta. */
+    int c146_vp3d = 0;
+    {
+        ZyntraViewport3D *vp = NULL;
+        CHECK(zyntra_vp3d_create(64, 48, &vp));
+        CHECK(zyntra_vp3d_camera(vp, 5.0f, 0.7f, 0.4f, 0.0f, 0.0f, 0.0f));
+        CHECK(zyntra_vp3d_add_object(vp, 42, 0.0f, 0.0f, 0.0f, 1.6f, 220, 200, 120));
+        CHECK(zyntra_vp3d_render(vp));
+
+        const uint8_t *px = NULL;
+        uint32_t w = 0, h = 0, stride = 0;
+        CHECK(zyntra_vp3d_pixels(vp, &px, &w, &h, &stride));
+        assert(w == 64 && h == 48 && stride == 64 * 4);
+        assert(px != NULL);
+
+        /* A cena desenhou algo (fundo + cubo + grade). */
+        int lit = 0;
+        for (uint32_t y = 0; y < h; y++) {
+            for (uint32_t x = 0; x < w; x++) {
+                const uint8_t *p = px + (size_t)y * stride + (size_t)x * 4;
+                if (p[0] > 40 || p[1] > 40 || p[2] > 40) lit++;
+            }
+        }
+        assert(lit > 20);
+
+        /* O clique no centro acerta o cubo. */
+        uint32_t picked = 0;
+        CHECK(zyntra_vp3d_pick(vp, 32.0f, 24.0f, &picked));
+        assert(picked == 42);
+
+        /* A imagem do viewport pode ser apresentada na UI. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_image(ctx, (ZyntraRect){0, 0, 64, 48}, px, w, h,
+            stride, (ZyntraColor){255, 255, 255, 255}));
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Modos de ajuste. */
+        ZyntraRect dest;
+        uint32_t sx = 0, sy = 0, sw = 0, sh = 0;
+        CHECK(zyntra_image_fit_rect((ZyntraRect){0, 0, 100, 50}, 2, 2, 1,
+            &dest, &sx, &sy, &sw, &sh));
+        assert(dest.w == 50.0f && dest.h == 50.0f);
+        assert(sw == 2 && sh == 2);
+        CHECK(zyntra_image_fit_rect((ZyntraRect){0, 0, 100, 50}, 2, 2, 0,
+            &dest, &sx, &sy, &sw, &sh));
+        assert(dest.w == 100.0f && dest.h == 50.0f);
+        assert(zyntra_image_fit_rect((ZyntraRect){0, 0, 100, 50}, 2, 2, 9,
+            &dest, &sx, &sy, &sw, &sh) == ZYNTRA_INVALID_ARGUMENT);
+
+        /* Redimensionar e destruir. */
+        CHECK(zyntra_vp3d_resize(vp, 32, 24));
+        CHECK(zyntra_vp3d_pixels(vp, &px, &w, &h, &stride));
+        assert(w == 32 && h == 24);
+        CHECK(zyntra_vp3d_destroy(vp));
+        c146_vp3d = (picked == 42 && lit > 20);
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -3827,6 +3884,7 @@ int main(void) {
     printf("C-ABI imagem px=%d dpi=%d\n", c129_image, c129_dpi);
     printf("C-ABI ime=%d\n", c130_ime);
     printf("C-ABI atlas=%d\n", c139_atlas);
+    printf("C-ABI vp3d=%d\n", c146_vp3d);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

@@ -594,7 +594,11 @@ menu choice, expander) handed back to C. Keyboard input and focus are part
 of the same surface (`zyntra_context_push_key`/`_push_text`/`_focus` plus the
 `ZyntraKey` mirror), so C consumers drive the same keys the Zig widgets
 handle, and the text fields (`text_input`, `text_input_selected`, `textarea`)
-edit caller-owned buffers with no allocation inside the library. See
+edit caller-owned buffers with no allocation inside the library. A 3D
+viewport also reaches C: the opaque `ZyntraViewport3D` handle runs the
+software 3D rasterizer (cube scene, orbit camera, grid, depth, ray
+picking) and hands back RGBA8 pixels the app presents with
+`zyntra_draw_image` — no GPU required. See
 [`src/c-abi/zyntra.h`](src/c-abi/zyntra.h) and [`docs/C_ABI.md`](docs/C_ABI.md)
 for the exported interface and integration details.
 

@@ -47,9 +47,15 @@ pub const Placement = struct {
 /// Calcula onde a imagem cai dentro de `bounds` para o modo `fit`.
 /// `img` precisa ser válida (`Image.isValid`).
 pub fn fitRect(bounds: types.Rect, img: image_mod.Image, fit: Fit) Placement {
-    const iw: f32 = @floatFromInt(img.width);
-    const ih: f32 = @floatFromInt(img.height);
-    const full = img.fullRegion();
+    return fitRectSize(bounds, img.width, img.height, fit);
+}
+
+/// Como `fitRect`, mas só das DIMENSÕES da imagem (sem precisar dos
+/// pixels) — é o que a fronteira C usa.
+pub fn fitRectSize(bounds: types.Rect, img_width: u32, img_height: u32, fit: Fit) Placement {
+    const iw: f32 = @floatFromInt(img_width);
+    const ih: f32 = @floatFromInt(img_height);
+    const full = image_mod.Region.init(0, 0, img_width, img_height);
     const bw = @max(0, bounds.w);
     const bh = @max(0, bounds.h);
     if (iw <= 0 or ih <= 0) return .{ .dest = bounds, .src = full };
@@ -89,8 +95,8 @@ pub fn fitRect(bounds: types.Rect, img: image_mod.Image, fit: Fit) Placement {
             const scale = @max(bw / iw, bh / ih);
             const src_w = @max(1, @as(u32, @intFromFloat(@floor(bw / scale))));
             const src_h = @max(1, @as(u32, @intFromFloat(@floor(bh / scale))));
-            const src_x = @min(img.width - src_w, (img.width - src_w) / 2);
-            const src_y = @min(img.height - src_h, (img.height - src_h) / 2);
+            const src_x = @min(img_width - src_w, (img_width - src_w) / 2);
+            const src_y = @min(img_height - src_h, (img_height - src_h) / 2);
             return .{
                 .dest = bounds,
                 .src = image_mod.Region.init(src_x, src_y, src_w, src_h),

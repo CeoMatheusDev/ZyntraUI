@@ -7,6 +7,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `c-abi`/`viewport3d`: **viewport 3D na fronteira C** (M146, aditivo) —
+  novo handle opaco `ZyntraViewport3D` roda o rasterizador 3D em software
+  (cena de cubos, câmera de órbita, grade, eixos, profundidade e picking
+  por raio): `zyntra_vp3d_create/destroy/resize/camera/orbit/zoom/
+  add_object/clear_objects/render/pick/pixels`. Os pixels (RGBA8,
+  emprestados) são apresentados na UI com `zyntra_draw_image` — nenhuma
+  dependência de GPU. `zyntra_image_fit_rect` calcula o rect de destino
+  e a região de origem nos modos de ajuste (stretch/contain/cover/none).
+  O widget de imagem ganhou `fitRectSize` (o cálculo a partir das
+  dimensões, sem a imagem) — a API existente segue igual.
 - `draw`/`core`: **observabilidade e reserva de capacidade** (M153, aditivo)
   — novo módulo `draw.stats` com `FrameMetrics` (contadores por tipo de
   comando, bytes de texto, glifos, regiões sujas e crescimentos de buffer;

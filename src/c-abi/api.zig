@@ -68,6 +68,13 @@ const atlas_mod = @import("../text/atlas.zig");
 const bitmap_mod = @import("../text/bitmap.zig");
 const text_layout_mod = @import("../text/layout.zig");
 const text_block_mod = @import("../widgets/text_block.zig");
+const image_widget_mod = @import("../widgets/image.zig");
+const vp3d_math = @import("../viewport3d/math.zig");
+const vp3d_camera = @import("../viewport3d/camera.zig");
+const vp3d_mesh = @import("../viewport3d/mesh.zig");
+const vp3d_raster = @import("../viewport3d/raster.zig");
+const vp3d_pick = @import("../viewport3d/pick.zig");
+const vp3d_grid = @import("../viewport3d/grid.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -1621,6 +1628,306 @@ pub export fn zyntra_framebuffer_render_metrics(
         .commands_drawn = fb.metrics.commands_drawn,
         .pixels_written = fb.metrics.pixels_written,
     };
+    return .ok;
+}
+
+// ---------------------------------------------------------------------------
+// Viewport 3D (M146): rasterizador em software + cena de cubos
+// ---------------------------------------------------------------------------
+
+/// Viewport 3D opaco: renderiza a cena num framebuffer interno (o app
+/// apresenta os pixels com `zyntra_draw_image`). O handle é destruído
+/// com `zyntra_vp3d_destroy`.
+pub const ZyntraViewport3D = opaque {};
+
+const Vp3DObject = struct {
+    id: u32 = 0,
+    center: vp3d_math.Vec3 = .{},
+    size: f32 = 1,
+    color: types_mod.Color = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+};
+
+const Vp3DState = struct {
+    gpa: std.mem.Allocator,
+    fb: software_mod.SoftwareFramebuffer,
+    raster: vp3d_raster.Rasterizer,
+    cam: vp3d_camera.Camera = .{},
+    objects: std.ArrayList(Vp3DObject) = .empty,
+    width: u32 = 0,
+    height: u32 = 0,
+
+    fn deinit(self: *Vp3DState) void {
+        self.objects.deinit(self.gpa);
+        self.raster.deinit();
+        self.fb.deinit(self.gpa);
+    }
+
+    fn aspect(self: *const Vp3DState) f32 {
+        if (self.width == 0 or self.height == 0) return 1;
+        return @as(f32, @floatFromInt(self.width)) / @as(f32, @floatFromInt(self.height));
+    }
+
+    /// (re)aponta o rasterizador para o framebuffer interno.
+    fn bindTarget(self: *Vp3DState) void {
+        self.raster.setTarget(.{
+            .pixels = self.fb.pixels,
+            .width = self.fb.w,
+            .height = self.fb.h,
+            .stride = self.fb.w * 4,
+        }) catch {};
+    }
+};
+
+fn toVp3D(h: *ZyntraViewport3D) *Vp3DState {
+    return @ptrCast(@alignCast(h));
+}
+
+/// Cria um viewport 3D (`width`×`height` em pixels).
+pub export fn zyntra_vp3d_create(
+    width: u32,
+    height: u32,
+    out: ?*?*ZyntraViewport3D,
+) callconv(.c) ct.ZyntraResult {
+    const o = out orelse return .invalid_argument;
+    if (width == 0 or height == 0) return .invalid_argument;
+    const gpa = std.heap.page_allocator;
+    const state = gpa.create(Vp3DState) catch return .out_of_memory;
+    errdefer gpa.destroy(state);
+    state.* = undefined;
+    state.gpa = gpa;
+    state.width = width;
+    state.height = height;
+    state.cam = .{}; // câmera padrão (o app ajusta com zyntra_vp3d_camera)
+    state.objects = .empty;
+    state.fb = software_mod.SoftwareFramebuffer.init(gpa, width, height) catch return .out_of_memory;
+    errdefer state.fb.deinit(gpa);
+    state.raster = vp3d_raster.Rasterizer.init(gpa, width, height) catch return .out_of_memory;
+    errdefer state.raster.deinit();
+    state.bindTarget();
+    o.* = @ptrCast(state);
+    return .ok;
+}
+
+/// Destrói o viewport 3D (libera o framebuffer e a cena).
+pub export fn zyntra_vp3d_destroy(vp: ?*ZyntraViewport3D) callconv(.c) ct.ZyntraResult {
+    const h = vp orelse return .invalid_argument;
+    const gpa = std.heap.page_allocator;
+    const state = toVp3D(h);
+    state.deinit();
+    gpa.destroy(state);
+    return .ok;
+}
+
+/// Redimensiona o viewport (o framebuffer é recriado).
+pub export fn zyntra_vp3d_resize(
+    vp: ?*ZyntraViewport3D,
+    width: u32,
+    height: u32,
+) callconv(.c) ct.ZyntraResult {
+    const h = vp orelse return .invalid_argument;
+    if (width == 0 or height == 0) return .invalid_argument;
+    const state = toVp3D(h);
+    state.fb.deinit(state.gpa);
+    state.fb = software_mod.SoftwareFramebuffer.init(state.gpa, width, height) catch return .out_of_memory;
+    state.raster.deinit();
+    state.raster = vp3d_raster.Rasterizer.init(state.gpa, width, height) catch return .out_of_memory;
+    state.bindTarget();
+    state.width = width;
+    state.height = height;
+    return .ok;
+}
+
+/// Define a câmera (distância, órbita em Y e X, alvo).
+pub export fn zyntra_vp3d_camera(
+    vp: ?*ZyntraViewport3D,
+    distance: f32,
+    yaw: f32,
+    pitch: f32,
+    target_x: f32,
+    target_y: f32,
+    target_z: f32,
+) callconv(.c) ct.ZyntraResult {
+    const h = vp orelse return .invalid_argument;
+    const state = toVp3D(h);
+    if (!std.math.isFinite(distance) or !std.math.isFinite(yaw) or !std.math.isFinite(pitch) or
+        !std.math.isFinite(target_x) or !std.math.isFinite(target_y) or !std.math.isFinite(target_z))
+    {
+        return .invalid_argument;
+    }
+    if (distance <= 0) return .invalid_argument;
+    state.cam.distance = distance;
+    state.cam.yaw = yaw;
+    state.cam.pitch = pitch;
+    state.cam.target = .{ .x = target_x, .y = target_y, .z = target_z };
+    if (!state.cam.isValid()) return .invalid_argument;
+    return .ok;
+}
+
+/// Orbita a câmera (delta em radianos).
+pub export fn zyntra_vp3d_orbit(
+    vp: ?*ZyntraViewport3D,
+    d_yaw: f32,
+    d_pitch: f32,
+) callconv(.c) ct.ZyntraResult {
+    const h = vp orelse return .invalid_argument;
+    toVp3D(h).cam.orbit(d_yaw, d_pitch);
+    return .ok;
+}
+
+/// Aproxima/afasta a câmera (`delta > 0` afasta).
+pub export fn zyntra_vp3d_zoom(
+    vp: ?*ZyntraViewport3D,
+    delta: f32,
+) callconv(.c) ct.ZyntraResult {
+    const h = vp orelse return .invalid_argument;
+    toVp3D(h).cam.zoom(delta);
+    return .ok;
+}
+
+/// Adiciona um objeto (um cubo) à cena.
+pub export fn zyntra_vp3d_add_object(
+    vp: ?*ZyntraViewport3D,
+    id: u32,
+    x: f32,
+    y: f32,
+    z: f32,
+    size: f32,
+    r: u8,
+    g: u8,
+    b: u8,
+) callconv(.c) ct.ZyntraResult {
+    const h = vp orelse return .invalid_argument;
+    const state = toVp3D(h);
+    if (!std.math.isFinite(x) or !std.math.isFinite(y) or !std.math.isFinite(z) or
+        !std.math.isFinite(size) or size <= 0)
+    {
+        return .invalid_argument;
+    }
+    state.objects.append(state.gpa, .{
+        .id = id,
+        .center = .{ .x = x, .y = y, .z = z },
+        .size = size,
+        .color = .{ .r = r, .g = g, .b = b, .a = 255 },
+    }) catch return .out_of_memory;
+    return .ok;
+}
+
+/// Limpa a cena.
+pub export fn zyntra_vp3d_clear_objects(vp: ?*ZyntraViewport3D) callconv(.c) ct.ZyntraResult {
+    const h = vp orelse return .invalid_argument;
+    toVp3D(h).objects.clearRetainingCapacity();
+    return .ok;
+}
+
+/// Renderiza a cena no framebuffer interno (grade + eixos + objetos).
+pub export fn zyntra_vp3d_render(vp: ?*ZyntraViewport3D) callconv(.c) ct.ZyntraResult {
+    const h = vp orelse return .invalid_argument;
+    const state = toVp3D(h);
+    const aspect = state.aspect();
+    state.raster.clear(.{ .r = 12, .g = 14, .b = 20, .a = 255 });
+    vp3d_grid.drawGrid(&state.raster, state.cam, aspect, .{ .spacing = 1.0, .extent = 6 });
+    vp3d_grid.drawAxes(&state.raster, state.cam, aspect, .{ .length = 1.5 });
+    for (state.objects.items) |obj| {
+        var cube = vp3d_mesh.CubeMesh.init(obj.size);
+        state.raster.drawMesh(
+            cube.mesh(),
+            vp3d_math.Mat4.translation(obj.center),
+            state.cam,
+            aspect,
+            .{ .color = obj.color, .backface_culling = true },
+        );
+    }
+    return .ok;
+}
+
+/// Pica o objeto sob a posição de tela (em pixels do viewport).
+/// `out_id` recebe 0 quando não há objeto.
+pub export fn zyntra_vp3d_pick(
+    vp: ?*ZyntraViewport3D,
+    screen_x: f32,
+    screen_y: f32,
+    out_id: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const h = vp orelse return .invalid_argument;
+    const out = out_id orelse return .invalid_argument;
+    const state = toVp3D(h);
+    if (!std.math.isFinite(screen_x) or !std.math.isFinite(screen_y)) return .invalid_argument;
+    out.* = 0;
+    const mvp = state.cam.viewProjection(state.aspect()) orelse return .ok;
+    const ray = vp3d_pick.screenRay(mvp, screen_x, screen_y, state.width, state.height) orelse return .ok;
+    var best: ?vp3d_pick.Hit = null;
+    for (state.objects.items) |obj| {
+        var cube = vp3d_mesh.CubeMesh.init(obj.size);
+        const hit = vp3d_pick.pickMesh(
+            ray,
+            cube.mesh(),
+            vp3d_math.Mat4.translation(obj.center),
+            obj.id,
+            true,
+        ) orelse continue;
+        if (best) |b| {
+            if (hit.distance >= b.distance) continue;
+        }
+        best = hit;
+    }
+    if (best) |b| out.* = b.id;
+    return .ok;
+}
+
+/// Os pixels do viewport (RGBA8, emprestados): o app apresenta com
+/// `zyntra_draw_image`.
+pub export fn zyntra_vp3d_pixels(
+    vp: ?*ZyntraViewport3D,
+    out_pixels: ?*[*]const u8,
+    out_width: ?*u32,
+    out_height: ?*u32,
+    out_stride: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const h = vp orelse return .invalid_argument;
+    const p = out_pixels orelse return .invalid_argument;
+    const w = out_width orelse return .invalid_argument;
+    const hh = out_height orelse return .invalid_argument;
+    const st = out_stride orelse return .invalid_argument;
+    const state = toVp3D(h);
+    p.* = @as([*]const u8, @ptrCast(state.fb.pixels.ptr));
+    w.* = state.fb.w;
+    hh.* = state.fb.h;
+    st.* = state.fb.w * 4;
+    return .ok;
+}
+
+/// Calcula o rect de destino e a região de origem de uma imagem nos
+/// modos de ajuste: 0 = stretch, 1 = contain, 2 = cover, 3 = none.
+pub export fn zyntra_image_fit_rect(
+    bounds: ct.ZyntraRect,
+    img_w: u32,
+    img_h: u32,
+    mode: i32,
+    out_dest: ?*ct.ZyntraRect,
+    out_src_x: ?*u32,
+    out_src_y: ?*u32,
+    out_src_w: ?*u32,
+    out_src_h: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const dest = out_dest orelse return .invalid_argument;
+    const sx = out_src_x orelse return .invalid_argument;
+    const sy = out_src_y orelse return .invalid_argument;
+    const sw = out_src_w orelse return .invalid_argument;
+    const sh = out_src_h orelse return .invalid_argument;
+    if (img_w == 0 or img_h == 0) return .invalid_argument;
+    const fit: image_widget_mod.Fit = switch (mode) {
+        0 => .stretch,
+        1 => .contain,
+        2 => .cover,
+        3 => .none,
+        else => return .invalid_argument,
+    };
+    const place = image_widget_mod.fitRectSize(toRect(bounds), img_w, img_h, fit);
+    dest.* = fromRect(place.dest);
+    sx.* = place.src.x;
+    sy.* = place.src.y;
+    sw.* = place.src.w;
+    sh.* = place.src.h;
     return .ok;
 }
 
@@ -8189,4 +8496,82 @@ test "C-ABI M151: campo de texto com atlas e bloco de texto" {
         &style,
         &res,
     ));
+}
+
+test "C-ABI M146: viewport 3D em C (cena, render, picking)" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var vp: ?*ZyntraViewport3D = null;
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_create(32, 24, &vp));
+    defer _ = zyntra_vp3d_destroy(vp);
+
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_camera(vp, 5.0, 0.7, 0.4, 0, 0, 0));
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_add_object(vp, 7, 0, 0, 0, 1.6, 220, 200, 120));
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_render(vp));
+
+    // Os pixels estão lá e a cena desenhou algo.
+    var px: [*]const u8 = undefined;
+    var w: u32 = 0;
+    var h: u32 = 0;
+    var stride: u32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_pixels(vp, &px, &w, &h, &stride));
+    try stdt.testing.expectEqual(@as(u32, 32), w);
+    try stdt.testing.expectEqual(@as(u32, 24), h);
+    try stdt.testing.expectEqual(@as(u32, 32 * 4), stride);
+    try stdt.testing.expect(@intFromPtr(px) != 0);
+
+    // O clique no centro acerta o objeto.
+    var picked: u32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_pick(vp, 16, 12, &picked));
+    try stdt.testing.expectEqual(@as(u32, 7), picked);
+
+    // Redimensionar e limpar a cena.
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_resize(vp, 16, 16));
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_pixels(vp, &px, &w, &h, &stride));
+    try stdt.testing.expectEqual(@as(u32, 16), w);
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_clear_objects(vp));
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_render(vp));
+    try stdt.testing.expectEqual(ok, zyntra_vp3d_pick(vp, 8, 8, &picked));
+    try stdt.testing.expectEqual(@as(u32, 0), picked);
+
+    // Erros e nulos.
+    try stdt.testing.expectEqual(bad, zyntra_vp3d_create(0, 24, &vp));
+    try stdt.testing.expectEqual(bad, zyntra_vp3d_camera(null, 5, 0, 0, 0, 0, 0));
+    try stdt.testing.expectEqual(bad, zyntra_vp3d_add_object(vp, 1, 0, 0, 0, -1, 0, 0, 0));
+    try stdt.testing.expectEqual(bad, zyntra_vp3d_pick(vp, 0, 0, null));
+    try stdt.testing.expectEqual(bad, zyntra_vp3d_pixels(vp, &px, &w, &h, null));
+}
+
+test "C-ABI M146: modos de ajuste da imagem" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var dest: ct.ZyntraRect = .{};
+    var sx: u32 = 0;
+    var sy: u32 = 0;
+    var sw: u32 = 0;
+    var sh: u32 = 0;
+    const bounds = ct.ZyntraRect{ .x = 0, .y = 0, .w = 100, .h = 50 };
+
+    // contain: 2x2 numa caixa 100x50 ⇒ 50x50 centralizado.
+    try stdt.testing.expectEqual(ok, zyntra_image_fit_rect(bounds, 2, 2, 1, &dest, &sx, &sy, &sw, &sh));
+    try stdt.testing.expectEqual(@as(f32, 50), dest.w);
+    try stdt.testing.expectEqual(@as(f32, 50), dest.h);
+    try stdt.testing.expectEqual(@as(u32, 2), sw);
+
+    // stretch: preenche a caixa.
+    try stdt.testing.expectEqual(ok, zyntra_image_fit_rect(bounds, 2, 2, 0, &dest, &sx, &sy, &sw, &sh));
+    try stdt.testing.expectEqual(@as(f32, 100), dest.w);
+
+    // cover: a imagem 4x4 numa caixa 100x50 é recortada na ALTURA
+    // (a largura cabe inteira).
+    try stdt.testing.expectEqual(ok, zyntra_image_fit_rect(bounds, 4, 4, 2, &dest, &sx, &sy, &sw, &sh));
+    try stdt.testing.expectEqual(@as(u32, 4), sw);
+    try stdt.testing.expectEqual(@as(u32, 2), sh);
+
+    // Modo inválido e dimensões zero.
+    try stdt.testing.expectEqual(bad, zyntra_image_fit_rect(bounds, 2, 2, 9, &dest, &sx, &sy, &sw, &sh));
+    try stdt.testing.expectEqual(bad, zyntra_image_fit_rect(bounds, 0, 2, 0, &dest, &sx, &sy, &sw, &sh));
+    try stdt.testing.expectEqual(bad, zyntra_image_fit_rect(bounds, 2, 2, 0, null, &sx, &sy, &sw, &sh));
 }
