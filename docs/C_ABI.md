@@ -1133,6 +1133,33 @@ zyntra_text_rich_runs_atlas(atlas, (const uint8_t *)text, (uint32_t)strlen(text)
   largura ou origem não-finitas, alinhamento desconhecido e texto
   malformado ⇒ `ZYNTRA_INVALID_TEXT`.
 
+### Vinte e terceiro lote (M166): graphemes
+
+```c
+uint32_t count = 0;
+zyntra_text_grapheme_count(utf8, utf8_len, &count);   /* 3 para "aé\xCC\x81b" */
+
+uint32_t len = 0;
+zyntra_text_grapheme_len(utf8, utf8_len, /*offset*/ 1, &len);  /* 3 bytes */
+
+uint32_t off = 0;
+zyntra_text_grapheme_prev(utf8, utf8_len, 4, &off);  /* 1: o início do "é" */
+zyntra_text_grapheme_next(utf8, utf8_len, 1, &off);  /* 4: o "b" */
+```
+
+* Um **grapheme cluster** é o que o usuário enxerga como UM caractere:
+  a letra com o acento, o emoji com ZWJ (👨‍👩‍👧), a bandeira (🇧🇷).
+  O cursor de um campo anda por cluster — nunca por byte nem por
+  codepoint.
+* A implementação segue o UAX #29 num subconjunto PRÁTICO e
+  documentado (CRLF, controles, Hangul, combinantes, marca espaçadora,
+  Prepend, emoji com ZWJ, bandeiras). **Não é a tabela completa do
+  UCD**: para texto sem diacríticos, sem emoji e sem ZWJ o resultado é
+  exato.
+* Offsets em BYTES (a convenção do resto da API de texto).
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: ponteiros nulos e offset maior
+  que o tamanho do texto.
+
 ## Ownership de atlas e fontes de bitmap
 
 * `ZyntraFontAtlas` é um handle **opaco**: a imagem do atlas e os seus
@@ -1536,6 +1563,15 @@ zyntra_svg_path_bounds
 ```c
 zyntra_text_rich_runs
 zyntra_text_rich_runs_atlas
+```
+
+### Graphemes (clusters Unicode)
+
+```c
+zyntra_text_grapheme_count
+zyntra_text_grapheme_len
+zyntra_text_grapheme_next
+zyntra_text_grapheme_prev
 ```
 
 ### Outros

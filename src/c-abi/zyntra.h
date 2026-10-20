@@ -307,6 +307,24 @@ ZyntraResult zyntra_image_fit_rect(ZyntraRect bounds, uint32_t img_w,
     uint32_t *out_src_h);
 
 /* ------------------------------------------------------------------ */
+/* Graphemes (M166): o cursor anda por cluster, não por codepoint    */
+/* ------------------------------------------------------------------ */
+
+/* O tamanho (em bytes) do GRAPHEME que começa em `offset` (a letra com
+ * o acento, o emoji com ZWJ, a bandeira: UM caractere para o usuário).
+ * `offset` em bytes; o resultado também em bytes. */
+ZyntraResult zyntra_text_grapheme_len(const uint8_t *utf8, uint32_t utf8_len,
+    uint32_t offset, uint32_t *out_len);
+/* O início do GRAPHEME anterior / do próximo (em bytes). */
+ZyntraResult zyntra_text_grapheme_prev(const uint8_t *utf8, uint32_t utf8_len,
+    uint32_t offset, uint32_t *out_offset);
+ZyntraResult zyntra_text_grapheme_next(const uint8_t *utf8, uint32_t utf8_len,
+    uint32_t offset, uint32_t *out_offset);
+/* Quantos GRAPHEMES o texto tem. */
+ZyntraResult zyntra_text_grapheme_count(const uint8_t *utf8, uint32_t utf8_len,
+    uint32_t *out_count);
+
+/* ------------------------------------------------------------------ */
 /* Texto rico (M165): trechos com estilos diferentes                 */
 /* ------------------------------------------------------------------ */
 

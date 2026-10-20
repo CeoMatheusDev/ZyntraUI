@@ -287,3 +287,20 @@ test "icon: o desenho entra na lista de comandos" {
     try std.testing.expectApproxEqAbs(@as(f32, 32), p.bounds.w, 0.01);
     ctx.endFrame();
 }
+
+test "icon: o cache não vaza quando a alocação falha (M168)" {
+    // A falha de alocação em qualquer ponto não pode vazar memória
+    // (o cache é do app: um erro deixa o cache intacto).
+    const Impl = struct {
+        fn run(gpa: std.mem.Allocator) !void {
+            var cache = Cache.init(gpa);
+            defer cache.deinit();
+            const flat = (try cache.get("M 0 0 L 10 0 L 10 10 Z")) orelse return error.TestUnexpectedResult;
+            try std.testing.expect(flat.pointCount() == 3);
+            // Um segundo path (a chave é copiada).
+            _ = try cache.get("M 0 0 L 20 0 L 20 20 Z");
+            try std.testing.expectEqual(@as(usize, 2), cache.count);
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Impl.run, .{});
+}

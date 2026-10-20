@@ -7,6 +7,20 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Adicionado
 
+- `text`/`widgets`/`c-abi`: **grapheme clusters** (M166, aditivo) — o
+  novo módulo `text.unicode` separa bytes, codepoints e CLUSTERS (o
+  que o usuário vê como um caractere): a letra com o acento, o emoji
+  com ZWJ e a bandeira são UM cluster. O cursor do campo de texto e da
+  área de texto agora anda, apaga e posiciona o clique por cluster (a
+  fronteira C ganha `zyntra_text_grapheme_len`/`_prev`/`_next`/
+  `_count`). A implementação segue o UAX #29 num subconjunto prático
+  e documentado (CRLF, Hangul, combinantes, emoji com ZWJ, bandeiras) —
+  não é a tabela completa do UCD.
+- `a11y`: **mudanças semânticas entre frames** (M167, aditivo) — o
+  `a11y.tree` ganhou `Change` (`added`/`removed`/`updated`/`focus`) e
+  `diff`; a `Context` guarda a árvore do frame anterior e publica
+  `ctx.a11yChanges()` depois do `endFrame` (o app atualiza o leitor de
+  tela com o que mudou, não com a tela inteira).
 - `text`/`widgets`/`c-abi`: **texto rico** (M165, aditivo) — o novo
   módulo `text.rich` calcula os TRECHOS de um texto com estilos
   diferentes (cor, negrito, itálico e uma etiqueta livre): `layoutRuns`
@@ -16,6 +30,25 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   fallback ou com atlas de glifos) usa isso. A fronteira C ganha
   `zyntra_text_rich_runs` e `zyntra_text_rich_runs_atlas` (com os
   tipos `ZyntraTextSpan` e `ZyntraTextRun`).
+
+### Testes e benchmarks
+
+- `text`/`draw`/`a11y`/`c-abi`: **cobertura de falha de alocação e
+  fuzzing** (M168, aditivo) — testes com `checkAllAllocationFailures`
+  provam que o cache de ícones, os blocos de caminho da `DrawList` e o
+  path SVG da fronteira C não vazam quando a alocação falha; novos
+  fuzz targets cobrem o parser de path SVG e o módulo de graphemes
+  (nenhum caminho pode estourar o buffer nem entrar em laço infinito).
+- `examples/bench.zig`: **fases novas** (M167, aditivo) — o benchmark
+  passa a medir o layout, a repintura parcial (região suja), o parsing
+  de path SVG, a edição de um documento longo, a virtualização (1
+  milhão de itens) e o uso de memória (crescimentos de buffer por
+  frame). Ver `docs/BENCHMARKS.md`.
+- `examples/app.zig`: **aplicação de referência** — o exemplo integrado
+  agora exercita uma lista VIRTUALIZADA de 50 mil itens (só os
+  visíveis viram comandos), um campo de texto editável, um ícone SVG, a
+  navegação por teclado (Tab), o redimensionamento do viewport e a
+  repintura parcial (a região suja).
 
 ## [1.43.0] - 2026-10-20
 

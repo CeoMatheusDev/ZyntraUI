@@ -277,6 +277,10 @@ int main(void) {
         _Static_assert(sizeof(ZyntraThemeColors) == 20, "ZyntraThemeColors ABI");
         _Static_assert(sizeof(ZyntraTextMetrics) == 16, "ZyntraTextMetrics ABI");
         _Static_assert(sizeof(ZyntraButtonStyle) == 24, "ZyntraButtonStyle ABI");
+        _Static_assert(sizeof(ZyntraTextSpan) == 20, "ZyntraTextSpan ABI");
+        _Static_assert(sizeof(ZyntraTextRun) == 28, "ZyntraTextRun ABI");
+        _Static_assert(sizeof(ZyntraA11yNode) == 72, "ZyntraA11yNode ABI");
+        _Static_assert(sizeof(ZyntraPathContour) == 12, "ZyntraPathContour ABI");
         _Static_assert(sizeof(ZyntraCheckboxStyle) == 24, "ZyntraCheckboxStyle ABI");
         _Static_assert(sizeof(ZyntraSwitchStyle) == 28, "ZyntraSwitchStyle ABI");
         _Static_assert(sizeof(ZyntraSliderStyle) == 32, "ZyntraSliderStyle ABI");
@@ -3880,6 +3884,66 @@ int main(void) {
         c161_paths = (lit > 100);
     }
 
+    /* Texto rico em C (M165): trechos com estilos. */
+    int c165_rich = 0;
+    {
+        const char *text = "abcdef";
+        ZyntraTextSpan spans[1] = {
+            {2, 2, {255, 0, 0, 255}, 1, 0, 7},
+        };
+        ZyntraTextRun runs[8];
+        uint32_t count = 0;
+        CHECK(zyntra_text_rich_runs((const uint8_t *)text,
+            (uint32_t)strlen(text), 10.0f, spans, 1, 0.0f, 0.0f, 0.0f, 0,
+            runs, 8, &count));
+        assert(count == 3);
+        assert(runs[0].len == 2);
+        assert(runs[1].start == 2 && runs[1].len == 2);
+        assert(runs[1].color.r == 255 && runs[1].color.g == 0);
+        assert(runs[1].bold == 1);
+        assert(runs[1].tag == 7);
+        // O trecho estilizado fica depois do primeiro (avanço 6/byte).
+        assert(runs[1].x > runs[0].x);
+
+        /* Centralizado numa caixa de 60. */
+        CHECK(zyntra_text_rich_runs((const uint8_t *)text, 6, 10.0f, NULL, 0,
+            60.0f, 0.0f, 0.0f, 1, runs, 8, &count));
+        assert(count == 1);
+        assert(runs[0].x > 0.0f);
+        c165_rich = (count == 1);
+
+        /* Erros: alinhamento desconhecido, tamanho inválido. */
+        assert(zyntra_text_rich_runs((const uint8_t *)text, 6, 10.0f, NULL,
+                   0, 0.0f, 0.0f, 0.0f, 9, runs, 8, &count) ==
+            ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_text_rich_runs((const uint8_t *)text, 6, 0.0f, NULL, 0,
+                   0.0f, 0.0f, 0.0f, 0, runs, 8, &count) ==
+            ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_text_rich_runs((const uint8_t *)text, 6, 10.0f, NULL, 0,
+                   0.0f, 0.0f, 0.0f, 0, NULL, 8, &count) == ZYNTRA_OK);
+    }
+
+    /* Graphemes em C (M166): o cursor anda por cluster. */
+    int c166_grapheme = 0;
+    {
+        /* "a" + "e" + acento (2 bytes) + "b" = 5 bytes, 3 clusters. */
+        const char *text = "ae\xCC\x81" "b";
+        uint32_t len = 0, count = 0, off = 0;
+        CHECK(zyntra_text_grapheme_count((const uint8_t *)text,
+            (uint32_t)strlen(text), &count));
+        assert(count == 3);
+        CHECK(zyntra_text_grapheme_len((const uint8_t *)text,
+            (uint32_t)strlen(text), 1, &len));
+        assert(len == 3); /* "e" + acento */
+        CHECK(zyntra_text_grapheme_prev((const uint8_t *)text,
+            (uint32_t)strlen(text), 4, &off));
+        assert(off == 1); /* o início do "é" */
+        CHECK(zyntra_text_grapheme_next((const uint8_t *)text,
+            (uint32_t)strlen(text), 1, &off));
+        assert(off == 4); /* o "b" */
+        c166_grapheme = (count == 3 && len == 3);
+    }
+
     /* Árvore de acessibilidade em C (M164). */
     int c164_a11y = 0;
     {
@@ -3989,6 +4053,8 @@ int main(void) {
     printf("C-ABI vp3d=%d\n", c146_vp3d);
     printf("C-ABI paths=%d\n", c161_paths);
     printf("C-ABI a11y=%d\n", c164_a11y);
+    printf("C-ABI rich=%d\n", c165_rich);
+    printf("C-ABI grapheme=%d\n", c166_grapheme);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

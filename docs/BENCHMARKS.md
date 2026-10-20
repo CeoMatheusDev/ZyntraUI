@@ -119,6 +119,39 @@ Nota: a carga do bench passou a rodar 3 amostras (o `checksum` e o
 `pxsum` mudaram de valor por isso — `3300600` e `293181120` — e são
 determinísticos para a carga atual).
 
+## M167 — fases novas do bench (2026-10-20)
+
+O `examples/bench.zig` passou a medir também o **layout**, a
+**repintura parcial** (região suja), o **parsing de path SVG**, a
+**edição de um documento longo**, a **virtualização** (1 milhão de
+itens) e o **uso de memória** (crescimentos de buffer por frame).
+
+Medido nesta máquina (Intel Xeon E5-2680 v3, `ReleaseFast` = `-Ofast`),
+mesma sessão, com os checksums de sempre (`3300600` e `293181120`):
+
+| Fase | Carga | Tempo | Por operação |
+|---|---|---|---|
+| Build do frame | 200 frames × 5500 cmds | ~48,3 ms | ~14 ns/comando |
+| Raster | 50 renders (5500 cmds) | ~86,4 ms | ~1,73 ms/render |
+| Layout | 50.000 posicionamentos | ~131 µs | ~2 ns |
+| Repintura parcial | 50 renders (região 64×64) | ~185 µs | ~3,7 µs/render |
+| Parsing SVG | 2.000 path (parse + achatamento) | ~3,5 ms | ~1,75 µs/path |
+| Edição longa | 2.000 inserções/apagares (64 KiB) | ~1 µs | ~0,5 ns/op |
+| Virtualização | 100.000 consultas sobre 1.000.000 de itens | ~989 µs | ~9 ns/consulta |
+| Memória | 1 frame | — | `growths=0` (zero alocação no steady-state) |
+
+Leituras:
+
+* A **virtualização é O(1) no total**: achar a faixa visível de uma
+  lista de 1 milhão de itens custa o mesmo que de uma lista de 10 —
+  o custo depende dos itens VISÍVEIS, não da coleção ✓.
+* A **repintura parcial** desenha só o que toca a região suja (350 dos
+  5500 comandos foram pintados) — o culling por região funciona ✓.
+* O **parsing de SVG** (~1,75 µs por path) é o motivo do cache de
+  ícones (`widgets.icon.Cache`): analyze uma vez, desenhe depois ✓.
+* A **edição longa** no fim do buffer é O(1) por operação (sem
+  realocação) ✓.
+
 ## Leitura
 
 * Steady-state retém capacidade (`clearRetainingCapacity`): sem syscalls de

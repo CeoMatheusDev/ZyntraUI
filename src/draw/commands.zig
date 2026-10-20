@@ -2186,3 +2186,22 @@ test "DrawList path: rejeita geometria inválida (M159)" {
     try stdt.testing.expectError(error.InvalidCommand, dl.path(gpa, bad, types.Color.rgb(0, 0, 0), 0, .nonzero, .round, .butt));
     try stdt.testing.expectError(error.InvalidCommand, dl.path(gpa, .{ .points = points[0..0], .contours = contours[0..0] }, types.Color.rgb(0, 0, 0), -1, .nonzero, .round, .butt));
 }
+
+test "DrawList path: a falha de alocação não vaza os blocos (M168)" {
+    const Impl = struct {
+        fn run(gpa: std.mem.Allocator) !void {
+            var dl = DrawList.initEmpty();
+            defer dl.deinit(gpa);
+            var segs: [8]path_mod.Segment = undefined;
+            var b = path_mod.Builder.init(&segs);
+            try b.rect(.{ .x = 0, .y = 0, .w = 10, .h = 20 });
+            var points: [32]types.Vec2 = undefined;
+            var contours: [4]path_mod.ContourRange = undefined;
+            const flat = try path_mod.flatten(b.segments(), 0.25, &points, &contours);
+            try dl.path(gpa, flat, types.Color.rgb(1, 2, 3), 0, .nonzero, .round, .butt);
+            try dl.path(gpa, flat, types.Color.rgb(4, 5, 6), 2, .nonzero, .round, .butt);
+            try std.testing.expectEqual(@as(usize, 2), dl.len());
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Impl.run, .{});
+}

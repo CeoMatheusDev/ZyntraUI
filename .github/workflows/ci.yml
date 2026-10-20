@@ -43,6 +43,9 @@ jobs:
           grep -q "^viewport3d " /tmp/zyntra-vp3d.log
           zig build run-paths -Doptimize=${{ matrix.optimize }} 2>&1 | tee /tmp/zyntra-paths.log
           grep -q "^paths " /tmp/zyntra-paths.log
+          zig build run-app -Doptimize=${{ matrix.optimize }} 2>&1 | tee /tmp/zyntra-app.log
+          grep -q "^app lista itens=" /tmp/zyntra-app.log
+          grep -q "^app a11y nos=" /tmp/zyntra-app.log
       - name: Benchmark smoke test
         # std.debug.print escreve em stderr: fundir para o grep validar.
         run: |
@@ -50,3 +53,9 @@ jobs:
           zig build run-bench -Doptimize=${{ matrix.optimize }} 2>&1 | tee /tmp/zyntra-bench.log
           grep -q "^bench frames=.*checksum=" /tmp/zyntra-bench.log
           grep -q "^treeview frames=.*checksum=" /tmp/zyntra-bench.log
+          grep -q "^layout iters=.*checksum=" /tmp/zyntra-bench.log
+          grep -q "^partial frames=.*painted=" /tmp/zyntra-bench.log
+          grep -q "^svg iters=.*checksum=" /tmp/zyntra-bench.log
+          grep -q "^doc ops=.*checksum=" /tmp/zyntra-bench.log
+          grep -q "^virt iters=.*checksum=" /tmp/zyntra-bench.log
+          grep -q "^mem growths=" /tmp/zyntra-bench.log

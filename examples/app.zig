@@ -274,6 +274,122 @@ pub fn main() !void {
     ctx.endFrame();
     std.debug.assert(app.tab == 0);
 
+    // ---- Aplicação de referência: o resto dos recursos ---------------
+    // 1) Lista VIRTUALIZADA: 50 mil itens, só os visíveis são desenhados.
+    // 2) Campo de texto editável.
+    // 3) Ícone SVG (o cache analiza o path uma vez).
+    // 4) Navegação por teclado (Tab circula o foco).
+    // 5) Redimensionamento do viewport.
+    // 6) Repintura parcial (a região suja).
+    const LIST_ITEMS = 50_000;
+    var list_buf: [LIST_ITEMS][]const u8 = undefined;
+    for (&list_buf) |*it| it.* = "item";
+    var list_selected: usize = 1234;
+    var list_scroll: f32 = 24.0 * 1000.0;
+    const list_style = theme.listViewStyle();
+
+    var text_buf: [64]u8 = undefined;
+    @memset(&text_buf, 0);
+    var text_len: usize = 0;
+    var text_cursor: usize = 0;
+
+    var icons = zyntra_ui.widgets.icon.Cache.init(allocator);
+    defer icons.deinit();
+    const icon_path = (try icons.get("M 2 2 L 14 2 L 8 14 Z")).?;
+
+    ctx.beginFrame();
+    // O campo de texto (editável).
+    _ = try zyntra_ui.widgets.text_input.textInput(
+        &ctx,
+        zyntra_ui.Id.fromString("app:input"),
+        zyntra_ui.Rect.init(270, 240, 180, 24),
+        &text_buf,
+        &text_len,
+        &text_cursor,
+        font,
+        theme.textInputStyle(),
+    );
+    // A lista virtualizada (o widget só desenha os visíveis).
+    _ = try zyntra_ui.widgets.list_view.beginListView(
+        &ctx,
+        zyntra_ui.Id.fromString("app:list"),
+        zyntra_ui.Rect.init(270, 270, 180, 100),
+        &list_buf,
+        &list_selected,
+        &list_scroll,
+        list_style,
+    );
+    // O ícone SVG.
+    try zyntra_ui.widgets.icon.drawIcon(
+        &ctx,
+        zyntra_ui.Rect.init(460, 240, 16, 16),
+        icon_path,
+        .{ .fit = .contain, .color = theme.accent },
+    );
+    const list_cmds = ctx.drawCommands().len;
+    ctx.endFrame();
+    std.debug.assert(list_cmds > 0);
+
+    // A lista tem 50 mil itens, mas só os visíveis viram comandos: o
+    // custo não depende do total (virtualização).
+    const visible_items = @as(usize, @intFromFloat(@ceil(100.0 / list_style.item_height))) + 2;
+    std.debug.print(
+        "app lista itens={d} visiveis={d} cmds={d}\n",
+        .{ LIST_ITEMS, visible_items, list_cmds },
+    );
+
+    // O texto digitado aparece no buffer.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = true, .pos = zyntra_ui.Vec2.init(280, 250) } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'Z' } });
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'y' } });
+    _ = try zyntra_ui.widgets.text_input.textInput(
+        &ctx,
+        zyntra_ui.Id.fromString("app:input"),
+        zyntra_ui.Rect.init(270, 240, 180, 24),
+        &text_buf,
+        &text_len,
+        &text_cursor,
+        font,
+        theme.textInputStyle(),
+    );
+    // A digitação marca a região suja (repintura parcial).
+    const dirty = ctx.dirty_rect;
+    ctx.endFrame();
+    std.debug.print(
+        "app texto=\"{s}\" cursor={d} sujo={d}x{d}\n",
+        .{ text_buf[0..text_len], text_cursor, @as(i32, @intFromFloat(dirty.w)), @as(i32, @intFromFloat(dirty.h)) },
+    );
+    std.debug.assert(text_len == 2);
+
+    // Navegação por teclado: o Tab move o foco entre os focáveis.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .tab, .pressed = true, .modifiers = .{} } });
+    _ = try zyntra_ui.widgets.text_input.textInput(
+        &ctx,
+        zyntra_ui.Id.fromString("app:input"),
+        zyntra_ui.Rect.init(270, 240, 180, 24),
+        &text_buf,
+        &text_len,
+        &text_cursor,
+        font,
+        theme.textInputStyle(),
+    );
+    const focus_after_tab = ctx.focus_owner;
+    ctx.endFrame();
+    std.debug.print("app foco_tab={d}\n", .{@backingInt(focus_after_tab.?)});
+    std.debug.assert(focus_after_tab != null);
+
+    // Redimensionamento: o viewport muda e o frame continua válido.
+    try ctx.setViewport(zyntra_ui.Rect.init(0, 0, 480, 320));
+    ctx.beginFrame();
+    _ = try drawApp(&ctx, &app, theme, font);
+    const resized_cmds = ctx.drawCommands().len;
+    ctx.endFrame();
+    try ctx.setViewport(zyntra_ui.Rect.init(0, 0, 640, 400));
+    std.debug.print("app resize cmds={d}\n", .{resized_cmds});
+    std.debug.assert(resized_cmds > 0);
+
     // A árvore de acessibilidade do frame: o que um leitor de tela
     // anunciaria (papel, estado e rótulo de cada nó).
     ctx.beginFrame();

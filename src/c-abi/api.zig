@@ -71,6 +71,7 @@ const text_block_mod = @import("../widgets/text_block.zig");
 const path_mod = @import("../draw/path.zig");
 const a11y_mod = @import("../a11y/tree.zig");
 const rich_mod = @import("../text/rich.zig");
+const unicode_mod = @import("../text/unicode.zig");
 const svg_mod = @import("../draw/svg.zig");
 const image_widget_mod = @import("../widgets/image.zig");
 const vp3d_math = @import("../viewport3d/math.zig");
@@ -1440,6 +1441,69 @@ pub export fn zyntra_text_truncate(
         error.InvalidMetrics, error.InvalidArgument => return .invalid_argument,
     };
     out.* = kept;
+    return .ok;
+}
+
+// ---------------------------------------------------------------------------
+// Graphemes (M166): o cursor anda por cluster, não por codepoint
+// ---------------------------------------------------------------------------
+
+/// O tamanho (em bytes) do GRAPHEME que começa em `offset` (a letra com
+/// o acento, o emoji com ZWJ, a bandeira: UM caractere para o usuário).
+pub export fn zyntra_text_grapheme_len(
+    utf8: ?[*]const u8,
+    utf8_len: u32,
+    offset: u32,
+    out_len: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const text_ptr = utf8 orelse return .invalid_argument;
+    const out = out_len orelse return .invalid_argument;
+    if (offset > utf8_len) return .invalid_argument;
+    const text = text_ptr[0..utf8_len];
+    out.* = @intCast(unicode_mod.graphemeLen(text, offset));
+    return .ok;
+}
+
+/// O início do GRAPHEME anterior (a posição anterior a `offset`).
+pub export fn zyntra_text_grapheme_prev(
+    utf8: ?[*]const u8,
+    utf8_len: u32,
+    offset: u32,
+    out_offset: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const text_ptr = utf8 orelse return .invalid_argument;
+    const out = out_offset orelse return .invalid_argument;
+    if (offset > utf8_len) return .invalid_argument;
+    const text = text_ptr[0..utf8_len];
+    out.* = @intCast(unicode_mod.prevGrapheme(text, offset));
+    return .ok;
+}
+
+/// O início do PRÓXIMO GRAPHEME (a posição depois de `offset`).
+pub export fn zyntra_text_grapheme_next(
+    utf8: ?[*]const u8,
+    utf8_len: u32,
+    offset: u32,
+    out_offset: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const text_ptr = utf8 orelse return .invalid_argument;
+    const out = out_offset orelse return .invalid_argument;
+    if (offset > utf8_len) return .invalid_argument;
+    const text = text_ptr[0..utf8_len];
+    out.* = @intCast(unicode_mod.nextGrapheme(text, offset));
+    return .ok;
+}
+
+/// Quantos GRAPHEMES o texto tem (a contagem que o usuário enxerga).
+pub export fn zyntra_text_grapheme_count(
+    utf8: ?[*]const u8,
+    utf8_len: u32,
+    out_count: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const text_ptr = utf8 orelse return .invalid_argument;
+    const out = out_count orelse return .invalid_argument;
+    const text = text_ptr[0..utf8_len];
+    out.* = @intCast(unicode_mod.graphemeCount(text));
     return .ok;
 }
 
@@ -9343,4 +9407,30 @@ test "C-ABI M165: os trechos do texto rico" {
     try stdt.testing.expectEqual(bad, zyntra_text_rich_runs(text, text.len, 10, &spans, 1, 0, 0, 0, 9, &runs, 8, &count));
     try stdt.testing.expectEqual(bad, zyntra_text_rich_runs(text, text.len, 0, &spans, 1, 0, 0, 0, 0, &runs, 8, &count));
     try stdt.testing.expectEqual(bad, zyntra_text_rich_runs(text, text.len, 10, &spans, 1, 0, 0, 0, 0, &runs, 8, null));
+}
+
+test "C-ABI M168: a falha de alocação no path SVG não vaza" {
+    const Impl = struct {
+        fn run(gpa: std.mem.Allocator) anyerror!void {
+            _ = gpa;
+            var ctx: ?*ZyntraContext = null;
+            try std.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 64, .h = 64 }, &ctx));
+            defer _ = zyntra_context_destroy(ctx);
+            try std.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_begin_frame(ctx));
+            const svg = "M 10 10 L 50 10 L 30 50 Z";
+            // O path SVG aloca temporariamente (análise + achatamento).
+            try std.testing.expectEqual(ct.ZyntraResult.ok, zyntra_draw_svg_path(
+                ctx,
+                svg,
+                @intCast(svg.len),
+                ct.ZyntraColor{ .r = 255, .g = 255, .b = 255, .a = 255 },
+                0,
+                0,
+                1,
+                0,
+            ));
+            try std.testing.expectEqual(ct.ZyntraResult.ok, zyntra_context_end_frame(ctx));
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Impl.run, .{});
 }
