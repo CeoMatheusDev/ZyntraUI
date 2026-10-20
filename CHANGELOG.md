@@ -43,6 +43,11 @@ existia mudou de assinatura ou layout.
   `zyntra_context_set_bitmap_font`/`_clear_bitmap_font` registram no
   contexto o atlas monoespaçado (`ZyntraFontAtlas`), usado por TODOS os
   widgets; `zyntra_draw_text` passou a respeitar a fonte registrada.
+- `software`: **caminho rápido de blit 1:1** (M145, aditivo) — quando o
+  destino é inteiro e do mesmo tamanho da região de origem (o caso
+  comum do texto com atlas/fonte de bitmap), o rasterizador copia o pixel
+  direto, sem amostragem bilinear. A cor resultante é idêntica à do
+  caminho geral (mesma matemática de tint e mistura).
 
 
 ## [1.37.0] - 2026-10-20

@@ -214,12 +214,39 @@ pub const SoftwareFramebuffer = struct {
         }
         if (x1 <= x0 or y1 <= y0) return;
 
-        const inv_w = 1.0 / dst.w;
-        const inv_h = 1.0 / dst.h;
         const tint_r = @as(f32, @floatFromInt(tint.r)) / 255.0;
         const tint_g = @as(f32, @floatFromInt(tint.g)) / 255.0;
         const tint_b = @as(f32, @floatFromInt(tint.b)) / 255.0;
         const tint_a = @as(f32, @floatFromInt(tint.a)) / 255.0;
+
+        // Caminho rápido 1:1 (o caso comum do texto com atlas): destino
+        // inteiro do mesmo tamanho da origem ⇒ cópia direta do pixel,
+        // sem amostragem bilinear. Mesma cor que o caminho geral.
+        if (dst.w == @as(f32, @floatFromInt(src.w)) and
+            dst.h == @as(f32, @floatFromInt(src.h)) and
+            dst.x == @floor(dst.x) and dst.y == @floor(dst.y))
+        {
+            var y = y0;
+            while (y < y1) : (y += 1) {
+                const sy = src.y + @as(u32, @intCast(y - @as(i64, @intFromFloat(@floor(dst.y)))));
+                var x = x0;
+                while (x < x1) : (x += 1) {
+                    const sx = src.x + @as(u32, @intCast(x - @as(i64, @intFromFloat(@floor(dst.x)))));
+                    const p = imagePixel(pixels, stride, sx, sy);
+                    const c = types.Color{
+                        .r = quantizeChannel(@as(f32, @floatFromInt(p[0])) * tint_r),
+                        .g = quantizeChannel(@as(f32, @floatFromInt(p[1])) * tint_g),
+                        .b = quantizeChannel(@as(f32, @floatFromInt(p[2])) * tint_b),
+                        .a = quantizeChannel(@as(f32, @floatFromInt(p[3])) * tint_a),
+                    };
+                    self.set(@intCast(x), @intCast(y), c);
+                }
+            }
+            return;
+        }
+
+        const inv_w = 1.0 / dst.w;
+        const inv_h = 1.0 / dst.h;
         const src_x_max = @as(f32, @floatFromInt(src.x + src.w - 1));
         const src_y_max = @as(f32, @floatFromInt(src.y + src.h - 1));
 
@@ -2135,4 +2162,70 @@ test "alfa global atenua os comandos seguintes (M140)" {
     try stdt.testing.expectError(error.InvalidCommand, dl3.pushAlpha(gpa, -0.5));
     try stdt.testing.expectError(error.InvalidCommand, dl3.pushAlpha(gpa, std.math.nan(f32)));
     try stdt.testing.expectEqual(@as(usize, 0), dl3.len());
+}
+
+test "blit 1:1 copia o pixel exato (caminho rápido) (M145)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 8, 8);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+
+    // Imagem 3x2 com cores e alfas variados.
+    const pixels = [3 * 2 * 4]u8{
+        255, 0,  0,   255, 0,   255, 0,  255,
+        0,   0,  255, 255, 128, 64,  32, 128,
+        10,  20, 30,  40,  200, 100, 50, 64,
+    };
+    const img = try image_mod.Image.init(3, 2, &pixels);
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    // 1:1 em posição inteira: cópia exata.
+    try dl.image(gpa, types.Rect.init(2, 1, 3, 2), img, types.Color.rgb(255, 255, 255));
+    _ = try render(&fb, dl.items(), types.Rect.init(0, 0, 8, 8));
+
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(2, 1));
+    try stdt.testing.expectEqual([4]u8{ 0, 255, 0, 255 }, fb.get(3, 1));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 255, 255 }, fb.get(4, 1));
+    // A linha de baixo tem alfa 128/40/64: misturados sobre o fundo
+    // opaco preto (source-over), não copiedos.
+    try stdt.testing.expectEqual([4]u8{ 64, 32, 16, 255 }, fb.get(2, 2));
+    try stdt.testing.expectEqual([4]u8{ 2, 3, 5, 255 }, fb.get(3, 2));
+    try stdt.testing.expectEqual([4]u8{ 50, 25, 13, 255 }, fb.get(4, 2));
+    // Fora do destino nada foi desenhado.
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(5, 1));
+
+    // Tint vermelho: os canais são multiplicados (o alfa também).
+    var fb2 = try SoftwareFramebuffer.init(gpa, 4, 4);
+    defer fb2.deinit(gpa);
+    fb2.clear(types.Color.rgb(0, 0, 0));
+    var dl2 = commands.DrawList.initEmpty();
+    defer dl2.deinit(gpa);
+    // Região 1x1 (o pixel vermelho) num destino 1x1: cópia 1:1.
+    try dl2.imageRegion(
+        gpa,
+        types.Rect.init(0, 0, 1, 1),
+        img,
+        image_mod.Region.init(0, 0, 1, 1),
+        .{ .r = 255, .g = 0, .b = 0, .a = 128 },
+    );
+    _ = try render(&fb2, dl2.items(), types.Rect.init(0, 0, 4, 4));
+    // Cor: r = 255, g = 0, b = 0, a = 128; misturado sobre o preto
+    // opaco ⇒ alfa final 255 e r = 128.
+    try stdt.testing.expectEqual([4]u8{ 128, 0, 0, 255 }, fb2.get(0, 0));
+
+    // Mesma imagem, agora ESCALADA (caminho bilinear): o canto mistura
+    // os vizinhos (não é cópia), mas continua sendo o vermelho dominante.
+    var fb3 = try SoftwareFramebuffer.init(gpa, 4, 4);
+    defer fb3.deinit(gpa);
+    fb3.clear(types.Color.rgb(0, 0, 0));
+    var dl3 = commands.DrawList.initEmpty();
+    defer dl3.deinit(gpa);
+    try dl3.image(gpa, types.Rect.init(0, 0, 2, 2), img, types.Color.rgb(255, 255, 255));
+    _ = try render(&fb3, dl3.items(), types.Rect.init(0, 0, 4, 4));
+    const corner = fb3.get(0, 0);
+    try stdt.testing.expect(corner[0] > corner[1]);
+    try stdt.testing.expect(corner[0] > corner[2]);
+    try stdt.testing.expect(corner[0] > 128);
 }
