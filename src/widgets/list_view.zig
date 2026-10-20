@@ -178,6 +178,14 @@ pub fn beginListView(
     // frame da rolagem.
     try ctx.mark_hot(id, bounds, res.hovered_index != null or res.changed);
 
+    // Acessibilidade (M164): a lista é um nó de lista; o item
+    // selecionado é o valor.
+    try ctx.pushA11yWidget(id, .listbox, bounds, .{
+        .focused = ctx.hasFocus(id),
+        .selected = true,
+    });
+    if (res.selected < items.len) ctx.setA11yValue(id, items[res.selected]);
+
     // Desenho: fundo
     ctx.draw.rectFilled(ctx.allocator, bounds, style.bg) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,

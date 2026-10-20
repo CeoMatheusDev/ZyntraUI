@@ -306,6 +306,65 @@ ZyntraResult zyntra_image_fit_rect(ZyntraRect bounds, uint32_t img_w,
     uint32_t *out_src_h);
 
 /* ------------------------------------------------------------------ */
+/* Acessibilidade (M164): a árvore de nós do frame                   */
+/* ------------------------------------------------------------------ */
+
+/* Um nó da árvore de acessibilidade. O rótulo e o valor são
+ * EMPRESTADOS (apontam para o texto do app) e valem até o próximo
+ * `zyntra_context_begin_frame`. */
+typedef struct ZyntraA11yNode {
+    uint64_t id;        /* id do widget (0 = sem id) */
+    uint8_t role;       /* papel (ver ZyntraA11yRole) */
+    uint32_t state;     /* flags: focado, desabilitado, marcado, ... */
+    ZyntraRect bounds;  /* caixa em pixels lógicos */
+    uint64_t parent;    /* id do pai (0 = sem pai) */
+    const uint8_t *label; /* pode ser NULL */
+    uint32_t label_len;
+    const uint8_t *value; /* pode ser NULL */
+    uint32_t value_len;
+} ZyntraA11yNode;
+
+/* Papéis (os mesmos valores de `a11y.tree.Role` da API Zig). */
+typedef enum ZyntraA11yRole {
+    ZYNTRA_A11Y_WINDOW = 0,
+    ZYNTRA_A11Y_GROUP = 1,
+    ZYNTRA_A11Y_LABEL = 2,
+    ZYNTRA_A11Y_BUTTON = 3,
+    ZYNTRA_A11Y_TOGGLE_BUTTON = 4,
+    ZYNTRA_A11Y_RADIO = 5,
+    ZYNTRA_A11Y_SLIDER = 6,
+    ZYNTRA_A11Y_TEXTBOX = 7,
+    ZYNTRA_A11Y_MULTILINE_TEXTBOX = 8,
+    ZYNTRA_A11Y_IMAGE = 9,
+    ZYNTRA_A11Y_PROGRESSBAR = 10,
+    ZYNTRA_A11Y_LISTBOX = 11,
+    ZYNTRA_A11Y_LISTITEM = 12,
+    ZYNTRA_A11Y_MENU = 13,
+    ZYNTRA_A11Y_MENUITEM = 14,
+    ZYNTRA_A11Y_MENUBAR = 15,
+    ZYNTRA_A11Y_TABLIST = 16,
+    ZYNTRA_A11Y_TAB = 17,
+    ZYNTRA_A11Y_TREE = 18,
+    ZYNTRA_A11Y_TREEITEM = 19,
+    ZYNTRA_A11Y_SEPARATOR = 20,
+    ZYNTRA_A11Y_TOOLTIP = 21,
+    ZYNTRA_A11Y_CANVAS = 22,
+    ZYNTRA_A11Y_COMBOBOX = 23,
+    ZYNTRA_A11Y_CUSTOM = 24,
+} ZyntraA11yRole;
+
+/* Quantos nós a árvore tem no frame atual. */
+ZyntraResult zyntra_a11y_node_count(ZyntraContext *ctx, uint32_t *out_count);
+/* O nó de um índice (0 = primeiro registrado). */
+ZyntraResult zyntra_a11y_node_at(ZyntraContext *ctx, uint32_t index,
+    ZyntraA11yNode *out_node);
+/* Rótulo/valor de um widget (o texto anunciado). */
+ZyntraResult zyntra_a11y_set_label(ZyntraContext *ctx, uint64_t id,
+    const uint8_t *utf8, uint32_t utf8_len);
+ZyntraResult zyntra_a11y_set_value(ZyntraContext *ctx, uint64_t id,
+    const uint8_t *utf8, uint32_t utf8_len);
+
+/* ------------------------------------------------------------------ */
 /* Caminhos vetoriais (M161): preenchimento e traço                  */
 /* ------------------------------------------------------------------ */
 

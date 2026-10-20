@@ -27,6 +27,13 @@ pub fn progress(
     if (!std.math.isFinite(frac)) return error.InvalidArgument;
     const t = std.math.clamp(frac, 0, 1);
 
+    // Acessibilidade (M164): barra de progresso (o app informa o
+    // rótulo e o percentual).
+    try ctx.pushA11y(.{
+        .role = .progressbar,
+        .bounds = bounds,
+    });
+
     ctx.draw.rectFilled(ctx.allocator, bounds, style.bg) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,

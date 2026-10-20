@@ -328,6 +328,61 @@ pub const ZyntraInspectorStyle = style_mod.InspectorStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
+/// Um nó da árvore de acessibilidade (M164).
+///
+/// O rótulo e o valor são EMPRESTADOS (apontam para o texto do app) e
+/// valem até o próximo frame.
+pub const ZyntraA11yNode = extern struct {
+    /// Id do widget (0 = sem id).
+    id: u64 = 0,
+    /// Papel do nó (ver `ZyntraA11yRole`).
+    role: u8 = 0,
+    /// Estados (flags: focado, desabilitado, marcado, ...).
+    state: u32 = 0,
+    /// Caixa do nó em pixels lógicos.
+    bounds: ZyntraRect = .{},
+    /// Id do pai (0 = sem pai).
+    parent: u64 = 0,
+    /// Rótulo (emprestado; pode ser NULL).
+    label: ?[*]const u8 = null,
+    /// Comprimento do rótulo em bytes.
+    label_len: u32 = 0,
+    /// Valor (emprestado; pode ser NULL).
+    value: ?[*]const u8 = null,
+    /// Comprimento do valor em bytes.
+    value_len: u32 = 0,
+};
+
+/// Papéis da árvore de acessibilidade (M164) — os mesmos valores de
+/// `a11y.tree.Role` da API Zig.
+pub const ZyntraA11yRole = enum(u8) {
+    ZYNTRA_A11Y_WINDOW = 0,
+    ZYNTRA_A11Y_GROUP = 1,
+    ZYNTRA_A11Y_LABEL = 2,
+    ZYNTRA_A11Y_BUTTON = 3,
+    ZYNTRA_A11Y_TOGGLE_BUTTON = 4,
+    ZYNTRA_A11Y_RADIO = 5,
+    ZYNTRA_A11Y_SLIDER = 6,
+    ZYNTRA_A11Y_TEXTBOX = 7,
+    ZYNTRA_A11Y_MULTILINE_TEXTBOX = 8,
+    ZYNTRA_A11Y_IMAGE = 9,
+    ZYNTRA_A11Y_PROGRESSBAR = 10,
+    ZYNTRA_A11Y_LISTBOX = 11,
+    ZYNTRA_A11Y_LISTITEM = 12,
+    ZYNTRA_A11Y_MENU = 13,
+    ZYNTRA_A11Y_MENUITEM = 14,
+    ZYNTRA_A11Y_MENUBAR = 15,
+    ZYNTRA_A11Y_TABLIST = 16,
+    ZYNTRA_A11Y_TAB = 17,
+    ZYNTRA_A11Y_TREE = 18,
+    ZYNTRA_A11Y_TREEITEM = 19,
+    ZYNTRA_A11Y_SEPARATOR = 20,
+    ZYNTRA_A11Y_TOOLTIP = 21,
+    ZYNTRA_A11Y_CANVAS = 22,
+    ZYNTRA_A11Y_COMBOBOX = 23,
+    ZYNTRA_A11Y_CUSTOM = 24,
+};
+
 /// Contorno de um caminho vetorial: a faixa de pontos (em pixels
 /// lógicos) que forma um contorno fechado ou aberto.
 pub const ZyntraPathContour = extern struct {

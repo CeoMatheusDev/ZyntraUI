@@ -123,6 +123,13 @@ pub fn image(
     }
     if (bounds.w < 0 or bounds.h < 0) return error.InvalidArgument;
 
+    // Acessibilidade (M164): imagem decorativa (o app pode registrar o
+    // texto alternativo com `ctx.pushA11y`).
+    try ctx.pushA11y(.{
+        .role = .image,
+        .bounds = bounds,
+    });
+
     const place = fitRect(bounds, img, opts.fit);
     if (place.dest.w <= 0 or place.dest.h <= 0) return; // nada a desenhar
     ctx.draw.imageRegion(ctx.allocator, place.dest, img, place.src, opts.tint) catch |err| switch (err) {

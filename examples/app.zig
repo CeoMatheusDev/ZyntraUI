@@ -255,4 +255,28 @@ pub fn main() !void {
     std.debug.print("app f7 aba={d} visiveis={d} draws={d}\n", .{ app.tab, app.visible(&idx7), ctx.drawCommands().len });
     ctx.endFrame();
     std.debug.assert(app.tab == 0);
+
+    // A árvore de acessibilidade do frame: o que um leitor de tela
+    // anunciaria (papel, estado e rótulo de cada nó).
+    ctx.beginFrame();
+    _ = try drawApp(&ctx, &app, theme, font);
+    const a11y = ctx.a11y;
+    var buttons: usize = 0;
+    var labels: usize = 0;
+    for (a11y.items()) |node| {
+        switch (node.role) {
+            .button => buttons += 1,
+            .label => labels += 1,
+            else => {},
+        }
+    }
+    const first = a11y.at(0);
+    std.debug.print(
+        "app a11y nos={d} botoes={d} rotulos={d} primeiro={s} rotulo=\"{s}\"\n",
+        .{ a11y.len(), buttons, labels, @tagName(first.?.role), first.?.label },
+    );
+    ctx.endFrame();
+    std.debug.assert(a11y.len() > 0);
+    std.debug.assert(buttons > 0);
+    std.debug.assert(labels > 0);
 }

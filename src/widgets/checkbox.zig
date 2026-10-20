@@ -83,6 +83,12 @@ pub fn checkbox(
     // alimenta o dirty rect (a alternância por teclado, sem hover, também).
     try ctx.mark_hot(id, box, hovered or res.toggled);
 
+    // Acessibilidade (M164): nó de botão de dois estados.
+    try ctx.pushA11yWidget(id, .toggle_button, box, .{
+        .focused = ctx.hasFocus(id),
+        .checked = checked.*,
+    });
+
     ctx.draw.rectFilled(ctx.allocator, box, bg) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,

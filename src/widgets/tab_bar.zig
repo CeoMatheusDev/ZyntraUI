@@ -148,6 +148,14 @@ pub fn beginTabBar(
     // fundo ⇒ alimenta o dirty rect (o foco não altera o desenho).
     try ctx.mark_hot(id, bounds, res.hovered_index != null or res.changed);
 
+    // Acessibilidade (M164): a barra de abas é uma lista de abas; a aba
+    // ativa é o valor.
+    try ctx.pushA11yWidget(id, .tablist, bounds, .{
+        .focused = ctx.hasFocus(id),
+        .selected = true,
+    });
+    if (active.* < tab_count) ctx.setA11yValue(id, tabs[active.*]);
+
     // Desenho
     const active_i = active.*;
     // Fundo da barra

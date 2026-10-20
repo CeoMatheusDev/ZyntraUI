@@ -56,6 +56,13 @@ pub fn groupBox(
     }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
 
+    // Acessibilidade (M164): agrupamento com título.
+    try ctx.pushA11y(.{
+        .role = .group,
+        .bounds = bounds,
+        .label = title,
+    });
+
     if (style.bg.a > 0) {
         ctx.draw.rectFilled(ctx.allocator, bounds, style.bg) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,

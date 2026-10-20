@@ -28,6 +28,7 @@ const bitmap_mod = @import("../text/bitmap.zig");
 const event_mod = @import("../event/event.zig");
 const draw_mod = @import("../draw/commands.zig");
 const stats_mod = @import("../draw/stats.zig");
+const a11y_mod = @import("../a11y/tree.zig");
 const dnd_mod = @import("../dnd/service.zig");
 
 /// Erros públicos do contexto (M1+M2).
@@ -127,6 +128,16 @@ pub const Context = struct {
     /// Widgets "quentes" do frame corrente, em ordem de declaração.
     /// Vira `hot_prev` no `beginFrame` seguinte.
     hot_now: std.ArrayList(HotEntry) = .empty,
+    /// Árvore de acessibilidade do frame (M164): os widgets registram
+    /// aqui o que um leitor de tela precisa saber. Zera a cada frame.
+    a11y: a11y_mod.Tree = .{},
+    /// Id do "pai" a11y atual (o container que começou por último):
+    /// os nós registrados herdam esse pai.
+    a11y_parent: u64 = 0,
+    /// Pilha de pais a11y (aninhamento de containers).
+    a11y_parents: [16]u64 = @splat(0),
+    /// Profundidade da pilha de pais a11y.
+    a11y_depth: u8 = 0,
 
     const Self = @This();
 
@@ -167,11 +178,15 @@ pub const Context = struct {
         self.focusables.deinit(self.allocator);
         self.hot_prev.deinit(self.allocator);
         self.hot_now.deinit(self.allocator);
+        self.a11y.nodes.deinit(self.allocator);
         self.events = event_mod.EventQueue.initEmpty();
         self.draw = draw_mod.DrawList.initEmpty();
         self.focusables = .empty;
         self.hot_prev = .empty;
         self.hot_now = .empty;
+        self.a11y = .{};
+        self.a11y_parent = 0;
+        self.a11y_depth = 0;
         self.state = .idle;
         self.frame_index = 0;
         self.mouse_pos = null;
@@ -200,6 +215,10 @@ pub const Context = struct {
         self.events.clearRetainingCapacity();
         self.draw.clearRetainingCapacity();
         self.focusables.clearRetainingCapacity();
+        // A árvore a11y é do frame: zera (a capacidade é retida).
+        self.a11y.clear();
+        self.a11y_parent = 0;
+        self.a11y_depth = 0;
         // Fecha o ciclo de interação: o registro quente do frame que
         // terminou vira a base da detecção de saída em `mark_hot`.
         std.mem.swap(std.ArrayList(HotEntry), &self.hot_prev, &self.hot_now);
@@ -329,6 +348,80 @@ pub const Context = struct {
     /// Define o alfa global dos comandos seguintes (0..1). É o gancho
     /// de animações (fade) sobre widgets: o que for desenhado depois
     /// sai atenuado até o próximo `pushAlpha` (ou o fim do frame).
+    /// Registra um nó na árvore de acessibilidade do frame (M164).
+    ///
+    /// O nó herda o pai a11y atual (o container aberto). O rótulo e o
+    /// valor são EMPRESTADOS (o app é dono do texto).
+    pub fn pushA11y(self: *Self, node: a11y_mod.Node) ContextError!void {
+        var n = node;
+        if (n.parent == 0) n.parent = self.a11y_parent;
+        self.a11y.push(self.allocator, n) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+    }
+
+    /// Registra um nó a11y de um widget (atalho para o widget).
+    ///
+    /// O rótulo e o valor ficam vazios: quem sabe o texto do widget
+    /// (o app) os preenche com `setA11yLabel`/`setA11yValue`.
+    pub fn pushA11yWidget(
+        self: *Self,
+        id: id_mod.Id,
+        role: a11y_mod.Role,
+        bounds: types.Rect,
+        state: a11y_mod.State,
+    ) ContextError!void {
+        if (id.isNull()) return;
+        try self.pushA11y(.{
+            .id = id.value(),
+            .role = role,
+            .bounds = bounds,
+            .state = state,
+        });
+    }
+
+    /// Define o RÓTULO do nó de um widget (o texto que o leitor de tela
+    /// anuncia). Aplica ao ÚLTIMO nó registrado com esse id.
+    pub fn setA11yLabel(self: *Self, id: id_mod.Id, label: []const u8) void {
+        if (id.isNull()) return;
+        var i = self.a11y.nodes.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (self.a11y.nodes.items[i].id != id.value()) continue;
+            self.a11y.nodes.items[i].label = label;
+            return;
+        }
+    }
+
+    /// Define o VALOR do nó de um widget (o texto atual de um campo,
+    /// por exemplo).
+    pub fn setA11yValue(self: *Self, id: id_mod.Id, value: []const u8) void {
+        if (id.isNull()) return;
+        var i = self.a11y.nodes.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (self.a11y.nodes.items[i].id != id.value()) continue;
+            self.a11y.nodes.items[i].value = value;
+            return;
+        }
+    }
+
+    /// Abre um container a11y: os nós registrados depois ficam como
+    /// filhos de `id` (até o `endA11yGroup` correspondente).
+    pub fn beginA11yGroup(self: *Self, id: u64) void {
+        if (self.a11y_depth >= self.a11y_parents.len) return; // aninhamento demais: ignora
+        self.a11y_parents[self.a11y_depth] = self.a11y_parent;
+        self.a11y_depth += 1;
+        self.a11y_parent = id;
+    }
+
+    /// Fecha o container a11y (volta ao pai anterior).
+    pub fn endA11yGroup(self: *Self) void {
+        if (self.a11y_depth == 0) return;
+        self.a11y_depth -= 1;
+        self.a11y_parent = self.a11y_parents[self.a11y_depth];
+    }
+
     pub fn pushAlpha(self: *Self, factor: f32) ContextError!void {
         self.draw.pushAlpha(self.allocator, factor) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,

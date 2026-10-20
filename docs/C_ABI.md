@@ -1069,6 +1069,36 @@ zyntra_draw_svg_path_transformed(ctx, (const uint8_t *)svg, svg_len,
   path SVG inválido, fator não-positivo ou não-finito e deslocamento
   não-finito.
 
+### Vinte e primeiro lote (M164): árvore de acessibilidade
+
+```c
+uint32_t count = 0;
+zyntra_a11y_node_count(ctx, &count);
+
+ZyntraA11yNode node;
+zyntra_a11y_node_at(ctx, 0, &node);
+/* node.role == ZYNTRA_A11Y_BUTTON; node.label é o texto anunciado. */
+
+/* O app completa o rótulo/valor de um widget. */
+zyntra_a11y_set_label(ctx, id, (const uint8_t *)"Enviar", 6);
+zyntra_a11y_set_value(ctx, id, (const uint8_t *)"42", 2);
+```
+
+* A árvore de acessibilidade é montada a CADA FRAME: os widgets
+  registram papel (button, toggle_button, radio, slider, textbox,
+  label, listbox, tablist, progressbar, separator, tooltip, image...),
+  estado (focado, marcado, selecionado, editável...) e caixa.
+* `zyntra_a11y_node_count`/`zyntra_a11y_node_at` percorrem a árvore
+  (índice 0 = primeiro registrado no frame). Um leitor de tela (ou
+  qualquer ferramenta de AT) usa isso para anunciar a tela.
+* O rótulo e o valor de um nó são EMPRESTADOS (apontam para o texto do
+  app) e valem até o próximo `zyntra_context_begin_frame`.
+* `zyntra_a11y_set_label`/`zyntra_a11y_set_value` completam (ou
+  corrigem) o texto anunciado de um widget — útil quando o widget não
+  sabe o texto (o botão desenha o rótulo à parte).
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle/ponteiros nulos, índice
+  fora da faixa e id nulo.
+
 ## Ownership de atlas e fontes de bitmap
 
 * `ZyntraFontAtlas` é um handle **opaco**: a imagem do atlas e os seus
@@ -1357,6 +1387,15 @@ zyntra_widget_tooltip
 zyntra_widget_tree_view
 ```
 
+### Acessibilidade (árvore a11y)
+
+```c
+zyntra_a11y_node_at
+zyntra_a11y_node_count
+zyntra_a11y_set_label
+zyntra_a11y_set_value
+```
+
 ### Imagem: modos de ajuste
 
 ```c
@@ -1481,6 +1520,7 @@ zyntra_toolbar_separator
 ### Tipos públicos
 
 ```c
+ZyntraA11yNode
 ZyntraAnimTimer
 ZyntraButtonResult
 ZyntraButtonStyle
@@ -1577,6 +1617,7 @@ ZyntraTreeViewResult
 ZyntraTreeViewStyle
 ZyntraTween
 ZyntraVec2
+ZyntraA11yRole
 ZyntraDndAccept
 ZyntraDockZone
 ZyntraEase

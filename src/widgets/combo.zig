@@ -91,6 +91,13 @@ pub fn combo(
             error.OutOfMemory => return error.OutOfMemory,
             error.InvalidCommand => return error.InvalidCommand,
         };
+        // Acessibilidade (M164): lista suspensa (o valor é a opção
+        // escolhida).
+        try ctx.pushA11yWidget(id, .combobox, bounds, .{
+            .focused = ctx.hasFocus(id),
+            .expanded = true,
+        });
+        if (selected.* < options.len) ctx.setA11yValue(id, options[selected.*]);
         return res;
     }
 

@@ -70,6 +70,11 @@ pub fn label(
             error.InvalidCommand => return error.InvalidCommand,
         };
     }
+
+    // Acessibilidade (M164): o rótulo É o texto (o app não precisa
+    // repetir a informação).
+    try ctx.pushA11yWidget(id, .label, bounds, .{});
+    ctx.setA11yLabel(id, text);
     return res;
 }
 

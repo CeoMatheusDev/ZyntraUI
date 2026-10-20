@@ -58,6 +58,13 @@ pub fn separator(
         return error.InvalidArgument;
     }
     if (bounds.w <= 0 or bounds.h <= 0) return error.InvalidArgument;
+
+    // Acessibilidade (M164): separador (papel decorativo).
+    try ctx.pushA11y(.{
+        .role = .separator,
+        .bounds = bounds,
+    });
+
     try fill(ctx, separatorLineRect(bounds, orientation, style.thickness), style.color);
 }
 

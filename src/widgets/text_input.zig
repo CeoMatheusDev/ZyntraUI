@@ -651,6 +651,14 @@ fn textInputInner(
     // e caret mudam com o foco e com a edição ⇒ alimenta o dirty rect.
     try ctx.mark_hot(id, bounds, focused or res.changed);
 
+    // Acessibilidade (M164): nó de campo de texto (o valor é o texto
+    // atual do campo).
+    try ctx.pushA11yWidget(id, .textbox, bounds, .{
+        .focused = res.focused,
+        .editable = true,
+    });
+    ctx.setA11yValue(id, buffer[0..len.*]);
+
     const bg = if (res.focused) style.bg_focus else style.bg;
     const border = if (res.focused) style.border_focus else style.border;
     ctx.draw.rectFilled(ctx.allocator, bounds, bg) catch |err| switch (err) {

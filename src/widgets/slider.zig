@@ -108,6 +108,12 @@ pub fn slider(
     // aparência (preenchimento/handle) ⇒ alimenta o dirty rect.
     try ctx.mark_hot(id, bounds, hovered or res.dragging or res.changed);
 
+    // Acessibilidade (M164): nó de controle de valor (o app informa o
+    // rótulo e o valor).
+    try ctx.pushA11yWidget(id, .slider, bounds, .{
+        .focused = ctx.hasFocus(id),
+    });
+
     const t = (value.* - min) / (max - min);
     const cy = bounds.y + bounds.h / 2;
     const track = types.Rect{

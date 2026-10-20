@@ -69,6 +69,7 @@ const bitmap_mod = @import("../text/bitmap.zig");
 const text_layout_mod = @import("../text/layout.zig");
 const text_block_mod = @import("../widgets/text_block.zig");
 const path_mod = @import("../draw/path.zig");
+const a11y_mod = @import("../a11y/tree.zig");
 const svg_mod = @import("../draw/svg.zig");
 const image_widget_mod = @import("../widgets/image.zig");
 const vp3d_math = @import("../viewport3d/math.zig");
@@ -1930,6 +1931,79 @@ pub export fn zyntra_image_fit_rect(
     sy.* = place.src.y;
     sw.* = place.src.w;
     sh.* = place.src.h;
+    return .ok;
+}
+
+// ---------------------------------------------------------------------------
+// Acessibilidade (M164): a árvore de nós do frame
+// ---------------------------------------------------------------------------
+
+/// Quantos nós a árvore de acessibilidade tem no frame atual.
+pub export fn zyntra_a11y_node_count(
+    handle: ?*ZyntraContext,
+    out_count: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_count orelse return .invalid_argument;
+    const ctx = toCtx(h);
+    out.* = @intCast(ctx.a11y.len());
+    return .ok;
+}
+
+/// O nó de acessibilidade de um índice (0 = primeiro registrado).
+///
+/// O rótulo e o valor são EMPRESTADOS (apontam para o texto do app) e
+/// valem até o próximo `zyntra_context_begin_frame`.
+pub export fn zyntra_a11y_node_at(
+    handle: ?*ZyntraContext,
+    index: u32,
+    out_node: ?*ct.ZyntraA11yNode,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const out = out_node orelse return .invalid_argument;
+    const ctx = toCtx(h);
+    const node = ctx.a11y.at(index) orelse return .invalid_argument;
+    out.* = .{
+        .id = node.id,
+        .role = @backingInt(node.role),
+        .state = @bitCast(node.state),
+        .bounds = fromRect(node.bounds),
+        .parent = node.parent,
+        .label = if (node.label.len != 0) node.label.ptr else null,
+        .label_len = @intCast(node.label.len),
+        .value = if (node.value.len != 0) node.value.ptr else null,
+        .value_len = @intCast(node.value.len),
+    };
+    return .ok;
+}
+
+/// Define o RÓTULO do nó de um widget (o texto anunciado).
+pub export fn zyntra_a11y_set_label(
+    handle: ?*ZyntraContext,
+    id: u64,
+    utf8: ?[*]const u8,
+    utf8_len: u32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const ctx = toCtx(h);
+    if (id == 0) return .invalid_argument;
+    const text: []const u8 = if (utf8) |p| p[0..utf8_len] else &.{};
+    ctx.setA11yLabel(id_mod.Id.fromU64(id), text);
+    return .ok;
+}
+
+/// Define o VALOR do nó de um widget (o texto atual de um campo).
+pub export fn zyntra_a11y_set_value(
+    handle: ?*ZyntraContext,
+    id: u64,
+    utf8: ?[*]const u8,
+    utf8_len: u32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const ctx = toCtx(h);
+    if (id == 0) return .invalid_argument;
+    const text: []const u8 = if (utf8) |p| p[0..utf8_len] else &.{};
+    ctx.setA11yValue(id_mod.Id.fromU64(id), text);
     return .ok;
 }
 
@@ -9022,4 +9096,38 @@ test "C-ABI M163: ícone SVG (bbox e desenho transformado)" {
         0.0,
         0.0,
     ));
+}
+
+test "C-ABI M164: a árvore de acessibilidade" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var ctx: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 200, .h = 200 }, &ctx));
+    defer _ = zyntra_context_destroy(ctx);
+
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(ctx));
+    const bid: ct.ZyntraId = id_mod.Id.fromString("a11y:btn").value();
+    var style = style_mod.Theme.darkDefault().buttonStyle();
+    _ = zyntra_widget_button(ctx, bid, ct.ZyntraRect{ .x = 10, .y = 10, .w = 100, .h = 30 }, &style, null);
+    try stdt.testing.expectEqual(ok, zyntra_a11y_set_label(ctx, bid, "Enviar", 6));
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(ctx));
+
+    var count: u32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_a11y_node_count(ctx, &count));
+    try stdt.testing.expect(count >= 1);
+
+    var node = ct.ZyntraA11yNode{};
+    try stdt.testing.expectEqual(ok, zyntra_a11y_node_at(ctx, 0, &node));
+    try stdt.testing.expectEqual(@as(u64, bid), node.id);
+    try stdt.testing.expectEqual(@as(u8, @backingInt(a11y_mod.Role.button)), node.role);
+    try stdt.testing.expect(node.label != null);
+    try stdt.testing.expectEqual(@as(u32, 6), node.label_len);
+    try stdt.testing.expectEqualStrings("Enviar", node.label.?[0..node.label_len]);
+
+    // Erros.
+    try stdt.testing.expectEqual(bad, zyntra_a11y_node_at(ctx, 999, &node));
+    try stdt.testing.expectEqual(bad, zyntra_a11y_node_at(ctx, 0, null));
+    try stdt.testing.expectEqual(bad, zyntra_a11y_node_count(ctx, null));
+    try stdt.testing.expectEqual(bad, zyntra_a11y_set_label(ctx, 0, "x", 1));
 }

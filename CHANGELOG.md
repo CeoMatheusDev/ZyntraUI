@@ -5,6 +5,21 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `a11y`/`core`/`widgets`/`c-abi`: **árvore de acessibilidade** (M164,
+  aditivo) — o novo módulo `a11y.tree` define o papel (`Role`), os
+  estados (`State`) e o nó (`Node`) da árvore de acessibilidade; a
+  `Context` mantém a árvore do frame (`ctx.a11y`), os containers
+  abrem grupos (`beginA11yGroup`/`endA11yGroup`) e o app completa o
+  texto anunciado (`setA11yLabel`/`setA11yValue`). Os widgets registram
+  papel, estado e caixa (botão, checkbox/switch, radio, slider, campos
+  de texto, rótulo, lista, abas, progresso, tooltip, separador, imagem,
+  grupo). A fronteira C ganha `zyntra_a11y_node_count`,
+  `zyntra_a11y_node_at`, `zyntra_a11y_set_label` e
+  `zyntra_a11y_set_value` (com os tipos `ZyntraA11yNode` e
+  `ZyntraA11yRole`).
+
 ## [1.42.0] - 2026-10-20
 
 MINOR estável, 100% compatível: os **caminhos vetoriais viram ícone** —

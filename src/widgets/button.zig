@@ -89,6 +89,13 @@ pub fn button(
     // alimenta o dirty rect (tanto na entrada quanto na saída do realce).
     try ctx.mark_hot(id, bounds, hovered or res.pressed);
 
+    // Acessibilidade (M164): o botão é um nó focável; o rótulo é
+    // preenchido pelo app (o widget não sabe o texto).
+    try ctx.pushA11yWidget(id, .button, bounds, .{
+        .focused = ctx.hasFocus(id),
+        .pressed = res.pressed,
+    });
+
     ctx.draw.rectFilled(ctx.allocator, bounds, bg) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
@@ -231,4 +238,78 @@ test "button rejeita bounds não-finitos" {
     ctx.beginFrame();
     try stdt.testing.expectError(error.InvalidArgument, button(&ctx, id, nan_bounds, style));
     ctx.endFrame();
+}
+
+test "a11y M164: os widgets registram nós na árvore do frame" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    const label_mod = @import("label.zig");
+    const input_mod = @import("text_input.zig");
+    const metrics_mod = @import("../text/metrics.zig");
+    const theme = style_mod.Theme.darkDefault();
+
+    var ctx = try context_mod.Context.init(gpa, .{ .viewport = types.Rect.init(0, 0, 200, 200) });
+    defer ctx.deinit();
+    ctx.beginFrame();
+
+    const btn_id = id_mod.Id.fromString("a11y:btn");
+    _ = try button(&ctx, btn_id, types.Rect.init(10, 10, 100, 30), theme.buttonStyle());
+
+    const label_id = id_mod.Id.fromString("a11y:label");
+    _ = try label_mod.label(
+        &ctx,
+        label_id,
+        types.Rect.init(10, 50, 100, 20),
+        "Olá",
+        types.Color.rgb(255, 255, 255),
+        metrics_mod.FontMetrics{},
+        false,
+    );
+
+    const input_id = id_mod.Id.fromString("a11y:input");
+    var buf: [32]u8 = undefined;
+    // O campo tem o texto "abc" (o valor é lido no desenho).
+    buf[0] = 'a';
+    buf[1] = 'b';
+    buf[2] = 'c';
+    var len: usize = 3;
+    var cursor: usize = 3;
+    _ = try input_mod.textInput(
+        &ctx,
+        input_id,
+        types.Rect.init(10, 80, 100, 24),
+        &buf,
+        &len,
+        &cursor,
+        metrics_mod.FontMetrics{},
+        theme.textInputStyle(),
+    );
+
+    ctx.endFrame();
+
+    const tree = ctx.a11y;
+    try stdt.testing.expectEqual(@as(usize, 3), tree.len());
+
+    // O botão.
+    const btn = tree.at(0).?;
+    try stdt.testing.expectEqual(@as(u64, btn_id.value()), btn.id);
+    try stdt.testing.expectEqual(@import("../a11y/tree.zig").Role.button, btn.role);
+
+    // O rótulo carrega o texto.
+    const lab = tree.at(1).?;
+    try stdt.testing.expectEqual(@import("../a11y/tree.zig").Role.label, lab.role);
+    try stdt.testing.expectEqualStrings("Olá", lab.label);
+
+    // O campo carrega o valor (o texto atual).
+    const inp = tree.at(2).?;
+    try stdt.testing.expectEqual(@import("../a11y/tree.zig").Role.textbox, inp.role);
+    try stdt.testing.expectEqualStrings("abc", inp.value);
+    try stdt.testing.expect(inp.state.editable);
+
+    // O app completa o rótulo do botão.
+    ctx.beginFrame();
+    _ = try button(&ctx, btn_id, types.Rect.init(10, 10, 100, 30), theme.buttonStyle());
+    ctx.setA11yLabel(btn_id, "Enviar");
+    ctx.endFrame();
+    try stdt.testing.expectEqualStrings("Enviar", ctx.a11y.at(0).?.label);
 }

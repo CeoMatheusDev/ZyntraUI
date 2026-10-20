@@ -160,6 +160,10 @@ pub fn beginScroll(
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
+
+    // Acessibilidade (M164): o container abre um grupo — os widgets
+    // desenhados dentro dele ficam como filhos.
+    ctx.beginA11yGroup(id.value());
     return res;
 }
 
@@ -173,6 +177,9 @@ pub fn endScroll(
     content_h: f32,
     style: style_mod.ScrollStyle,
 ) context_mod.ContextError!void {
+    // Fecha o grupo a11y aberto no `beginScroll`.
+    ctx.endA11yGroup();
+
     ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = .{}, .null_rect = true } }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,

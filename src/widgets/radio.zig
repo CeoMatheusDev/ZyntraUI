@@ -106,6 +106,13 @@ pub fn radio(
     // Estado de interação (M99): hover e troca de seleção mudam a
     // aparência ⇒ alimenta o dirty rect (setas com foco, sem hover, também).
     try ctx.mark_hot(id, bounds, hovered or res.changed);
+
+    // Acessibilidade (M164): nó de opção (o app informa o rótulo e o
+    // valor selecionado).
+    try ctx.pushA11yWidget(id, .radio, bounds, .{
+        .focused = ctx.hasFocus(id),
+        .selected = selected.* < options.len,
+    });
     const r = @min(style.radio_r, rh / 2 - 1);
     var i: usize = 0;
     while (i < options.len) : (i += 1) {

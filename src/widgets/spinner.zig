@@ -58,6 +58,17 @@ pub fn spinner(
         radius * 2,
     ));
 
+    // Acessibilidade (M164): indicador de progresso indeterminado.
+    try ctx.pushA11y(.{
+        .role = .progressbar,
+        .bounds = types.Rect.init(
+            center.x - radius,
+            center.y - radius,
+            radius * 2,
+            radius * 2,
+        ),
+    });
+
     const head = spinnerHeadIndex(style.dots, t);
     var i: usize = 0;
     while (i < @as(usize, style.dots)) : (i += 1) {

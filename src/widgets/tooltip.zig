@@ -81,6 +81,10 @@ pub fn tooltip(
     // está sobre o anchor (e na saída, pelo contexto).
     try ctx.mark_hot(id, box, true);
 
+    // Acessibilidade (M164): a dica é o texto do tooltip.
+    try ctx.pushA11yWidget(id, .tooltip, box, .{});
+    ctx.setA11yLabel(id, text);
+
     if (state.hover_frames < delay_frames) return res;
     // delay 0: hovered no 1º frame já mostra (frames>=1 > 0). Para
     // delay>0 exige N frames consecutivos. hovered aqui implica

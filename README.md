@@ -34,6 +34,7 @@ Rather than tying UI logic to a window system or GPU API, ZyntraUI keeps those c
 - **Pure Zig core:** Use the native Zig API or the optional C ABI without introducing a heavyweight GUI runtime.
 - **Multi-surface ready:** A window registry, per-surface input routing, repaint composition and draggable/resizable window frames, all on top of the same draw-command pipeline.
 - **Vector paths:** Build shapes and icons with paths (curves, arcs, SVG path data) filled or stroked with anti-aliased edges — no image assets and no external dependencies.
+- **Accessibility:** Every frame exposes an accessibility tree (roles, states, labels and bounds) so screen readers and other assistive tools can announce the UI.
 
 ## Widgets
 
@@ -58,6 +59,7 @@ src/
 ├── core/          Context, types, stable IDs and DPI scale
 ├── event/         Normalized input events
 ├── draw/          Draw commands, renderer contract, RGBA8 images, metrics
+├── a11y/          Accessibility tree (roles, states, nodes)
 ├── layout/        Constraints, flex placement and virtualization helpers
 ├── style/         Themes and widget styles
 ├── widgets/       Widget implementations
