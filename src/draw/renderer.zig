@@ -87,6 +87,7 @@ pub fn commandBounds(cmd: commands.DrawCommand) ?types.Rect {
             return .{ .x = c.pos.x, .y = c.pos.y, .w = c.width, .h = c.size };
         },
         .rect_rounded => |c| return c.rect,
+        .image => |c| return c.rect,
         .rect_gradient => |c| return c.rect,
         .rect_shadow => |c| {
             // União da silhueta e da silhueta deslocada, expandida pelo
@@ -229,6 +230,24 @@ test "cull usa bounds de texto" {
     };
     const s = cull(&outside, vp);
     try stdt.testing.expectEqual(@as(u32, 0), s.visible);
+    try stdt.testing.expectEqual(@as(u32, 1), s.culled);
+}
+
+test "cull usa bounds do comando de imagem (M123)" {
+    const stdt = @import("std");
+    const vp = types.Rect.init(0, 0, 100, 100);
+    var bytes: [16]u8 = undefined;
+    for (&bytes, 0..) |*b, i| b.* = @intCast(i);
+    const img = try @import("image.zig").Image.init(2, 2, &bytes);
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(stdt.testing.allocator);
+    try dl.image(stdt.testing.allocator, types.Rect.init(10, 10, 20, 20), img, types.Color.rgb(255, 255, 255));
+    try dl.image(stdt.testing.allocator, types.Rect.init(500, 500, 20, 20), img, types.Color.rgb(255, 255, 255));
+
+    try stdt.testing.expectEqual(types.Rect.init(10, 10, 20, 20), commandBounds(dl.items()[0]).?);
+    const s = cull(dl.items(), vp);
+    try stdt.testing.expectEqual(@as(u32, 1), s.visible);
     try stdt.testing.expectEqual(@as(u32, 1), s.culled);
 }
 

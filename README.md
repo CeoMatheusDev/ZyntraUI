@@ -56,7 +56,7 @@ src/
 ├── root.zig       Public Zig API
 ├── core/          Context, types, and stable IDs
 ├── event/         Normalized input events
-├── draw/          Draw commands and renderer contract
+├── draw/          Draw commands, renderer contract and RGBA8 images
 ├── layout/        Constraints and placement
 ├── style/         Themes and widget styles
 ├── widgets/       Widget implementations
@@ -171,6 +171,29 @@ mechanism is conservative by
 design: while hot, the widget is treated as changing and its own rect is
 repainted every frame, while the rest of the frame stays skipped. A widget
 that is no longer drawn is unknown to the context — mark its rect yourself.
+
+### Images and sprites (RGBA8)
+
+`draw.image` blits a caller-owned RGBA8 image into a rectangle, with an
+optional source region (sprites/atlas) and a tint. Pixel data is borrowed,
+never copied: the buffer must stay alive until the renderer consumes the
+frame.
+
+```zig
+var pixels: [2 * 2 * 4]u8 = /* RGBA8: vermelho, verde / azul, branco */;
+const img = try zyntra_ui.Image.init(2, 2, &pixels);
+try ctx.draw.image(
+    ctx.allocator,
+    zyntra_ui.Rect.init(0, 0, 32, 32),
+    img,
+    zyntra_ui.Color.rgb(255, 255, 255), // identidade
+);
+```
+
+`draw.imageRegion` restricts the blit to an integer pixel region of the
+image — the same mechanism a sprite atlas or a glyph atlas needs. The
+reference rasterizer samples with bilinear filtering in premultiplied alpha
+and honours clip, culling and partial repaint like every other command.
 
 ### Multi-window registry
 

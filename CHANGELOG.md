@@ -5,6 +5,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `draw`: **imagens RGBA8 nos draw commands** (M123, aditivo) — novo tipo
+  `Image` (pixels RGBA8 emprestados pelo chamador, com `stride` explícito) e
+  `ImageRegion` (sub-retângulo inteiro, para sprites e atlas de glifos). O
+  comando `.image` faz blit escalável com `tint` (modulação RGBA) e região de
+  origem; `DrawList.image`/`imageRegion` enfileiram, `renderer.commandBounds`
+  devolve o rect de destino e o rasterizador de referência amostra com
+  bilinear em alfa pré-multiplicado, respeitando clip, culling e repintura
+  parcial. Sem alocação: os pixels continuam sendo do chamador.
+
 ## [1.35.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a fronteira C avança de forma substancial e

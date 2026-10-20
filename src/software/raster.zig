@@ -15,6 +15,7 @@
 const std = @import("std");
 const types = @import("../core/types.zig");
 const commands = @import("../draw/commands.zig");
+const image_mod = @import("../draw/image.zig");
 const renderer = @import("../draw/renderer.zig");
 
 pub const max_dimension: u32 = 8192;
@@ -167,6 +168,122 @@ pub const SoftwareFramebuffer = struct {
                 self.pixels[o + 2] = @intCast((@as(u32, c.b) * sa + @as(u32, self.pixels[o + 2]) * ia + 127) / 255);
                 self.pixels[o + 3] = @intCast((sa * 255 + @as(u32, self.pixels[o + 3]) * ia + 127) / 255);
                 o += 4;
+            }
+        }
+    }
+
+    /// Desenha uma imagem RGBA8 em `dst`, amostrando `src` com bilinear.
+    /// A interpolação é feita em alfa pré-multiplicado para evitar halos
+    /// escuros nas bordas; `tint` modula RGBA e o `clip` é respeitado.
+    pub fn blitImage(
+        self: *Self,
+        dst: types.Rect,
+        src: image_mod.Region,
+        pixels: [*]const u8,
+        img_w: u32,
+        img_h: u32,
+        stride: u32,
+        tint: types.Color,
+        clip: ?types.Rect,
+    ) void {
+        if (tint.a == 0) return;
+        if (!std.math.isFinite(dst.x) or !std.math.isFinite(dst.y) or
+            !std.math.isFinite(dst.w) or !std.math.isFinite(dst.h) or
+            dst.w <= 0 or dst.h <= 0) return;
+        if (img_w == 0 or img_h == 0) return;
+        if (!src.isValidFor(img_w, img_h)) return;
+        const row_bytes = @as(u64, img_w) * image_mod.bytes_per_pixel;
+        if (row_bytes > std.math.maxInt(u32) or @as(u64, stride) < row_bytes) return;
+        if (@as(u64, stride) * img_h > std.math.maxInt(usize)) return;
+
+        var x0 = @as(i64, @intFromFloat(@floor(dst.x)));
+        var y0 = @as(i64, @intFromFloat(@floor(dst.y)));
+        var x1 = @as(i64, @intFromFloat(@ceil(dst.x + dst.w)));
+        var y1 = @as(i64, @intFromFloat(@ceil(dst.y + dst.h)));
+        x0 = @max(x0, 0);
+        y0 = @max(y0, 0);
+        x1 = @min(x1, self.w);
+        y1 = @min(y1, self.h);
+        if (clip) |cp| {
+            if (!std.math.isFinite(cp.x) or !std.math.isFinite(cp.y) or
+                !std.math.isFinite(cp.w) or !std.math.isFinite(cp.h)) return;
+            x0 = @max(x0, @as(i64, @intFromFloat(@floor(cp.x))));
+            y0 = @max(y0, @as(i64, @intFromFloat(@floor(cp.y))));
+            x1 = @min(x1, @as(i64, @intFromFloat(@ceil(cp.x + cp.w))));
+            y1 = @min(y1, @as(i64, @intFromFloat(@ceil(cp.y + cp.h))));
+        }
+        if (x1 <= x0 or y1 <= y0) return;
+
+        const inv_w = 1.0 / dst.w;
+        const inv_h = 1.0 / dst.h;
+        const tint_r = @as(f32, @floatFromInt(tint.r)) / 255.0;
+        const tint_g = @as(f32, @floatFromInt(tint.g)) / 255.0;
+        const tint_b = @as(f32, @floatFromInt(tint.b)) / 255.0;
+        const tint_a = @as(f32, @floatFromInt(tint.a)) / 255.0;
+        const src_x_max = @as(f32, @floatFromInt(src.x + src.w - 1));
+        const src_y_max = @as(f32, @floatFromInt(src.y + src.h - 1));
+
+        var y = y0;
+        while (y < y1) : (y += 1) {
+            const v = std.math.clamp(
+                @as(f32, @floatFromInt(src.y)) +
+                    ((@as(f32, @floatFromInt(y)) + 0.5 - dst.y) * inv_h) * @as(f32, @floatFromInt(src.h)) - 0.5,
+                @as(f32, @floatFromInt(src.y)),
+                src_y_max,
+            );
+            const sy0: u32 = @intFromFloat(@floor(v));
+            const sy1 = @min(sy0 + 1, src.y + src.h - 1);
+            const fy = v - @as(f32, @floatFromInt(sy0));
+
+            var x = x0;
+            while (x < x1) : (x += 1) {
+                const u = std.math.clamp(
+                    @as(f32, @floatFromInt(src.x)) +
+                        ((@as(f32, @floatFromInt(x)) + 0.5 - dst.x) * inv_w) * @as(f32, @floatFromInt(src.w)) - 0.5,
+                    @as(f32, @floatFromInt(src.x)),
+                    src_x_max,
+                );
+                const sx0: u32 = @intFromFloat(@floor(u));
+                const sx1 = @min(sx0 + 1, src.x + src.w - 1);
+                const fx = u - @as(f32, @floatFromInt(sx0));
+
+                const p00 = imagePixel(pixels, stride, sx0, sy0);
+                const p10 = imagePixel(pixels, stride, sx1, sy0);
+                const p01 = imagePixel(pixels, stride, sx0, sy1);
+                const p11 = imagePixel(pixels, stride, sx1, sy1);
+                const a00 = @as(f32, @floatFromInt(p00[3])) / 255.0;
+                const a10 = @as(f32, @floatFromInt(p10[3])) / 255.0;
+                const a01 = @as(f32, @floatFromInt(p01[3])) / 255.0;
+                const a11 = @as(f32, @floatFromInt(p11[3])) / 255.0;
+                const w00 = (1 - fx) * (1 - fy);
+                const w10 = fx * (1 - fy);
+                const w01 = (1 - fx) * fy;
+                const w11 = fx * fy;
+                const alpha = a00 * w00 + a10 * w10 + a01 * w01 + a11 * w11;
+                var r: f32 = 0;
+                var g: f32 = 0;
+                var b: f32 = 0;
+                if (alpha > 0) {
+                    r = (@as(f32, @floatFromInt(p00[0])) * a00 * w00 +
+                        @as(f32, @floatFromInt(p10[0])) * a10 * w10 +
+                        @as(f32, @floatFromInt(p01[0])) * a01 * w01 +
+                        @as(f32, @floatFromInt(p11[0])) * a11 * w11) / alpha;
+                    g = (@as(f32, @floatFromInt(p00[1])) * a00 * w00 +
+                        @as(f32, @floatFromInt(p10[1])) * a10 * w10 +
+                        @as(f32, @floatFromInt(p01[1])) * a01 * w01 +
+                        @as(f32, @floatFromInt(p11[1])) * a11 * w11) / alpha;
+                    b = (@as(f32, @floatFromInt(p00[2])) * a00 * w00 +
+                        @as(f32, @floatFromInt(p10[2])) * a10 * w10 +
+                        @as(f32, @floatFromInt(p01[2])) * a01 * w01 +
+                        @as(f32, @floatFromInt(p11[2])) * a11 * w11) / alpha;
+                }
+                const c = types.Color{
+                    .r = quantizeChannel(r * tint_r),
+                    .g = quantizeChannel(g * tint_g),
+                    .b = quantizeChannel(b * tint_b),
+                    .a = quantizeChannel(alpha * tint_a * 255.0),
+                };
+                self.set(@intCast(x), @intCast(y), c);
             }
         }
     }
@@ -737,6 +854,15 @@ pub const SoftwareFramebuffer = struct {
     }
 };
 
+fn imagePixel(pixels: [*]const u8, stride: u32, x: u32, y: u32) [4]u8 {
+    const i = @as(usize, y) * @as(usize, stride) + @as(usize, x) * image_mod.bytes_per_pixel;
+    return pixels[i..][0..4].*;
+}
+
+fn quantizeChannel(v: f32) u8 {
+    return @intFromFloat(@round(std.math.clamp(v, 0, 255)));
+}
+
 /// Estatísticas de uma submissão ao rasterizador.
 pub const SoftwareStats = extern struct {
     submitted: u32 = 0,
@@ -844,6 +970,16 @@ fn renderInternal(
                     .line_dashed => |c| fb.strokeLineDashed(c.p0, c.p1, c.thickness, c.dash_len, c.gap_len, mergeClip(clip, area), c.color),
                     .rect_shadow => |c| fb.fillShadow(c.rect, c.radius, c.offset, c.blur, mergeClip(clip, area), c.color),
                     .blur => |c| fb.blurRegion(c.rect, c.radius, mergeClip(clip, area)),
+                    .image => |c| fb.blitImage(
+                        c.rect,
+                        c.src,
+                        c.pixels.?,
+                        c.width,
+                        c.height,
+                        c.stride,
+                        c.tint,
+                        mergeClip(clip, area),
+                    ),
                     else => unreachable,
                 }
                 out.drawn += 1;
@@ -1007,6 +1143,141 @@ test "raster entradas não-finitas saturam em no-op" {
         }
     }
 }
+test "blit de imagem 1:1 escreve os pixels exatos (M123)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 4, 4);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+
+    // 2x2: vermelho, verde / azul, branco.
+    var bytes = [_]u8{
+        255, 0, 0,   255, 0,   255, 0,   255,
+        0,   0, 255, 255, 255, 255, 255, 255,
+    };
+    const img = try image_mod.Image.init(2, 2, &bytes);
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    try dl.image(gpa, types.Rect.init(1, 1, 2, 2), img, types.Color.rgb(255, 255, 255));
+    const stats = try render(&fb, dl.items(), types.Rect.init(0, 0, 4, 4));
+    try stdt.testing.expectEqual(@as(u32, 1), stats.drawn);
+
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(1, 1));
+    try stdt.testing.expectEqual([4]u8{ 0, 255, 0, 255 }, fb.get(2, 1));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 255, 255 }, fb.get(1, 2));
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb.get(2, 2));
+    // Fora do destino o framebuffer é preservado.
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(3, 3));
+}
+
+test "blit de imagem aplica tint e alfa (M123)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 2, 2);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+
+    var bytes = [_]u8{ 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255 };
+    const img = try image_mod.Image.init(2, 2, &bytes);
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    // Tint vermelho opaco.
+    try dl.image(gpa, types.Rect.init(0, 0, 1, 1), img, types.Color.rgb(255, 0, 0));
+    // Tint vermelho a 50% sobre preto.
+    try dl.image(gpa, types.Rect.init(1, 0, 1, 1), img, .{ .r = 255, .g = 0, .b = 0, .a = 128 });
+    _ = try render(&fb, dl.items(), types.Rect.init(0, 0, 2, 2));
+
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(0, 0));
+    // Source-over sobre fundo opaco: alfa final continua 255.
+    try stdt.testing.expectEqual([4]u8{ 128, 0, 0, 255 }, fb.get(1, 0));
+}
+
+test "blit de imagem respeita clip e região de origem (M123)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 4, 4);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+
+    var bytes = [_]u8{
+        255, 0, 0,   255, 0,   255, 0,   255,
+        0,   0, 255, 255, 255, 255, 255, 255,
+    };
+    const img = try image_mod.Image.init(2, 2, &bytes);
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    try dl.clip(gpa, types.Rect.init(0, 0, 1, 1));
+    try dl.image(gpa, types.Rect.init(0, 0, 2, 2), img, types.Color.rgb(255, 255, 255));
+    try dl.clip(gpa, null);
+    // Sprite: só o pixel branco (1,1) da imagem.
+    try dl.imageRegion(
+        gpa,
+        types.Rect.init(2, 2, 1, 1),
+        img,
+        image_mod.Region.init(1, 1, 1, 1),
+        types.Color.rgb(255, 255, 255),
+    );
+    _ = try render(&fb, dl.items(), types.Rect.init(0, 0, 4, 4));
+
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(0, 0));
+    // Fora do clip nada foi desenhado.
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(1, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 1));
+    // Sprite correto.
+    try stdt.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, fb.get(2, 2));
+}
+
+test "blit de imagem escala com bilinear (M123)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 4, 4);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+
+    var bytes = [_]u8{
+        255, 0, 0,   255, 0,   255, 0,   255,
+        0,   0, 255, 255, 255, 255, 255, 255,
+    };
+    const img = try image_mod.Image.init(2, 2, &bytes);
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    try dl.image(gpa, types.Rect.init(0, 0, 4, 4), img, types.Color.rgb(255, 255, 255));
+    _ = try render(&fb, dl.items(), types.Rect.init(0, 0, 4, 4));
+
+    // Borda superior: o primeiro pixel é a origem e o último é a segunda
+    // coluna (clamp nas bordas).
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(0, 0));
+    try stdt.testing.expectEqual([4]u8{ 0, 255, 0, 255 }, fb.get(3, 0));
+    // No meio há mistura entre as duas colunas.
+    const mid = fb.get(1, 0);
+    try stdt.testing.expect(mid[0] > 0 and mid[0] < 255);
+    try stdt.testing.expect(mid[1] > 0 and mid[1] < 255);
+}
+
+test "render de imagem fora do viewport é descartado (M123)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 4, 4);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+
+    var bytes = [_]u8{ 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255 };
+    const img = try image_mod.Image.init(2, 2, &bytes);
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    try dl.image(gpa, types.Rect.init(100, 100, 4, 4), img, types.Color.rgb(255, 255, 255));
+    const stats = try render(&fb, dl.items(), types.Rect.init(0, 0, 4, 4));
+    try stdt.testing.expectEqual(@as(u32, 0), stats.drawn);
+    try stdt.testing.expectEqual(@as(u32, 1), stats.culled);
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 0));
+}
+
 test "fuzz primitivas: sem crash com bits arbitrários" {
     try std.testing.fuzz({}, fuzzRaster, .{});
 }

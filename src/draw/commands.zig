@@ -13,6 +13,7 @@
 const std = @import("std");
 const types = @import("../core/types.zig");
 const metrics_mod = @import("../text/metrics.zig");
+const image_mod = @import("image.zig");
 
 /// Comando único de desenho.
 pub const DrawCommand = union(enum) {
@@ -69,6 +70,21 @@ pub const DrawCommand = union(enum) {
         width: f32,
         start: u32,
         len: u32,
+    },
+    /// Blit de uma imagem RGBA8 para `rect` (escala livre).
+    /// `src` é a região inteira de origem (sprites/atlas); `pixels`
+    /// aponta para o buffer do chamador, que precisa permanecer válido
+    /// até o backend consumir o frame. `stride` está em bytes e `tint`
+    /// modula RGBA (branco opaco = identidade). O backend de referência
+    /// amostra com bilinear e respeita clip/culling.
+    image: extern struct {
+        rect: types.Rect,
+        src: image_mod.Region,
+        pixels: ?[*]const u8,
+        width: u32,
+        height: u32,
+        stride: u32,
+        tint: types.Color,
     },
     /// Retângulo de cantos arredondados uniformes (`radius` em px,
     /// clampado a `min(w,h)/2` pelo backend). O backend de referência
@@ -192,6 +208,19 @@ pub const DrawCommand = union(enum) {
                     finite(c.size) and c.size > 0 and
                     finite(c.width) and c.width >= 0;
             },
+            .image => |c| {
+                if (!finite(c.rect.x) or !finite(c.rect.y) or
+                    !finite(c.rect.w) or !finite(c.rect.h) or
+                    c.rect.w < 0 or c.rect.h < 0) return false;
+                if (c.pixels == null) return false;
+                if (c.width == 0 or c.height == 0) return false;
+                const row_bytes = @as(u64, c.width) * image_mod.bytes_per_pixel;
+                if (row_bytes > std.math.maxInt(u32)) return false;
+                if (@as(u64, c.stride) < row_bytes) return false;
+                const needed = @as(u64, c.stride) * c.height;
+                if (needed > std.math.maxInt(usize)) return false;
+                return c.src.isValidFor(c.width, c.height);
+            },
             .rect_rounded => |c| {
                 return finite(c.rect.x) and finite(c.rect.y) and
                     finite(c.rect.w) and finite(c.rect.h) and
@@ -278,6 +307,7 @@ pub const DrawCommand = union(enum) {
             },
             .rect_shadow => |*c| moveRect(&c.rect, dx, dy),
             .blur => |*c| moveRect(&c.rect, dx, dy),
+            .image => |*c| moveRect(&c.rect, dx, dy),
             .line => |*c| {
                 moveVec(&c.p0, dx, dy);
                 moveVec(&c.p1, dx, dy);
@@ -552,7 +582,168 @@ pub const DrawList = struct {
             .len = @intCast(text.len),
         } });
     }
+
+    /// Enfileira a imagem inteira em `rect` (blit escalável).
+    /// `tint` modula RGBA; use `Color.rgb(255, 255, 255)` para identidade.
+    /// Os bytes de `img` são emprestados e não copiados.
+    pub fn image(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        rect: types.Rect,
+        img: image_mod.Image,
+        tint: types.Color,
+    ) !void {
+        try self.imageRegion(gpa, rect, img, img.fullRegion(), tint);
+    }
+
+    /// Enfileira um sub-retângulo inteiro de `img` em `rect`.
+    /// Útil para sprites e atlas de glifos.
+    pub fn imageRegion(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        rect: types.Rect,
+        img: image_mod.Image,
+        src: image_mod.Region,
+        tint: types.Color,
+    ) !void {
+        if (!img.isValid()) return error.InvalidCommand;
+        try self.push(gpa, .{ .image = .{
+            .rect = rect,
+            .src = src,
+            .pixels = img.pixels.ptr,
+            .width = img.width,
+            .height = img.height,
+            .stride = img.stride,
+            .tint = tint,
+        } });
+    }
 };
+
+test "DrawList image: enfileira, valida e translada (M123)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    var bytes: [16]u8 = undefined;
+    for (&bytes, 0..) |*b, i| b.* = @intCast(i);
+    const img = try image_mod.Image.init(2, 2, &bytes);
+
+    try dl.image(gpa, types.Rect.init(4, 5, 20, 10), img, types.Color.rgb(255, 255, 255));
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    const cmd = dl.items()[0];
+    try stdt.testing.expect(cmd == .image);
+    try stdt.testing.expectEqual(types.Rect.init(4, 5, 20, 10), cmd.image.rect);
+    try stdt.testing.expectEqual(image_mod.Region.init(0, 0, 2, 2), cmd.image.src);
+    try stdt.testing.expectEqual(@as(u32, 2), cmd.image.width);
+    try stdt.testing.expectEqual(@as(u32, 2), cmd.image.height);
+    try stdt.testing.expectEqual(@as(u32, 8), cmd.image.stride);
+    try stdt.testing.expect(cmd.image.pixels != null);
+    try stdt.testing.expectEqual(types.Color.rgb(255, 255, 255), cmd.image.tint);
+
+    // Região de origem (sprite/atlas) é preservada.
+    try dl.imageRegion(
+        gpa,
+        types.Rect.init(0, 0, 4, 4),
+        img,
+        image_mod.Region.init(1, 0, 1, 1),
+        types.Color.rgb(255, 255, 255),
+    );
+    try stdt.testing.expectEqual(image_mod.Region.init(1, 0, 1, 1), dl.items()[1].image.src);
+
+    // Região fora da imagem é recusada sem enfileirar.
+    try stdt.testing.expectError(error.InvalidCommand, dl.imageRegion(
+        gpa,
+        types.Rect.init(0, 0, 4, 4),
+        img,
+        image_mod.Region.init(2, 0, 1, 1),
+        types.Color.rgb(255, 255, 255),
+    ));
+    try stdt.testing.expectError(error.InvalidCommand, dl.imageRegion(
+        gpa,
+        types.Rect.init(0, 0, 4, 4),
+        img,
+        image_mod.Region.init(0, 0, 0, 1),
+        types.Color.rgb(255, 255, 255),
+    ));
+    try stdt.testing.expectEqual(@as(usize, 2), dl.len());
+
+    // Imagem inválida (bytes curtos) é recusada.
+    var short: [8]u8 = undefined;
+    try stdt.testing.expectError(error.InvalidImage, image_mod.Image.initStrided(2, 2, 8, &short));
+
+    // Comandos forjados são rejeitados por `isValid`.
+    var forged = dl.items()[0];
+    forged.image.pixels = null;
+    try stdt.testing.expect(!forged.isValid());
+    forged = dl.items()[0];
+    forged.image.src = image_mod.Region.init(0, 0, 3, 3);
+    try stdt.testing.expect(!forged.isValid());
+    forged = dl.items()[0];
+    forged.image.stride = 4;
+    try stdt.testing.expect(!forged.isValid());
+    forged = dl.items()[0];
+    forged.image.rect = types.Rect.init(0, 0, -1, 4);
+    try stdt.testing.expect(!forged.isValid());
+    forged = dl.items()[0];
+    forged.image.width = 0;
+    try stdt.testing.expect(!forged.isValid());
+}
+
+test "DrawList translateInto preserva comando de imagem (M123)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var src = DrawList.initEmpty();
+    defer src.deinit(gpa);
+    var out = DrawList.initEmpty();
+    defer out.deinit(gpa);
+
+    var bytes: [16]u8 = undefined;
+    for (&bytes, 0..) |*b, i| b.* = @intCast(i);
+    const img = try image_mod.Image.init(2, 2, &bytes);
+    try src.image(gpa, types.Rect.init(1, 2, 8, 8), img, types.Color.rgb(255, 255, 255));
+
+    try src.translateInto(gpa, &out, 10, 20);
+    try stdt.testing.expectEqual(@as(usize, 1), out.len());
+    try stdt.testing.expectEqual(types.Rect.init(11, 22, 8, 8), out.items()[0].image.rect);
+    // A região de origem continua em coordenadas da imagem.
+    try stdt.testing.expectEqual(image_mod.Region.init(0, 0, 2, 2), out.items()[0].image.src);
+    try stdt.testing.expect(out.items()[0].image.pixels != null);
+}
+
+test "fuzz pushImage: sem crash, comando sempre válido" {
+    try std.testing.fuzz({}, fuzzPushImage, .{});
+}
+
+fn fuzzPushImage(_: void, smith: *std.testing.Smith) !void {
+    var fb: [32]u8 = undefined;
+    smith.bytes(&fb);
+    const gpa = std.testing.allocator;
+
+    var bytes: [64]u8 = undefined;
+    for (&bytes, 0..) |*b, i| b.* = @intCast(i);
+    const img = try image_mod.Image.init(4, 4, &bytes);
+
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    const w = @as(f32, @floatFromInt(fb[0] % 40)) + 1.0;
+    const h = @as(f32, @floatFromInt(fb[1] % 40)) + 1.0;
+    const x = @as(f32, @floatFromInt(fb[2] % 20)) - 10.0;
+    const y = @as(f32, @floatFromInt(fb[3] % 20)) - 10.0;
+    const sx = @as(u32, fb[4] % 4);
+    const sy = @as(u32, fb[5] % 4);
+    const sw = @as(u32, fb[6] % (4 - sx + 1));
+    const sh = @as(u32, fb[7] % (4 - sy + 1));
+    const region = image_mod.Region.init(sx, sy, sw, sh);
+
+    dl.imageRegion(gpa, types.Rect.init(x, y, w, h), img, region, types.Color.rgb(255, 255, 255)) catch |err| {
+        try std.testing.expectEqual(error.InvalidCommand, err);
+        return;
+    };
+    try std.testing.expectEqual(@as(usize, 1), dl.len());
+    try std.testing.expect(dl.items()[0].isValid());
+}
 
 test "DrawList helpers + validação" {
     const stdt = @import("std");
