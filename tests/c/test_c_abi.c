@@ -3522,6 +3522,73 @@ int main(void) {
         c129_dpi = (factor == 2.0f);
     }
 
+    /* Composição de IME (M130). */
+    int c130_ime = 0;
+    {
+        uint8_t pre[16];
+        ZyntraImeComposition comp = {pre, sizeof(pre), 0, 0, false, false};
+
+        /* Pré-edit + commit. */
+        CHECK(zyntra_ime_update(&comp, "ni", 2, 2));
+        assert(comp.len == 2 && comp.cursor == 2 && comp.active);
+        CHECK(zyntra_ime_commit(&comp));
+        assert(comp.committed && !comp.active);
+        /* Update invalido (UTF-8) e buffer pequeno demais. */
+        assert(zyntra_ime_update(&comp, "\xff", 1, 0)
+            == ZYNTRA_INVALID_TEXT);
+        {
+            uint8_t tiny[1];
+            ZyntraImeComposition small = {tiny, sizeof(tiny), 0, 0, false,
+                false};
+            assert(zyntra_ime_update(&small, "ab", 2, 0)
+                == ZYNTRA_INVALID_ARGUMENT);
+        }
+        CHECK(zyntra_ime_cancel(&comp));
+        assert(!comp.committed && comp.len == 0);
+
+        /* O texto confirmado entra no buffer do campo. */
+        char buf[32] = {0};
+        size_t len = 0;
+        size_t cursor = 0;
+        size_t anchor = 0;
+        ZyntraTextInputStyle tis;
+        CHECK(zyntra_style_text_input(0, &tis));
+        const ZyntraId ti_ime = zyntra_id_from_string("m130:ti", 7);
+
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_focus(ctx, ti_ime));
+        CHECK(zyntra_ime_update(&comp, "ni", 2, 2));
+        ZyntraTextInputResult tir;
+        CHECK(zyntra_widget_text_input_ime(ctx, ti_ime,
+            (ZyntraRect){0, 0, 200, 30}, buf, sizeof(buf), &len, &cursor,
+            &anchor, &comp, 10.0f, &tis, &tir));
+        assert(tir.focused);
+        assert(len == 0); /* ainda em composição: nada no buffer */
+        CHECK(zyntra_context_end_frame(ctx));
+
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_ime_commit(&comp));
+        CHECK(zyntra_widget_text_input_ime(ctx, ti_ime,
+            (ZyntraRect){0, 0, 200, 30}, buf, sizeof(buf), &len, &cursor,
+            &anchor, &comp, 10.0f, &tis, &tir));
+        assert(tir.changed);
+        assert(len == 2);
+        assert(strcmp(buf, "ni") == 0);
+        assert(cursor == 2);
+        assert(!comp.committed);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Nulos e handle nulo nunca crasham. */
+        assert(zyntra_ime_update(NULL, "a", 1, 0)
+            == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_ime_commit(NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_ime_cancel(NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_widget_text_input_ime(NULL, ti_ime, (ZyntraRect){0, 0,
+            200, 30}, buf, sizeof(buf), &len, &cursor, &anchor, &comp, 10.0f,
+            &tis, &tir) == ZYNTRA_INVALID_ARGUMENT);
+        c130_ime = (len == 2 && strcmp(buf, "ni") == 0);
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -3596,6 +3663,7 @@ int main(void) {
     printf("C-ABI anim ease=%d tween=%d timer=%d color=%d\n",
         c122_ease, c122_tween, c122_timer, c122_color);
     printf("C-ABI imagem px=%d dpi=%d\n", c129_image, c129_dpi);
+    printf("C-ABI ime=%d\n", c130_ime);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

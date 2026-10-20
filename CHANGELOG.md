@@ -68,6 +68,14 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   enfileiram entrada em pixels de dispositivo. O consumidor C ganhou os
   frames de imagem (com checagem de pixel no framebuffer) e de escala.
 
+- `c-abi`: **composição de IME na fronteira C** (M130, aditivo) —
+  `ZyntraImeComposition` (struct travada em 40 bytes; pré-edit no buffer
+  do chamador) com `zyntra_ime_update`/`_commit`/`_cancel`, e
+  `zyntra_widget_text_input_ime`, que aplica o texto confirmado no buffer
+  do campo (substituindo a seleção) e desenha o pré-edit na posição do
+  caret. O consumidor C ganhou o frame de composição (pré-edit, commit e
+  buffer resultante).
+
 ## [1.35.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a fronteira C avança de forma substancial e

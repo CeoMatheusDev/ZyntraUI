@@ -63,6 +63,7 @@ const anim_mod = @import("../anim/anim.zig");
 const commands_mod = @import("../draw/commands.zig");
 const image_mod = @import("../draw/image.zig");
 const scale_mod = @import("../core/scale.zig");
+const ime_mod = @import("../text/ime.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -2189,6 +2190,120 @@ pub export fn zyntra_widget_text_input(
 
 /// Campo de texto com seleção: `anchor` (offset de byte) e `cursor` marcam a
 /// faixa `[min,max)`; ambos pertencem ao chamador e persistem entre frames.
+/// Converte a composição C para o modelo Zig (emprestado).
+fn toImeComp(c: ct.ZyntraImeComposition) ?ime_mod.Composition {
+    const p = c.buf orelse return null;
+    if (c.cap == 0) return null;
+    if (c.len > c.cap or c.cursor > c.len) return null;
+    return .{
+        .buf = p[0..c.cap],
+        .len = c.len,
+        .cursor = c.cursor,
+        .active = c.active,
+        .committed = c.committed,
+    };
+}
+
+/// Devolve o estado da composição para o chamador C.
+fn fromImeComp(dst: *ct.ZyntraImeComposition, src: ime_mod.Composition) void {
+    dst.len = src.len;
+    dst.cursor = src.cursor;
+    dst.active = src.active;
+    dst.committed = src.committed;
+}
+
+/// Substitui o pré-edit da composição (`cursor` em bytes, ajustado para
+/// uma fronteira de codepoint). Texto emprestado só durante a chamada.
+pub export fn zyntra_ime_update(
+    comp: ?*ct.ZyntraImeComposition,
+    utf8: ?[*]const u8,
+    utf8_len: usize,
+    cursor: usize,
+) callconv(.c) ct.ZyntraResult {
+    const c = comp orelse return .invalid_argument;
+    var zig = toImeComp(c.*) orelse return .invalid_argument;
+    if (utf8_len > 0 and utf8 == null) return .invalid_argument;
+    const text: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
+    zig.update(text, cursor) catch |err| return switch (err) {
+        error.InvalidUtf8 => .invalid_text,
+        error.BufferTooSmall => .invalid_argument,
+        error.OutOfSpace => .out_of_memory,
+        error.InvalidState => .invalid_argument,
+    };
+    fromImeComp(c, zig);
+    return .ok;
+}
+
+/// Confirma o pré-edit: o texto fica pendente para o widget aplicar.
+pub export fn zyntra_ime_commit(comp: ?*ct.ZyntraImeComposition) callconv(.c) ct.ZyntraResult {
+    const c = comp orelse return .invalid_argument;
+    var zig = toImeComp(c.*) orelse return .invalid_argument;
+    zig.commit();
+    fromImeComp(c, zig);
+    return .ok;
+}
+
+/// Cancela a composição (descarta o pré-edit).
+pub export fn zyntra_ime_cancel(comp: ?*ct.ZyntraImeComposition) callconv(.c) ct.ZyntraResult {
+    const c = comp orelse return .invalid_argument;
+    var zig = toImeComp(c.*) orelse return .invalid_argument;
+    zig.cancel();
+    fromImeComp(c, zig);
+    return .ok;
+}
+
+/// Campo de texto com composição de IME: aplica o texto confirmado no
+/// buffer (substituindo a seleção) e desenha o pré-edit na posição do
+/// caret.
+pub export fn zyntra_widget_text_input_ime(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    buffer: ?[*]u8,
+    buffer_len: usize,
+    len: ?*usize,
+    cursor: ?*usize,
+    anchor: ?*usize,
+    comp: ?*ct.ZyntraImeComposition,
+    size: f32,
+    style: ?*const ct.ZyntraTextInputStyle,
+    out_result: ?*ct.ZyntraTextInputResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const n = len orelse return .invalid_argument;
+    const cur = cursor orelse return .invalid_argument;
+    const anc = anchor orelse return .invalid_argument;
+    const c = comp orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    const buf = byteBufOf(buffer, buffer_len) catch return .invalid_argument;
+    var zig_comp = toImeComp(c.*) orelse return .invalid_argument;
+    const res = text_input_mod.textInputIme(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        buf,
+        n,
+        cur,
+        anc,
+        &zig_comp,
+        metrics_mod.FontMetrics.withSize(size),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    fromImeComp(c, zig_comp);
+    if (out_result) |o| o.* = .{
+        .focused = res.focused,
+        .changed = res.changed,
+        .submitted = res.submitted,
+        .overflowed = res.overflowed,
+        .selected = res.selected,
+        .undone = res.undone,
+        .redone = res.redone,
+        .len = res.len,
+    };
+    return .ok;
+}
+
 pub export fn zyntra_widget_text_input_selected(
     handle: ?*ZyntraContext,
     id: ct.ZyntraId,
@@ -7022,4 +7137,114 @@ test "C-ABI M129: imagem RGBA8 e escala DPI" {
     try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
     try stdt.testing.expectEqual(bad, zyntra_context_push_device_mouse_button(handle, 9, true, .{}));
     try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI M130: composição de IME no campo de texto" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(ok, zyntra_context_create(.{
+        .x = 0,
+        .y = 0,
+        .w = 400,
+        .h = 200,
+    }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    var pre: [16]u8 = undefined;
+    var comp = ct.ZyntraImeComposition{ .buf = &pre, .cap = pre.len };
+    try stdt.testing.expectEqual(ok, zyntra_ime_update(&comp, "ni", 2, 2));
+    try stdt.testing.expectEqual(@as(usize, 2), comp.len);
+    try stdt.testing.expectEqual(@as(usize, 2), comp.cursor);
+    try stdt.testing.expect(comp.active);
+    try stdt.testing.expectEqual(ok, zyntra_ime_commit(&comp));
+    try stdt.testing.expect(comp.committed);
+    try stdt.testing.expect(!comp.active);
+    try stdt.testing.expectEqual(ok, zyntra_ime_cancel(&comp));
+    try stdt.testing.expect(!comp.committed);
+    try stdt.testing.expectEqual(@as(usize, 0), comp.len);
+
+    // Inválidos: handle/ponteiro nulo, UTF-8 malformado e buffer pequeno.
+    try stdt.testing.expectEqual(bad, zyntra_ime_update(null, "a", 1, 0));
+    try stdt.testing.expectEqual(bad, zyntra_ime_commit(null));
+    try stdt.testing.expectEqual(bad, zyntra_ime_cancel(null));
+    try stdt.testing.expectEqual(ct.ZyntraResult.invalid_text, zyntra_ime_update(&comp, "\xff", 1, 0));
+    var tiny: [1]u8 = undefined;
+    var small = ct.ZyntraImeComposition{ .buf = &tiny, .cap = tiny.len };
+    try stdt.testing.expectEqual(bad, zyntra_ime_update(&small, "ab", 2, 0));
+    // Composição sem buffer é recusada.
+    var nobuf = ct.ZyntraImeComposition{};
+    try stdt.testing.expectEqual(bad, zyntra_ime_update(&nobuf, "a", 1, 0));
+
+    // O commit entra no buffer do campo.
+    var style: ct.ZyntraTextInputStyle = undefined;
+    try stdt.testing.expectEqual(ok, zyntra_style_text_input(0, &style));
+    var buf: [32]u8 = undefined;
+    var len: usize = 0;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    const id = zyntra_id_from_string("m130:ti", 7);
+    var res: ct.ZyntraTextInputResult = .{};
+
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_context_focus(handle, id));
+    try stdt.testing.expectEqual(ok, zyntra_ime_update(&comp, "ni", 2, 2));
+    try stdt.testing.expectEqual(ok, zyntra_widget_text_input_ime(
+        handle,
+        id,
+        .{ .x = 0, .y = 0, .w = 200, .h = 30 },
+        &buf,
+        buf.len,
+        &len,
+        &cursor,
+        &anchor,
+        &comp,
+        10.0,
+        &style,
+        &res,
+    ));
+    try stdt.testing.expect(res.focused);
+    // Em composição, o texto ainda não está no buffer.
+    try stdt.testing.expectEqual(@as(usize, 0), len);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_ime_commit(&comp));
+    try stdt.testing.expectEqual(ok, zyntra_widget_text_input_ime(
+        handle,
+        id,
+        .{ .x = 0, .y = 0, .w = 200, .h = 30 },
+        &buf,
+        buf.len,
+        &len,
+        &cursor,
+        &anchor,
+        &comp,
+        10.0,
+        &style,
+        &res,
+    ));
+    try stdt.testing.expect(res.changed);
+    try stdt.testing.expectEqual(@as(usize, 2), len);
+    try stdt.testing.expectEqualStrings("ni", buf[0..len]);
+    try stdt.testing.expectEqual(@as(usize, 2), cursor);
+    try stdt.testing.expect(!comp.committed);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // Handle nulo nunca crasha.
+    try stdt.testing.expectEqual(bad, zyntra_widget_text_input_ime(
+        null,
+        id,
+        .{ .x = 0, .y = 0, .w = 200, .h = 30 },
+        &buf,
+        buf.len,
+        &len,
+        &cursor,
+        &anchor,
+        &comp,
+        10.0,
+        &style,
+        &res,
+    ));
 }

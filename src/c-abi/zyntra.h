@@ -667,6 +667,25 @@ ZyntraResult zyntra_widget_text_input_selected(ZyntraContext *handle, ZyntraId i
     ZyntraRect bounds, char *buffer, size_t buffer_len, size_t *len, size_t *cursor,
     size_t *anchor, float size, const ZyntraTextInputStyle *style,
     ZyntraTextInputResult *out_result);
+/* Composição de IME (M130): o buffer do pré-edit é do chamador. */
+typedef struct ZyntraImeComposition {
+    uint8_t *buf;    /* buffer do pré-edit (capacidade `cap`) */
+    size_t cap;      /* capacidade do buffer, em bytes */
+    size_t len;      /* bytes válidos do pré-edit */
+    size_t cursor;   /* cursor no pré-edit (byte, fronteira UTF-8) */
+    bool active;     /* composição em andamento */
+    bool committed;  /* texto confirmado aguardando aplicação */
+} ZyntraImeComposition;
+
+ZyntraResult zyntra_ime_update(ZyntraImeComposition *comp, const char *utf8,
+    size_t utf8_len, size_t cursor);
+ZyntraResult zyntra_ime_commit(ZyntraImeComposition *comp);
+ZyntraResult zyntra_ime_cancel(ZyntraImeComposition *comp);
+ZyntraResult zyntra_widget_text_input_ime(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, char *buffer, size_t buffer_len, size_t *len,
+    size_t *cursor, size_t *anchor, ZyntraImeComposition *comp, float size,
+    const ZyntraTextInputStyle *style, ZyntraTextInputResult *out_result);
+
 ZyntraResult zyntra_widget_text_area(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
     char *buffer, size_t buffer_len, size_t *len, size_t *cursor, size_t *anchor,
     float *scroll_y, float size, const ZyntraTextInputStyle *style,

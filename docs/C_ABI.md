@@ -855,6 +855,36 @@ zyntra_draw_image_region(ctx, (ZyntraRect){0, 0, 16, 16}, pixels, 2, 2, 8,
   origem fora da imagem, fator de escala não-finito/≤ 0, ponteiro de
   saída nulo e botão de mouse desconhecido.
 
+### Décimo sexto lote (M130): composição de IME
+
+```c
+uint8_t pre[32];
+ZyntraImeComposition comp = {pre, sizeof(pre), 0, 0, false, false};
+
+/* Callback de IME da plataforma: */
+zyntra_ime_update(&comp, "ni", 2, 2);  /* pré-edit + cursor */
+zyntra_ime_commit(&comp);              /* texto confirmado */
+
+/* No frame: o widget aplica o texto confirmado no buffer do campo. */
+zyntra_widget_text_input_ime(ctx, id, bounds, buffer, sizeof(buffer), &len,
+    &cursor, &anchor, &comp, 10.0f, &style, &result);
+```
+
+* `ZyntraImeComposition` guarda o pré-edit no buffer do CHAMADOR
+  (`buf`/`cap`): a biblioteca não aloca. `len`/`cursor` descrevem o
+  pré-edit, `active` marca a composição em andamento e `committed` o
+  texto confirmado à espera de aplicação.
+* `zyntra_ime_update` substitui o pré-edit e ajusta o cursor para uma
+  fronteira de codepoint; `zyntra_ime_commit` confirma; `zyntra_ime_cancel`
+  descarta. O texto é **emprestado** só durante a chamada.
+* `zyntra_widget_text_input_ime` aplica o texto confirmado no buffer do
+  campo (substituindo a seleção), desenha o pré-edit na posição do caret e
+  mantém o caret dentro do pré-edit durante a composição. Sem foco, a
+  composição é cancelada.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: composição nula, buffer/pré-edit
+  nulos ou inconsistentes, pré-edit maior que o buffer, cursor fora do
+  buffer; UTF-8 malformado ⇒ `ZYNTRA_INVALID_TEXT`.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -928,6 +958,8 @@ zyntra_draw_image_region(ctx, (ZyntraRect){0, 0, 16, 16}, pixels, 2, 2, 8,
   `ZyntraEase` (0..6, mesmos valores de `anim.Ease`).
 * M129: sem novos structs — a imagem e a escala DPI usam só parâmetros
   escalares e o buffer do chamador (nenhuma trava de layout nova).
+* M130: travado `ZyntraImeComposition=40` (ponteiro + 3 `size_t` + 2
+  `bool`, alinhamento 8).
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -948,5 +980,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..." + "C-ABI inspector ..." + "C-ABI anim ..." + "C-ABI imagem ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..." + "C-ABI inspector ..." + "C-ABI anim ..." + "C-ABI imagem ..." + "C-ABI ime ..."
 ```

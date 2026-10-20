@@ -728,6 +728,18 @@ pub const ZyntraInspectorViewResult = extern struct {
     scrolled: bool = false,
 };
 
+/// Composição de IME (M130): pré-edit do input method. O buffer é do
+/// chamador (`buf`/`cap`); `len`/`cursor` descrevem o pré-edit atual e
+/// `committed` marca texto confirmado à espera de aplicação.
+pub const ZyntraImeComposition = extern struct {
+    buf: ?[*]u8 = null,
+    cap: usize = 0,
+    len: usize = 0,
+    cursor: usize = 0,
+    active: bool = false,
+    committed: bool = false,
+};
+
 /// Tween puro (M122). `ease` usa `ZYNTRA_EASE_*` como `int32_t`.
 pub const ZyntraTween = extern struct {
     from: f32 = 0,
@@ -898,6 +910,7 @@ comptime {
     if (@sizeOf(ZyntraInspectorViewOptions) != 20 or @alignOf(ZyntraInspectorViewOptions) != 4) @compileError("ZyntraInspectorViewOptions ABI drift");
     if (@sizeOf(ZyntraInspectorViewResult) != 48 or @alignOf(ZyntraInspectorViewResult) != 8) @compileError("ZyntraInspectorViewResult ABI drift");
     if (@sizeOf(ZyntraTween) != 16 or @alignOf(ZyntraTween) != 4) @compileError("ZyntraTween ABI drift");
+    if (@sizeOf(ZyntraImeComposition) != 40 or @alignOf(ZyntraImeComposition) != 8) @compileError("ZyntraImeComposition ABI drift");
     if (@sizeOf(ZyntraAnimTimer) != 12 or @alignOf(ZyntraAnimTimer) != 4) @compileError("ZyntraAnimTimer ABI drift");
     if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
         @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
@@ -993,6 +1006,8 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 48), @sizeOf(ZyntraInspectorViewResult));
     // Animação M122.
     try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraTween));
+    // IME M130.
+    try stdt.testing.expectEqual(@as(usize, 40), @sizeOf(ZyntraImeComposition));
     try stdt.testing.expectEqual(@as(usize, 12), @sizeOf(ZyntraAnimTimer));
     // Docking: espelhos do modelo e do resultado da área interativa.
     try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));
