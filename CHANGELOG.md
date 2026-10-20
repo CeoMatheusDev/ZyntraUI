@@ -5,6 +5,16 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.40.0] - 2026-10-20
+
+MINOR estável, 100% compatível: a frente de **fonte real** fecha — a área
+de texto agora mede, posiciona o caret e desenha com um atlas de
+glifos (fonte proporcional), e a fronteira C ganha o campo de texto, a
+área de texto e o bloco de texto com atlas. Nada que já existia mudou
+de assinatura ou layout.
+
+### Adicionado
+
 ### Corrigido
 
 - `docs`: o README contava 31 módulos de widget e omitia `image` e
@@ -13,6 +23,7 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   passou a refletir a série estável `1.x`.
 - `docs`: `CONTRIBUTING.md` pedia `zig fmt --check .`; agora usa o mesmo
   comando do CI e do AGENTS.md (`src/ examples/ build.zig`).
+
 
 ## [1.39.0] - 2026-10-20
 
