@@ -213,6 +213,12 @@ pub const ZyntraTableStyle = style_mod.TableStyle;
 pub const ZyntraTreeViewStyle = style_mod.TreeViewStyle;
 /// Mesmo estilo para o campo de texto e a área de texto (como na API Zig).
 pub const ZyntraTextInputStyle = style_mod.TextInputStyle;
+/// Estilos dos widgets de composição/exibição (M115): splitter, spinner,
+/// groupbox e tooltip. O combo reusa `ZyntraButtonStyle`/`ZyntraMenuStyle`.
+pub const ZyntraSplitterStyle = style_mod.SplitterStyle;
+pub const ZyntraSpinnerStyle = style_mod.SpinnerStyle;
+pub const ZyntraGroupBoxStyle = style_mod.GroupBoxStyle;
+pub const ZyntraTooltipStyle = style_mod.TooltipStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
@@ -329,6 +335,32 @@ pub const ZyntraTextAreaResult = extern struct {
     len: usize = 0,
 };
 
+/// Resultado do combo (M115): `changed` quando a escolha mudou de índice
+/// e `open` o estado do dropdown depois do frame.
+pub const ZyntraComboResult = extern struct {
+    changed: bool = false,
+    open: bool = false,
+};
+
+/// Resultado do splitter (M115): `pos` é a posição (clampada) da divisória.
+pub const ZyntraSplitterResult = extern struct {
+    pos: f32 = 0,
+    changed: bool = false,
+    hovered: bool = false,
+    dragging: bool = false,
+};
+
+/// Estado retido do tooltip (M115), do chamador — um por tooltip.
+pub const ZyntraTooltipState = extern struct {
+    hover_frames: u32 = 0,
+};
+
+/// Resultado do tooltip (M115).
+pub const ZyntraTooltipResult = extern struct {
+    visible: bool = false,
+    hovered: bool = false,
+};
+
 /// Zona de acoplamento de um drop (espelha `dock.DockZone`; mesmos valores).
 pub const ZyntraDockZone = enum(c_int) {
     left = 0,
@@ -442,6 +474,14 @@ comptime {
     if (@sizeOf(ZyntraTextInputStyle) != 32 or @alignOf(ZyntraTextInputStyle) != 4) @compileError("ZyntraTextInputStyle ABI drift");
     if (@sizeOf(ZyntraTextInputResult) != 16 or @alignOf(ZyntraTextInputResult) != 8) @compileError("ZyntraTextInputResult ABI drift");
     if (@sizeOf(ZyntraTextAreaResult) != 16 or @alignOf(ZyntraTextAreaResult) != 8) @compileError("ZyntraTextAreaResult ABI drift");
+    if (@sizeOf(ZyntraSplitterStyle) != 20 or @alignOf(ZyntraSplitterStyle) != 4) @compileError("ZyntraSplitterStyle ABI drift");
+    if (@sizeOf(ZyntraSpinnerStyle) != 20 or @alignOf(ZyntraSpinnerStyle) != 4) @compileError("ZyntraSpinnerStyle ABI drift");
+    if (@sizeOf(ZyntraGroupBoxStyle) != 24 or @alignOf(ZyntraGroupBoxStyle) != 4) @compileError("ZyntraGroupBoxStyle ABI drift");
+    if (@sizeOf(ZyntraTooltipStyle) != 20 or @alignOf(ZyntraTooltipStyle) != 4) @compileError("ZyntraTooltipStyle ABI drift");
+    if (@sizeOf(ZyntraComboResult) != 2 or @alignOf(ZyntraComboResult) != 1) @compileError("ZyntraComboResult ABI drift");
+    if (@sizeOf(ZyntraSplitterResult) != 8 or @alignOf(ZyntraSplitterResult) != 4) @compileError("ZyntraSplitterResult ABI drift");
+    if (@sizeOf(ZyntraTooltipState) != 4 or @alignOf(ZyntraTooltipState) != 4) @compileError("ZyntraTooltipState ABI drift");
+    if (@sizeOf(ZyntraTooltipResult) != 2 or @alignOf(ZyntraTooltipResult) != 1) @compileError("ZyntraTooltipResult ABI drift");
     if (@sizeOf(ZyntraDockGroup) != @sizeOf(dock_layout_mod.DockGroup) or
         @alignOf(ZyntraDockGroup) != @alignOf(dock_layout_mod.DockGroup))
     {
@@ -486,6 +526,15 @@ test "C-ABI tipos: tamanhos e ok==0" {
     try stdt.testing.expectEqual(@as(usize, 32), @sizeOf(ZyntraTextInputStyle));
     try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraTextInputResult));
     try stdt.testing.expectEqual(@as(usize, 16), @sizeOf(ZyntraTextAreaResult));
+    // Widgets M115: estilos e resultados (composição/exibição).
+    try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraSplitterStyle));
+    try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraSpinnerStyle));
+    try stdt.testing.expectEqual(@as(usize, 24), @sizeOf(ZyntraGroupBoxStyle));
+    try stdt.testing.expectEqual(@as(usize, 20), @sizeOf(ZyntraTooltipStyle));
+    try stdt.testing.expectEqual(@as(usize, 2), @sizeOf(ZyntraComboResult));
+    try stdt.testing.expectEqual(@as(usize, 8), @sizeOf(ZyntraSplitterResult));
+    try stdt.testing.expectEqual(@as(usize, 4), @sizeOf(ZyntraTooltipState));
+    try stdt.testing.expectEqual(@as(usize, 2), @sizeOf(ZyntraTooltipResult));
     // Docking: espelhos do modelo e do resultado da área interativa.
     try stdt.testing.expectEqual(@as(usize, 10), @sizeOf(ZyntraDockGroup));
     try stdt.testing.expectEqual(@as(usize, 28), @sizeOf(ZyntraDockPaneInfo));

@@ -335,6 +335,8 @@ colors and per-widget styles (`zyntra_theme_colors`/`zyntra_style_*`), and
 `label`/`button`/`checkbox`/`switch`/`slider`/`progress`/`separator` plus
 the string-list widgets `radio`/`tab_bar`/`list_view`, the `panel`
 container and the flat/recursive structures `menu`/`table`/`tree_view`,
+plus `combo`/`splitter`/`spinner`/`groupbox`/`tooltip` (dropdown,
+draggable divider, indeterminate indicator, titled box and hover hint),
 with their interaction results (click, toggle, selection, drag, collapse,
 menu choice, expander) handed back to C. Keyboard input and focus are part
 of the same surface (`zyntra_context_push_key`/`_push_text`/`_focus` plus the

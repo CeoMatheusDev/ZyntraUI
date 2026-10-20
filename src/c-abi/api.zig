@@ -40,6 +40,11 @@ const table_mod = @import("../widgets/table.zig");
 const tree_mod = @import("../widgets/tree_view.zig");
 const text_input_mod = @import("../widgets/text_input.zig");
 const textarea_mod = @import("../widgets/textarea.zig");
+const combo_mod = @import("../widgets/combo.zig");
+const splitter_mod = @import("../widgets/splitter.zig");
+const spinner_mod = @import("../widgets/spinner.zig");
+const groupbox_mod = @import("../widgets/groupbox.zig");
+const tooltip_mod = @import("../widgets/tooltip.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -2083,6 +2088,207 @@ pub export fn zyntra_widget_text_area(
     return .ok;
 }
 
+// ---------------------------------------------------------------------------
+// Widgets de composição/exibição: combo, splitter, spinner, groupbox e
+// tooltip (M115)
+// ---------------------------------------------------------------------------
+
+/// Orientação do splitter (`ZYNTRA_HORIZONTAL` = divisória horizontal, pos = y;
+/// `ZYNTRA_VERTICAL` = divisória vertical, pos = x).
+fn toSplitterOrientation(v: i32) ?splitter_mod.SplitterOrientation {
+    const o = std.enums.fromInt(ct.ZyntraOrientation, v) orelse return null;
+    return switch (o) {
+        .horizontal => .horizontal,
+        .vertical => .vertical,
+    };
+}
+
+/// Estilo de splitter do tema embutido.
+pub export fn zyntra_style_splitter(kind: i32, out_style: ?*ct.ZyntraSplitterStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.splitterStyle();
+    return .ok;
+}
+
+/// Estilo de spinner do tema embutido.
+pub export fn zyntra_style_spinner(kind: i32, out_style: ?*ct.ZyntraSpinnerStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.spinnerStyle();
+    return .ok;
+}
+
+/// Estilo de groupbox do tema embutido.
+pub export fn zyntra_style_group_box(kind: i32, out_style: ?*ct.ZyntraGroupBoxStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.groupBoxStyle();
+    return .ok;
+}
+
+/// Estilo de tooltip do tema embutido.
+pub export fn zyntra_style_tooltip(kind: i32, out_style: ?*ct.ZyntraTooltipStyle) callconv(.c) ct.ZyntraResult {
+    const out = out_style orelse return .invalid_argument;
+    const t = themeOf(kind) orelse return .invalid_argument;
+    out.* = t.tooltipStyle();
+    return .ok;
+}
+
+/// Combo dropdown: reusa `ButtonStyle`/`MenuStyle` (como na API Zig).
+/// `options` é a lista de rótulos (vetor de `ZyntraStr`, emprestado só na
+/// chamada; 1..256), `selected` e `open` pertencem ao chamador (o widget lê e
+/// altera). `size` é a fonte do rótulo e dos itens.
+pub export fn zyntra_widget_combo(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    options: ?[*]const ct.ZyntraStr,
+    options_len: usize,
+    selected: ?*usize,
+    open: ?*bool,
+    size: f32,
+    button_style: ?*const ct.ZyntraButtonStyle,
+    menu_style: ?*const ct.ZyntraMenuStyle,
+    out_result: ?*ct.ZyntraComboResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const bst = button_style orelse return .invalid_argument;
+    const mst = menu_style orelse return .invalid_argument;
+    const sel = selected orelse return .invalid_argument;
+    const op = open orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    if (options_len == 0 or options_len > 256) return .invalid_argument;
+    const ctx = toCtx(h);
+    var scratch: [64][]const u8 = undefined;
+    const list = strListOf(ctx.allocator, options, options_len, &scratch) catch |err| return mapWidgetErr(err);
+    defer list.deinit();
+    const res = combo_mod.combo(
+        ctx,
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        list.items,
+        sel,
+        op,
+        metrics_mod.FontMetrics.withSize(size),
+        bst.*,
+        mst.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |o| o.* = .{ .changed = res.changed, .open = res.open };
+    return .ok;
+}
+
+/// Splitter arrastável: `pos` pertence ao chamador (lido, clampado e alterado
+/// pelo arraste/teclado). `out_result` é opcional.
+pub export fn zyntra_widget_splitter(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    orientation: i32,
+    pos: ?*f32,
+    style: ?*const ct.ZyntraSplitterStyle,
+    out_result: ?*ct.ZyntraSplitterResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const p = pos orelse return .invalid_argument;
+    const o = toSplitterOrientation(orientation) orelse return .invalid_argument;
+    const res = splitter_mod.beginSplitter(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(bounds),
+        o,
+        p,
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_result) |out| out.* = .{
+        .pos = res.pos,
+        .changed = res.changed,
+        .hovered = res.hovered,
+        .dragging = res.dragging,
+    };
+    return .ok;
+}
+
+/// Spinner indeterminado (display puro, sem id): `t` é o tempo decorrido em
+/// segundos (fornecido pelo chamador); o quadro é função pura de `t`.
+pub export fn zyntra_widget_spinner(
+    handle: ?*ZyntraContext,
+    center: ct.ZyntraVec2,
+    t: f32,
+    style: ?*const ct.ZyntraSpinnerStyle,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    spinner_mod.spinner(toCtx(h), toVec2(center), t, st.*) catch |err| return mapWidgetErr(err);
+    return .ok;
+}
+
+/// Groupbox com título: desenha o chrome e devolve em `out_content` (opcional)
+/// a área útil para o chamador posicionar os filhos. `title` é emprestado só
+/// na chamada; `size` é a fonte do título.
+pub export fn zyntra_widget_group_box(
+    handle: ?*ZyntraContext,
+    bounds: ct.ZyntraRect,
+    title: ?[*]const u8,
+    title_len: usize,
+    size: f32,
+    style: ?*const ct.ZyntraGroupBoxStyle,
+    out_content: ?*ct.ZyntraRect,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    if (title_len > 0 and title == null) return .invalid_argument;
+    const bytes: []const u8 = if (title_len == 0) &.{} else title.?[0..title_len];
+    const content = groupbox_mod.groupBox(
+        toCtx(h),
+        toRect(bounds),
+        bytes,
+        metrics_mod.FontMetrics.withSize(size),
+        st.*,
+    ) catch |err| return mapWidgetErr(err);
+    if (out_content) |o| o.* = fromRect(content);
+    return .ok;
+}
+
+/// Tooltip por hover: conta frames consecutivos com o mouse em `anchor` e,
+/// ao atingir `delay_frames`, desenha caixa + texto perto do cursor. `state`
+/// pertence ao chamador (um por tooltip). `text` é emprestado só na chamada.
+pub export fn zyntra_widget_tooltip(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    anchor: ct.ZyntraRect,
+    text: ?[*]const u8,
+    text_len: usize,
+    size: f32,
+    style: ?*const ct.ZyntraTooltipStyle,
+    delay_frames: u32,
+    state: ?*ct.ZyntraTooltipState,
+    out_result: ?*ct.ZyntraTooltipResult,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const st = style orelse return .invalid_argument;
+    const s = state orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    if (text_len > 0 and text == null) return .invalid_argument;
+    const bytes: []const u8 = if (text_len == 0) &.{} else text.?[0..text_len];
+    var local = tooltip_mod.TooltipState{ .hover_frames = s.hover_frames };
+    const res = tooltip_mod.tooltip(
+        toCtx(h),
+        id_mod.Id.fromU64(id),
+        toRect(anchor),
+        bytes,
+        metrics_mod.FontMetrics.withSize(size),
+        st.*,
+        delay_frames,
+        &local,
+    ) catch |err| return mapWidgetErr(err);
+    s.hover_frames = local.hover_frames;
+    if (out_result) |o| o.* = .{ .visible = res.visible, .hovered = res.hovered };
+    return .ok;
+}
+
 test "C-ABI ciclo completo via símbolos exportados" {
     const stdt = @import("std");
     var handle: ?*ZyntraContext = null;
@@ -3595,4 +3801,208 @@ test "C-ABI docking: modelo, consultas e widget dock_view" {
     try eq(ok, zyntra_widget_dock_view(ctx_handle, id, bounds, dock, null, 0, -1, 0.25, &ds, &res));
     try eq(@as(usize, 2), res.pane_count);
     try eq(ok, zyntra_context_end_frame(ctx_handle));
+}
+
+test "C-ABI widgets M115: combo, splitter, spinner, groupbox e tooltip" {
+    const stdt = @import("std");
+    const eq = stdt.testing.expectEqual;
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    const nan = std.math.nan(f32);
+
+    var handle: ?*ZyntraContext = null;
+    try eq(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 800, .h = 600 }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    // Estilos do tema embutido; kind fora da faixa e out nulo são recusados.
+    var spst: ct.ZyntraSplitterStyle = undefined;
+    var sps: ct.ZyntraSpinnerStyle = undefined;
+    var gbs: ct.ZyntraGroupBoxStyle = undefined;
+    var tts: ct.ZyntraTooltipStyle = undefined;
+    try eq(ok, zyntra_style_splitter(0, &spst));
+    try eq(ok, zyntra_style_spinner(1, &sps));
+    try eq(ok, zyntra_style_group_box(0, &gbs));
+    try eq(ok, zyntra_style_tooltip(1, &tts));
+    try stdt.testing.expect(spst.isValid() and sps.isValid());
+    try stdt.testing.expect(gbs.isValid() and tts.isValid());
+    try eq(bad, zyntra_style_splitter(9, &spst));
+    try eq(bad, zyntra_style_spinner(0, null));
+    try eq(bad, zyntra_style_group_box(9, &gbs));
+    try eq(bad, zyntra_style_tooltip(0, null));
+
+    var bst: ct.ZyntraButtonStyle = undefined;
+    var mst: ct.ZyntraMenuStyle = undefined;
+    try eq(ok, zyntra_style_button(0, &bst));
+    try eq(ok, zyntra_style_menu(0, &mst));
+
+    // Combo: press fecha, release abre, press no item escolhe.
+    const labels = [_][]const u8{ "A", "B", "C" };
+    var opts: [3]ct.ZyntraStr = undefined;
+    for (labels, 0..) |lbl, i| opts[i] = .{ .ptr = lbl.ptr, .len = lbl.len };
+    const combo_bounds: ct.ZyntraRect = .{ .x = 10, .y = 10, .w = 120, .h = 28 };
+    const combo_id: ct.ZyntraId = 0xC0;
+    var selected: usize = 0;
+    var open = false;
+    var cbres: ct.ZyntraComboResult = undefined;
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 20, .y = 20 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 20, .y = 20 }));
+    try eq(ok, zyntra_widget_combo(handle, combo_id, combo_bounds, &opts, opts.len, &selected, &open, 10, &bst, &mst, &cbres));
+    try stdt.testing.expect(!cbres.open and !open and !cbres.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 20, .y = 20 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 20, .y = 20 }));
+    try eq(ok, zyntra_widget_combo(handle, combo_id, combo_bounds, &opts, opts.len, &selected, &open, 10, &bst, &mst, &cbres));
+    try stdt.testing.expect(cbres.open and open and !cbres.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Item 2: y = 38 + 2 * 18.625 + 5 ≈ 80.25.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 20, .y = 80 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 20, .y = 80 }));
+    try eq(ok, zyntra_widget_combo(handle, combo_id, combo_bounds, &opts, opts.len, &selected, &open, 10, &bst, &mst, &cbres));
+    try stdt.testing.expect(cbres.changed and !cbres.open and !open);
+    try eq(@as(usize, 2), selected);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Inválidos: handles/ponteiros nulos, lista vazia/grande demais, fonte.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(bad, zyntra_widget_combo(null, combo_id, combo_bounds, &opts, opts.len, &selected, &open, 10, &bst, &mst, &cbres));
+    try eq(bad, zyntra_widget_combo(handle, 0, combo_bounds, &opts, opts.len, &selected, &open, 10, &bst, &mst, &cbres));
+    try eq(bad, zyntra_widget_combo(handle, combo_id, combo_bounds, null, 0, &selected, &open, 10, &bst, &mst, &cbres));
+    try eq(bad, zyntra_widget_combo(handle, combo_id, combo_bounds, &opts, 0, &selected, &open, 10, &bst, &mst, &cbres));
+    try eq(bad, zyntra_widget_combo(handle, combo_id, combo_bounds, &opts, 257, &selected, &open, 10, &bst, &mst, &cbres));
+    try eq(bad, zyntra_widget_combo(handle, combo_id, combo_bounds, &opts, opts.len, null, &open, 10, &bst, &mst, &cbres));
+    try eq(bad, zyntra_widget_combo(handle, combo_id, combo_bounds, &opts, opts.len, &selected, null, 10, &bst, &mst, &cbres));
+    try eq(bad, zyntra_widget_combo(handle, combo_id, combo_bounds, &opts, opts.len, &selected, &open, 0, &bst, &mst, &cbres));
+    try eq(bad, zyntra_widget_combo(handle, combo_id, combo_bounds, &opts, opts.len, &selected, &open, 10, null, &mst, &cbres));
+    try eq(bad, zyntra_widget_combo(handle, combo_id, combo_bounds, &opts, opts.len, &selected, &open, 10, &bst, null, &cbres));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Splitter: press captura, drag muda a posição, release encerra.
+    const sp_bounds: ct.ZyntraRect = .{ .x = 0, .y = 0, .w = 200, .h = 200 };
+    const sp_id: ct.ZyntraId = 0x5B;
+    var pos: f32 = 100;
+    var spres: ct.ZyntraSplitterResult = undefined;
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 100, .y = 100 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, true, .{ .x = 100, .y = 100 }));
+    try eq(ok, zyntra_widget_splitter(handle, sp_id, sp_bounds, 0, &pos, &spst, &spres));
+    try stdt.testing.expect(spres.dragging and spres.hovered and !spres.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 100, .y = 140 }));
+    try eq(ok, zyntra_widget_splitter(handle, sp_id, sp_bounds, 0, &pos, &spst, &spres));
+    try stdt.testing.expect(spres.dragging and spres.changed);
+    try eq(@as(f32, 140), pos);
+    try eq(@as(f32, 140), spres.pos);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 100, .y = 140 }));
+    try eq(ok, zyntra_context_push_mouse_button(handle, 0, false, .{ .x = 100, .y = 140 }));
+    try eq(ok, zyntra_widget_splitter(handle, sp_id, sp_bounds, 0, &pos, &spst, &spres));
+    try stdt.testing.expect(!spres.dragging and !spres.changed);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Inválidos: orientação fora da faixa, pos nulo, estilo nulo, id nulo.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(bad, zyntra_widget_splitter(null, sp_id, sp_bounds, 0, &pos, &spst, &spres));
+    try eq(bad, zyntra_widget_splitter(handle, 0, sp_bounds, 0, &pos, &spst, &spres));
+    try eq(bad, zyntra_widget_splitter(handle, sp_id, sp_bounds, 9, &pos, &spst, &spres));
+    try eq(bad, zyntra_widget_splitter(handle, sp_id, sp_bounds, 0, null, &spst, &spres));
+    try eq(bad, zyntra_widget_splitter(handle, sp_id, sp_bounds, 0, &pos, null, &spres));
+    try eq(bad, zyntra_widget_splitter(handle, sp_id, .{ .x = 0, .y = 0, .w = 0, .h = 10 }, 0, &pos, &spst, &spres));
+    var bad_sp = spst;
+    bad_sp.handle_w = -1;
+    try eq(bad, zyntra_widget_splitter(handle, sp_id, sp_bounds, 0, &pos, &bad_sp, &spres));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Spinner: display puro; valida centro/tempo e estilo.
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_widget_spinner(handle, .{ .x = 400, .y = 50 }, 0, &sps));
+    try eq(bad, zyntra_widget_spinner(null, .{ .x = 0, .y = 0 }, 0, &sps));
+    try eq(bad, zyntra_widget_spinner(handle, .{ .x = nan, .y = 0 }, 0, &sps));
+    try eq(bad, zyntra_widget_spinner(handle, .{ .x = 0, .y = 0 }, nan, &sps));
+    try eq(bad, zyntra_widget_spinner(handle, .{ .x = 0, .y = 0 }, 0, null));
+    var bad_sps = sps;
+    bad_sps.dots = 1;
+    try eq(bad, zyntra_widget_spinner(handle, .{ .x = 0, .y = 0 }, 0, &bad_sps));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Groupbox: devolve a área útil (pad 8 + reserva lineHeight/2 no topo).
+    const gb_bounds: ct.ZyntraRect = .{ .x = 10, .y = 10, .w = 200, .h = 100 };
+    var content: ct.ZyntraRect = undefined;
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_widget_group_box(handle, gb_bounds, "G", 1, 10, &gbs, &content));
+    try eq(@as(f32, 18), content.x);
+    try stdt.testing.expectApproxEqAbs(@as(f32, 23.3125), content.y, 0.001);
+    try eq(@as(f32, 184), content.w);
+    try stdt.testing.expectApproxEqAbs(@as(f32, 78.6875), content.h, 0.001);
+    try eq(bad, zyntra_widget_group_box(null, gb_bounds, "G", 1, 10, &gbs, &content));
+    try eq(bad, zyntra_widget_group_box(handle, gb_bounds, null, 1, 10, &gbs, &content));
+    try eq(bad, zyntra_widget_group_box(handle, gb_bounds, "G", 1, nan, &gbs, &content));
+    try eq(bad, zyntra_widget_group_box(handle, gb_bounds, "G", 1, 10, null, &content));
+    try eq(bad, zyntra_widget_group_box(handle, .{ .x = 0, .y = 0, .w = 0, .h = 10 }, "G", 1, 10, &gbs, &content));
+    var bad_gbs = gbs;
+    bad_gbs.padding = -1;
+    try eq(bad, zyntra_widget_group_box(handle, gb_bounds, "G", 1, 10, &bad_gbs, &content));
+    // Título malformado: recusado sem deixar comandos parciais.
+    try eq(ct.ZyntraResult.invalid_argument, zyntra_widget_group_box(handle, gb_bounds, "\xff", 1, 10, &gbs, &content));
+    // `out_content` nulo é válido (só desenha).
+    try eq(ok, zyntra_widget_group_box(handle, gb_bounds, "G", 1, 10, &gbs, null));
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    // Tooltip: conta frames de hover e só aparece ao atingir o atraso.
+    const tip_anchor: ct.ZyntraRect = .{ .x = 0, .y = 0, .w = 100, .h = 50 };
+    const tip_id: ct.ZyntraId = 0x71;
+    var tstate = ct.ZyntraTooltipState{};
+    var mtres: ct.ZyntraTooltipResult = undefined;
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 10, .y = 10 }));
+    try eq(ok, zyntra_widget_tooltip(handle, tip_id, tip_anchor, "Tip", 3, 10, &tts, 3, &tstate, &mtres));
+    try stdt.testing.expect(mtres.hovered and !mtres.visible);
+    try eq(@as(u32, 1), tstate.hover_frames);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 11, .y = 11 }));
+    try eq(ok, zyntra_widget_tooltip(handle, tip_id, tip_anchor, "Tip", 3, 10, &tts, 3, &tstate, &mtres));
+    try stdt.testing.expect(mtres.hovered and !mtres.visible);
+    try eq(@as(u32, 2), tstate.hover_frames);
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 12, .y = 12 }));
+    try eq(ok, zyntra_widget_tooltip(handle, tip_id, tip_anchor, "Tip", 3, 10, &tts, 3, &tstate, &mtres));
+    try stdt.testing.expect(mtres.hovered and mtres.visible);
+    try eq(@as(u32, 3), tstate.hover_frames);
+    var n_draw: usize = 0;
+    try eq(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expect(n_draw >= 3); // caixa + borda + texto
+    try eq(ok, zyntra_context_end_frame(handle));
+
+    try eq(ok, zyntra_context_begin_frame(handle));
+    try eq(ok, zyntra_context_push_mouse_move(handle, .{ .x = 500, .y = 500 }));
+    try eq(ok, zyntra_widget_tooltip(handle, tip_id, tip_anchor, "Tip", 3, 10, &tts, 3, &tstate, &mtres));
+    try stdt.testing.expect(!mtres.hovered and !mtres.visible);
+    try eq(@as(u32, 0), tstate.hover_frames);
+    // Inválidos: id/handle/estado/estilo/âncora/fonte/texto.
+    try eq(bad, zyntra_widget_tooltip(null, tip_id, tip_anchor, "T", 1, 10, &tts, 0, &tstate, &mtres));
+    try eq(bad, zyntra_widget_tooltip(handle, 0, tip_anchor, "T", 1, 10, &tts, 0, &tstate, &mtres));
+    try eq(bad, zyntra_widget_tooltip(handle, tip_id, tip_anchor, "T", 1, 10, &tts, 0, null, &mtres));
+    try eq(bad, zyntra_widget_tooltip(handle, tip_id, tip_anchor, "T", 1, 10, null, 0, &tstate, &mtres));
+    try eq(bad, zyntra_widget_tooltip(handle, tip_id, .{ .x = 0, .y = 0, .w = 0, .h = 50 }, "T", 1, 10, &tts, 0, &tstate, &mtres));
+    try eq(bad, zyntra_widget_tooltip(handle, tip_id, tip_anchor, "T", 1, 0, &tts, 0, &tstate, &mtres));
+    try eq(bad, zyntra_widget_tooltip(handle, tip_id, tip_anchor, null, 1, 10, &tts, 0, &tstate, &mtres));
+    var bad_tts = tts;
+    bad_tts.padding = -1;
+    try eq(bad, zyntra_widget_tooltip(handle, tip_id, tip_anchor, "T", 1, 10, &bad_tts, 0, &tstate, &mtres));
+    try eq(ok, zyntra_context_end_frame(handle));
 }

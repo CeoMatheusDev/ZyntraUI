@@ -776,6 +776,111 @@ ZyntraResult zyntra_widget_dock_view(ZyntraContext *handle, ZyntraId id,
     size_t panes_len, int64_t dragging, float edge_frac,
     const ZyntraDockStyle *style, ZyntraDockViewResult *out_result);
 
+/* Widgets de composição/exibição (M115): combo, splitter, spinner, groupbox
+ * e tooltip. Mesmo modelo da API Zig: estado pertence ao chamador, nada é
+ * retido na biblioteca e não há segunda implementação. */
+
+typedef struct ZyntraSplitterStyle {
+    ZyntraColor bg;
+    ZyntraColor bg_hover;
+    ZyntraColor bg_drag;
+    float handle_w;
+    float handle_h;
+} ZyntraSplitterStyle;
+
+typedef struct ZyntraSpinnerStyle {
+    ZyntraColor track;
+    ZyntraColor head;
+    uint8_t dots;
+    float radius;
+    float dot_radius;
+} ZyntraSpinnerStyle;
+
+typedef struct ZyntraGroupBoxStyle {
+    ZyntraColor bg;     /* transparente (a == 0) ⇒ sem preenchimento */
+    ZyntraColor border;
+    float border_width; /* 0 ⇒ sem borda */
+    ZyntraColor title;
+    float padding;
+    float title_gap;
+} ZyntraGroupBoxStyle;
+
+typedef struct ZyntraTooltipStyle {
+    ZyntraColor bg;
+    ZyntraColor border;
+    ZyntraColor text;
+    float border_width;
+    float padding;
+} ZyntraTooltipStyle;
+
+typedef struct ZyntraComboResult {
+    bool changed; /* a escolha mudou de índice neste frame */
+    bool open;    /* estado do dropdown depois do frame */
+} ZyntraComboResult;
+
+typedef struct ZyntraSplitterResult {
+    float pos; /* posição clampada da divisória */
+    bool changed;
+    bool hovered;
+    bool dragging;
+} ZyntraSplitterResult;
+
+/* Estado do tooltip (um por tooltip, do chamador). */
+typedef struct ZyntraTooltipState {
+    uint32_t hover_frames;
+} ZyntraTooltipState;
+
+typedef struct ZyntraTooltipResult {
+    bool visible;
+    bool hovered;
+} ZyntraTooltipResult;
+
+/* Estilos do tema embutido (`theme_kind`: ZYNTRA_THEME_DARK/_LIGHT).
+ * O estilo devolvido é mutável — ajuste e passe ao widget. */
+ZyntraResult zyntra_style_splitter(int32_t theme_kind, ZyntraSplitterStyle *out_style);
+ZyntraResult zyntra_style_spinner(int32_t theme_kind, ZyntraSpinnerStyle *out_style);
+ZyntraResult zyntra_style_group_box(int32_t theme_kind, ZyntraGroupBoxStyle *out_style);
+ZyntraResult zyntra_style_tooltip(int32_t theme_kind, ZyntraTooltipStyle *out_style);
+
+/* Combo dropdown: reusa ZyntraButtonStyle/ZyntraMenuStyle (como na API Zig).
+ * `options` é o vetor de rótulos (emprestado só na chamada; 1..256),
+ * `selected`/`open` pertencem ao chamador (o widget lê e altera) e `size` é
+ * a fonte do rótulo e dos itens. `out_result` é opcional. */
+ZyntraResult zyntra_widget_combo(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, const ZyntraStr *options, size_t options_len,
+    size_t *selected, bool *open, float size,
+    const ZyntraButtonStyle *button_style, const ZyntraMenuStyle *menu_style,
+    ZyntraComboResult *out_result);
+
+/* Splitter arrastável: `orientation` usa ZYNTRA_HORIZONTAL (divisória
+ * horizontal, pos = y) ou ZYNTRA_VERTICAL (divisória vertical, pos = x).
+ * `pos` pertence ao chamador (lido, clampado e alterado pelo arraste e pelo
+ * teclado). `out_result` é opcional. */
+ZyntraResult zyntra_widget_splitter(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect bounds, int32_t orientation, float *pos,
+    const ZyntraSplitterStyle *style, ZyntraSplitterResult *out_result);
+
+/* Spinner indeterminado (sem id): `t` é o tempo decorrido em segundos,
+ * fornecido pelo chamador; o quadro é função pura de `t`. */
+ZyntraResult zyntra_widget_spinner(ZyntraContext *handle, ZyntraVec2 center,
+    float t, const ZyntraSpinnerStyle *style);
+
+/* Groupbox com título: desenha o chrome e devolve em `out_content`
+ * (opcional) a área útil para o chamador posicionar os filhos. `title` é
+ * emprestado só na chamada; `size` é a fonte do título. */
+ZyntraResult zyntra_widget_group_box(ZyntraContext *handle, ZyntraRect bounds,
+    const char *title, size_t title_len, float size,
+    const ZyntraGroupBoxStyle *style, ZyntraRect *out_content);
+
+/* Tooltip por hover: conta frames consecutivos com o mouse em `anchor` e,
+ * ao atingir `delay_frames`, desenha caixa + texto perto do cursor.
+ * `state` pertence ao chamador (um por tooltip); `text` é emprestado só na
+ * chamada. `out_result` é opcional. */
+ZyntraResult zyntra_widget_tooltip(ZyntraContext *handle, ZyntraId id,
+    ZyntraRect anchor, const char *text, size_t text_len, float size,
+    const ZyntraTooltipStyle *style, uint32_t delay_frames,
+    ZyntraTooltipState *state, ZyntraTooltipResult *out_result);
+
 #ifdef __cplusplus
 }
 #endif

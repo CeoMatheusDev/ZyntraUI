@@ -394,6 +394,63 @@ zyntra_context_end_frame(ctx);
   `zyntra_widget_dock_view` é preenchido pelo widget (nunca alocado pela
   lib). As consultas usam scratch na pilha (até 16 entradas).
 
+Sétimo lote (M115): widgets de composição/exibição — `combo`, `splitter`,
+`spinner`, `groupbox` e `tooltip`. Nenhum deles retém estado na lib: o
+chamador detém os ponteiros de estado e o texto é emprestado só na chamada.
+
+```c
+ZyntraButtonStyle bst;
+ZyntraMenuStyle mst;
+zyntra_style_button(ZYNTRA_THEME_DARK, &bst);
+zyntra_style_menu(ZYNTRA_THEME_DARK, &mst);
+
+ZyntraStr opts[2] = { { "A", 1 }, { "B", 1 } };
+size_t sel = 0;
+bool open = false;
+ZyntraComboResult cres;
+zyntra_widget_combo(ctx, id, (ZyntraRect){10, 10, 160, 28}, opts, 2,
+    &sel, &open, 10.0f, &bst, &mst, &cres);
+
+ZyntraSplitterStyle sps;
+zyntra_style_splitter(ZYNTRA_THEME_DARK, &sps);
+float pos = 200;
+ZyntraSplitterResult sres;
+zyntra_widget_splitter(ctx, sid, (ZyntraRect){0, 0, 640, 480},
+    ZYNTRA_HORIZONTAL, &pos, &sps, &sres);
+```
+
+* `zyntra_widget_combo` reusa `ZyntraButtonStyle`/`ZyntraMenuStyle` (como a
+  API Zig, sem struct nova). `options` (1..256) é um vetor de `ZyntraStr`
+  emprestado só na chamada; `selected`/`open` pertencem ao chamador (o widget
+  lê e altera). O menu só é desenhado quando a chamada entra com
+  `open == true` — o clique de abertura aparece no frame seguinte. `size` é a
+  fonte do rótulo e dos itens.
+* `zyntra_widget_splitter`: `orientation` usa `ZYNTRA_HORIZONTAL` (divisória
+  horizontal, `pos = y`) ou `ZYNTRA_VERTICAL` (`pos = x`). `pos` é do
+  chamador (lido, clampado e alterado pelo arraste e pelo teclado). O puxador
+  desenhado usa a posição de **entrada** do frame; a posição nova aparece no
+  frame seguinte, mas `SplitterResult.pos`/`changed` já refletem o arraste no
+  mesmo frame.
+* `zyntra_widget_spinner` (sem id) é display puro: `t` é o tempo decorrido
+  em segundos, fornecido pelo chamador; o quadro é função pura de `t`.
+* `zyntra_widget_group_box` desenha o chrome e devolve em `out_content`
+  (opcional) a área útil (`padding` + reserva de `lineHeight/2` no topo) para
+  o chamador posicionar os filhos. `title` é emprestado só na chamada.
+* `zyntra_widget_tooltip` conta frames consecutivos com o mouse em `anchor`
+  e, ao atingir `delay_frames`, desenha caixa + texto perto do cursor,
+  clampado ao viewport. `ZyntraTooltipState` (um por tooltip) pertence ao
+  chamador; `out_result` é opcional.
+* Estilos do tema: `zyntra_style_splitter`, `_spinner`, `_group_box` e
+  `_tooltip` (o combo usa os estilos de botão/menu). `ZyntraComboResult` tem
+  `changed`/`open`; `ZyntraSplitterResult` tem `pos`/`changed`/`hovered`/
+  `dragging`; `ZyntraTooltipResult` tem `visible`/`hovered`.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle/id/out obrigatório nulo,
+  `options` vazio ou > 256, `selected` fora da faixa, fonte (`size`) não
+  finita/≤ 0, `orientation` fora de `ZYNTRA_HORIZONTAL`/`_VERTICAL`, posição
+  não-finita, âncora sem área, estado do tooltip nulo, texto com ponteiro
+  nulo e `len > 0` (UTF-8 malformado vira `ZYNTRA_INVALID_TEXT` no desenho
+  do tooltip).
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -435,6 +492,11 @@ zyntra_context_end_frame(ctx);
   `ZyntraDockSplitInfo=40`, `ZyntraDockDrop=24`, `ZyntraDockViewResult=88` e
   `ZyntraDockStyle=36`; `ZyntraDockZone` é enum `c_int` (0..4, mesmos
   valores de `dock.DockZone`).
+* M115: também travados os estilos `ZyntraSplitterStyle=20`,
+  `ZyntraSpinnerStyle=20`, `ZyntraGroupBoxStyle=24`,
+  `ZyntraTooltipStyle=20` e os resultados `ZyntraComboResult=2`,
+  `ZyntraSplitterResult=8`, `ZyntraTooltipState=4`,
+  `ZyntraTooltipResult=2`.
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -455,5 +517,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..."
 ```

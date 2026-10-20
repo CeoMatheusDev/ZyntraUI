@@ -1484,6 +1484,368 @@ int main(void) {
         CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
     }
 
+    /* Frames 47-61: widgets de composição/exibição (M115) — combo,
+     * splitter, spinner, groupbox e tooltip, com checagem de pixels. */
+    size_t m_sel = 0;
+    int m_open = 0, m_changed = 0;
+    int m_px_closed = 0, m_px_open = 0, m_px_after = 0;
+    int m_drag_px = 0, m_moved_px = 0;
+    float m_pos = 100.0f;
+    int m_orient_err = 0;
+    int m_spin_px = 0, m_gb_px = 0, m_tip_px = 0;
+    {
+        ZyntraSplitterStyle m_spst;
+        ZyntraSpinnerStyle m_sps;
+        ZyntraGroupBoxStyle m_gbs;
+        ZyntraTooltipStyle m_tts;
+        ZyntraButtonStyle m_bst;
+        ZyntraMenuStyle m_mst;
+        ZyntraComboResult m_cbrez;
+        ZyntraSplitterResult m_sprez;
+        ZyntraTooltipResult m_tiprez;
+
+        _Static_assert(sizeof(ZyntraSplitterStyle) == 20, "ZyntraSplitterStyle ABI");
+        _Static_assert(sizeof(ZyntraSpinnerStyle) == 20, "ZyntraSpinnerStyle ABI");
+        _Static_assert(sizeof(ZyntraGroupBoxStyle) == 24, "ZyntraGroupBoxStyle ABI");
+        _Static_assert(sizeof(ZyntraTooltipStyle) == 20, "ZyntraTooltipStyle ABI");
+        _Static_assert(sizeof(ZyntraComboResult) == 2, "ZyntraComboResult ABI");
+        _Static_assert(sizeof(ZyntraSplitterResult) == 8, "ZyntraSplitterResult ABI");
+        _Static_assert(sizeof(ZyntraTooltipState) == 4, "ZyntraTooltipState ABI");
+        _Static_assert(sizeof(ZyntraTooltipResult) == 2, "ZyntraTooltipResult ABI");
+
+        /* Estilos do tema e argumentos nulos/fora da faixa. */
+        CHECK(zyntra_style_splitter(ZYNTRA_THEME_DARK, &m_spst));
+        CHECK(zyntra_style_spinner(ZYNTRA_THEME_LIGHT, &m_sps));
+        CHECK(zyntra_style_group_box(ZYNTRA_THEME_DARK, &m_gbs));
+        CHECK(zyntra_style_tooltip(ZYNTRA_THEME_LIGHT, &m_tts));
+        CHECK(zyntra_style_button(ZYNTRA_THEME_DARK, &m_bst));
+        CHECK(zyntra_style_menu(ZYNTRA_THEME_DARK, &m_mst));
+        assert(zyntra_style_splitter(9, &m_spst) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_spinner(0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_group_box(9, &m_gbs) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_style_tooltip(0, NULL) == ZYNTRA_INVALID_ARGUMENT);
+
+        ZyntraFramebuffer *mfb = NULL;
+        CHECK(zyntra_framebuffer_create(240, 200, &mfb));
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 240, 200}));
+        ZyntraThemeColors mcols;
+        CHECK(zyntra_theme_colors(ZYNTRA_THEME_DARK, &mcols));
+        const unsigned long long m_id =
+            (unsigned long long)zyntra_id_from_string("c:m115", 6);
+        ZyntraColor mp = {0, 0, 0, 0};
+        const ZyntraRect combo_b = {10, 10, 120, 28};
+        const char *m_labels[3] = { "A", "B", "C" };
+        ZyntraStr m_opts[3];
+        for (int i = 0; i < 3; i++) {
+            m_opts[i].ptr = m_labels[i];
+            m_opts[i].len = 1;
+        }
+
+        /* Frame 47: combo fechado — press no campo (ainda fechado). */
+        bool open = false;
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){20, 20}));
+        CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){20, 20}));
+        CHECK(zyntra_draw_clear(ctx, mcols.bg));
+        CHECK(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 3, &m_sel, &open,
+            10.0f, &m_bst, &m_mst, &m_cbrez));
+        assert(!m_cbrez.open && !m_cbrez.changed && !open);
+        CHECK(zyntra_framebuffer_render(mfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(mfb, 20, 43, &mp));
+        m_px_closed = (mp.r == mcols.bg.r && mp.g == mcols.bg.g && mp.b == mcols.bg.b);
+        assert(m_px_closed);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 48: release abre o dropdown (o menu é desenhado só no
+         * frame seguinte, quando a chamada já entra com open=true). */
+        {
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){20, 20}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){20, 20}));
+            CHECK(zyntra_draw_clear(ctx, mcols.bg));
+            CHECK(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 3, &m_sel, &open,
+                10.0f, &m_bst, &m_mst, &m_cbrez));
+            assert(m_cbrez.open && open && !m_cbrez.changed);
+            m_open = open;
+            CHECK(zyntra_context_end_frame(ctx));
+
+            /* Frame 49: aberto — o fundo do menu cobre a área abaixo. */
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){20, 20}));
+            CHECK(zyntra_draw_clear(ctx, mcols.bg));
+            CHECK(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 3, &m_sel, &open,
+                10.0f, &m_bst, &m_mst, &m_cbrez));
+            assert(m_cbrez.open && open && !m_cbrez.changed);
+            CHECK(zyntra_framebuffer_render(mfb, ctx, NULL));
+            /* Item 1 (sem realce) longe do rótulo: fundo do menu. */
+            CHECK(zyntra_framebuffer_pixel(mfb, 100, 60, &mp));
+            m_px_open = (mp.r == m_mst.bg.r && mp.g == m_mst.bg.g && mp.b == m_mst.bg.b);
+            assert(m_px_open);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            /* Frame 50: press no item 2 escolhe e fecha (o menu desenhado
+             * neste frame ainda cobre a área abaixo do campo). */
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){20, 80}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){20, 80}));
+            CHECK(zyntra_draw_clear(ctx, mcols.bg));
+            CHECK(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 3, &m_sel, &open,
+                10.0f, &m_bst, &m_mst, &m_cbrez));
+            assert(m_cbrez.changed && !m_cbrez.open && !open && m_sel == 2);
+            m_changed = m_cbrez.changed;
+            CHECK(zyntra_context_end_frame(ctx));
+
+            /* Frame 51: release e combo já fechado — a área volta ao fundo. */
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){20, 80}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){20, 80}));
+            CHECK(zyntra_draw_clear(ctx, mcols.bg));
+            CHECK(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 3, &m_sel, &open,
+                10.0f, &m_bst, &m_mst, &m_cbrez));
+            assert(!m_cbrez.open && !m_cbrez.changed && !open && m_sel == 2);
+            CHECK(zyntra_framebuffer_render(mfb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(mfb, 20, 43, &mp));
+            m_px_after = (mp.r == mcols.bg.r && mp.g == mcols.bg.g && mp.b == mcols.bg.b);
+            assert(m_px_after);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frames 52-54: splitter — press captura, drag move e release solta. */
+        {
+            const ZyntraRect sp_b = {0, 0, 200, 200};
+            const unsigned long long sp_id =
+                (unsigned long long)zyntra_id_from_string("c:split", 7);
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){100, 100}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, true, (ZyntraVec2){100, 100}));
+            CHECK(zyntra_draw_clear(ctx, mcols.bg));
+            CHECK(zyntra_widget_splitter(ctx, sp_id, sp_b, ZYNTRA_HORIZONTAL, &m_pos,
+                &m_spst, &m_sprez));
+            assert(m_sprez.dragging && m_sprez.hovered && !m_sprez.changed);
+            CHECK(zyntra_framebuffer_render(mfb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(mfb, 100, 100, &mp));
+            m_drag_px = (mp.r == m_spst.bg_drag.r && mp.g == m_spst.bg_drag.g);
+            assert(m_drag_px);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){100, 140}));
+            CHECK(zyntra_draw_clear(ctx, mcols.bg));
+            CHECK(zyntra_widget_splitter(ctx, sp_id, sp_b, ZYNTRA_HORIZONTAL, &m_pos,
+                &m_spst, &m_sprez));
+            assert(m_sprez.dragging && m_sprez.changed && m_pos == 140.0f);
+            CHECK(zyntra_framebuffer_render(mfb, ctx, NULL));
+            /* O puxador desenhado neste frame ainda usa a posição de entrada
+             * (100); a nova posição aparece no frame seguinte. */
+            CHECK(zyntra_framebuffer_pixel(mfb, 100, 100, &mp));
+            assert(mp.r == m_spst.bg_drag.r && mp.g == m_spst.bg_drag.g);
+            CHECK(zyntra_framebuffer_pixel(mfb, 100, 140, &mp));
+            assert(mp.r == mcols.bg.r && mp.g == mcols.bg.g);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            /* Frame de acomodação: sem mover o mouse, o puxador já é
+             * desenhado em 140 (posição de entrada do frame). */
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){100, 140}));
+            CHECK(zyntra_draw_clear(ctx, mcols.bg));
+            CHECK(zyntra_widget_splitter(ctx, sp_id, sp_b, ZYNTRA_HORIZONTAL, &m_pos,
+                &m_spst, &m_sprez));
+            assert(m_sprez.dragging && !m_sprez.changed && m_pos == 140.0f);
+            CHECK(zyntra_framebuffer_render(mfb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(mfb, 100, 140, &mp));
+            m_moved_px = (mp.r == m_spst.bg_drag.r && mp.g == m_spst.bg_drag.g);
+            assert(m_moved_px);
+            CHECK(zyntra_framebuffer_pixel(mfb, 100, 100, &mp));
+            assert(mp.r == mcols.bg.r && mp.g == mcols.bg.g);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){100, 140}));
+            CHECK(zyntra_context_push_mouse_button(ctx, 0, false, (ZyntraVec2){100, 140}));
+            CHECK(zyntra_widget_splitter(ctx, sp_id, sp_b, ZYNTRA_HORIZONTAL, &m_pos,
+                &m_spst, &m_sprez));
+            assert(!m_sprez.dragging && !m_sprez.changed);
+            m_orient_err = 0;
+            assert(zyntra_widget_splitter(ctx, sp_id, sp_b, 9, &m_pos, &m_spst, &m_sprez)
+                == ZYNTRA_INVALID_ARGUMENT);
+            m_orient_err = 1;
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frame 56: spinner — a cabeça (t=0) é o dot do topo. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, mcols.bg));
+        CHECK(zyntra_widget_spinner(ctx, (ZyntraVec2){200, 30}, 0.0f, &m_sps));
+        CHECK(zyntra_framebuffer_render(mfb, ctx, NULL));
+        CHECK(zyntra_framebuffer_pixel(mfb, 200, 20, &mp));
+        m_spin_px = (mp.r == m_sps.head.r && mp.g == m_sps.head.g);
+        assert(m_spin_px);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* Frame 57: groupbox — fundo opaco no conteúdo e área útil devolvida. */
+        {
+            ZyntraGroupBoxStyle gb = m_gbs;
+            gb.bg = mcols.surface;
+            ZyntraRect content;
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_draw_clear(ctx, mcols.bg));
+            CHECK(zyntra_widget_group_box(ctx, (ZyntraRect){10, 60, 90, 80}, "G", 1,
+                10.0f, &gb, &content));
+            assert(content.x == 18.0f && content.w == 74.0f);
+            assert(content.y > 73.31f && content.y < 73.32f);
+            assert(content.h > 58.68f && content.h < 58.69f);
+            CHECK(zyntra_framebuffer_render(mfb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(mfb, 50, 100, &mp));
+            m_gb_px = (mp.r == mcols.surface.r && mp.g == mcols.surface.g &&
+                mp.b == mcols.surface.b);
+            assert(m_gb_px);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Frames 58-61: tooltip — atraso de 3 frames, depois caixa e texto. */
+        {
+            const ZyntraRect tip_a = {0, 0, 100, 50};
+            const unsigned long long tip_id =
+                (unsigned long long)zyntra_id_from_string("c:tip", 5);
+            ZyntraTooltipState tstate = {0};
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){10, 10}));
+            CHECK(zyntra_widget_tooltip(ctx, tip_id, tip_a, "Tip", 3, 10.0f, &m_tts,
+                3, &tstate, &m_tiprez));
+            assert(m_tiprez.hovered && !m_tiprez.visible && tstate.hover_frames == 1);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){11, 11}));
+            CHECK(zyntra_widget_tooltip(ctx, tip_id, tip_a, "Tip", 3, 10.0f, &m_tts,
+                3, &tstate, &m_tiprez));
+            assert(m_tiprez.hovered && !m_tiprez.visible && tstate.hover_frames == 2);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){12, 12}));
+            CHECK(zyntra_draw_clear(ctx, mcols.bg));
+            CHECK(zyntra_widget_tooltip(ctx, tip_id, tip_a, "Tip", 3, 10.0f, &m_tts,
+                3, &tstate, &m_tiprez));
+            assert(m_tiprez.hovered && m_tiprez.visible && tstate.hover_frames == 3);
+            CHECK(zyntra_framebuffer_render(mfb, ctx, NULL));
+            CHECK(zyntra_framebuffer_pixel(mfb, 30, 32, &mp));
+            m_tip_px = (mp.r == m_tts.bg.r && mp.g == m_tts.bg.g && mp.b == m_tts.bg.b);
+            assert(m_tip_px);
+            CHECK(zyntra_context_end_frame(ctx));
+
+            CHECK(zyntra_context_begin_frame(ctx));
+            CHECK(zyntra_context_push_mouse_move(ctx, (ZyntraVec2){200, 180}));
+            CHECK(zyntra_widget_tooltip(ctx, tip_id, tip_a, "Tip", 3, 10.0f, &m_tts,
+                3, &tstate, &m_tiprez));
+            assert(!m_tiprez.hovered && !m_tiprez.visible && tstate.hover_frames == 0);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
+
+        /* Inválidos dos cinco widgets: nada crasha e devolve
+         * ZYNTRA_INVALID_ARGUMENT. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        {
+            bool open = false;
+            assert(zyntra_widget_combo(NULL, m_id, combo_b, m_opts, 3, &m_sel, &open,
+                10.0f, &m_bst, &m_mst, &m_cbrez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_combo(ctx, 0, combo_b, m_opts, 3, &m_sel, &open,
+                10.0f, &m_bst, &m_mst, &m_cbrez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_combo(ctx, m_id, combo_b, NULL, 0, &m_sel, &open,
+                10.0f, &m_bst, &m_mst, &m_cbrez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 0, &m_sel, &open,
+                10.0f, &m_bst, &m_mst, &m_cbrez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 257, &m_sel, &open,
+                10.0f, &m_bst, &m_mst, &m_cbrez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 3, NULL, &open,
+                10.0f, &m_bst, &m_mst, &m_cbrez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 3, &m_sel, NULL,
+                10.0f, &m_bst, &m_mst, &m_cbrez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 3, &m_sel, &open,
+                0.0f, &m_bst, &m_mst, &m_cbrez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 3, &m_sel, &open,
+                10.0f, NULL, &m_mst, &m_cbrez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_combo(ctx, m_id, combo_b, m_opts, 3, &m_sel, &open,
+                10.0f, &m_bst, NULL, &m_cbrez) == ZYNTRA_INVALID_ARGUMENT);
+
+            assert(zyntra_widget_splitter(NULL, 1, (ZyntraRect){0, 0, 10, 10},
+                ZYNTRA_HORIZONTAL, &m_pos, &m_spst, &m_sprez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_splitter(ctx, 1, (ZyntraRect){0, 0, 10, 10},
+                ZYNTRA_HORIZONTAL, NULL, &m_spst, &m_sprez) == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_splitter(ctx, 1, (ZyntraRect){0, 0, 10, 10},
+                ZYNTRA_HORIZONTAL, &m_pos, NULL, &m_sprez) == ZYNTRA_INVALID_ARGUMENT);
+            {
+                ZyntraSplitterStyle bad = m_spst;
+                bad.handle_h = -1.0f;
+                assert(zyntra_widget_splitter(ctx, 1, (ZyntraRect){0, 0, 10, 10},
+                    ZYNTRA_HORIZONTAL, &m_pos, &bad, &m_sprez) == ZYNTRA_INVALID_ARGUMENT);
+            }
+
+            assert(zyntra_widget_spinner(NULL, (ZyntraVec2){0, 0}, 0, &m_sps)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_spinner(ctx, (ZyntraVec2){0, 0}, 0, NULL)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(zyntra_widget_spinner(ctx, (ZyntraVec2){0, 0}, 0.0f / 0.0f, &m_sps)
+                == ZYNTRA_INVALID_ARGUMENT);
+            {
+                ZyntraSpinnerStyle bad = m_sps;
+                bad.dots = 1;
+                assert(zyntra_widget_spinner(ctx, (ZyntraVec2){0, 0}, 0, &bad)
+                    == ZYNTRA_INVALID_ARGUMENT);
+            }
+
+            {
+                ZyntraRect content;
+                assert(zyntra_widget_group_box(NULL, (ZyntraRect){0, 0, 20, 20}, "G", 1,
+                    10.0f, &m_gbs, &content) == ZYNTRA_INVALID_ARGUMENT);
+                assert(zyntra_widget_group_box(ctx, (ZyntraRect){0, 0, 20, 20}, NULL, 1,
+                    10.0f, &m_gbs, &content) == ZYNTRA_INVALID_ARGUMENT);
+                assert(zyntra_widget_group_box(ctx, (ZyntraRect){0, 0, 20, 20}, "G", 1,
+                    0.0f, &m_gbs, &content) == ZYNTRA_INVALID_ARGUMENT);
+                assert(zyntra_widget_group_box(ctx, (ZyntraRect){0, 0, 20, 20}, "G", 1,
+                    10.0f, NULL, &content) == ZYNTRA_INVALID_ARGUMENT);
+                assert(zyntra_widget_group_box(ctx, (ZyntraRect){0, 0, 0, 20}, "G", 1,
+                    10.0f, &m_gbs, &content) == ZYNTRA_INVALID_ARGUMENT);
+                {
+                    ZyntraGroupBoxStyle bad = m_gbs;
+                    bad.padding = -1.0f;
+                    assert(zyntra_widget_group_box(ctx, (ZyntraRect){0, 0, 20, 20}, "G", 1,
+                        10.0f, &bad, &content) == ZYNTRA_INVALID_ARGUMENT);
+                }
+                /* out_content nulo é válido (só desenha). */
+                CHECK(zyntra_widget_group_box(ctx, (ZyntraRect){0, 0, 20, 20}, "G", 1,
+                    10.0f, &m_gbs, NULL));
+            }
+
+            {
+                ZyntraTooltipState st = {0};
+                assert(zyntra_widget_tooltip(NULL, 1, (ZyntraRect){0, 0, 10, 10}, "T", 1,
+                    10.0f, &m_tts, 0, &st, &m_tiprez) == ZYNTRA_INVALID_ARGUMENT);
+                assert(zyntra_widget_tooltip(ctx, 0, (ZyntraRect){0, 0, 10, 10}, "T", 1,
+                    10.0f, &m_tts, 0, &st, &m_tiprez) == ZYNTRA_INVALID_ARGUMENT);
+                assert(zyntra_widget_tooltip(ctx, 1, (ZyntraRect){0, 0, 10, 10}, "T", 1,
+                    10.0f, &m_tts, 0, NULL, &m_tiprez) == ZYNTRA_INVALID_ARGUMENT);
+                assert(zyntra_widget_tooltip(ctx, 1, (ZyntraRect){0, 0, 10, 10}, "T", 1,
+                    10.0f, NULL, 0, &st, &m_tiprez) == ZYNTRA_INVALID_ARGUMENT);
+                assert(zyntra_widget_tooltip(ctx, 1, (ZyntraRect){0, 0, 0, 10}, "T", 1,
+                    10.0f, &m_tts, 0, &st, &m_tiprez) == ZYNTRA_INVALID_ARGUMENT);
+                assert(zyntra_widget_tooltip(ctx, 1, (ZyntraRect){0, 0, 10, 10}, NULL, 1,
+                    10.0f, &m_tts, 0, &st, &m_tiprez) == ZYNTRA_INVALID_ARGUMENT);
+                {
+                    ZyntraTooltipStyle bad = m_tts;
+                    bad.padding = -1.0f;
+                    assert(zyntra_widget_tooltip(ctx, 1, (ZyntraRect){0, 0, 10, 10}, "T", 1,
+                        10.0f, &bad, 0, &st, &m_tiprez) == ZYNTRA_INVALID_ARGUMENT);
+                }
+            }
+        }
+        CHECK(zyntra_context_end_frame(ctx));
+
+        zyntra_framebuffer_destroy(mfb);
+        CHECK(zyntra_context_set_viewport(ctx, (ZyntraRect){0, 0, 64, 32}));
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -1532,6 +1894,11 @@ int main(void) {
         d_panes, d_splits_n, d_hovered, d_dragging, d_changed,
         d_has_drop, d_has_dropped, d_dropped_tabs,
         d_px_idle, d_px_hover, d_px_drag, d_px_drop, d_id);
+    printf("C-ABI widgets2 combo=%zu/%d/%d px=%d/%d/%d split=%.0f"
+        " drag=%d moved=%d orient=%d spin=%d group=%d tip=%d\n",
+        m_sel, m_open, m_changed, m_px_closed, m_px_open, m_px_after,
+        (double)m_pos, m_drag_px, m_moved_px, m_orient_err,
+        m_spin_px, m_gb_px, m_tip_px);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }

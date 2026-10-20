@@ -39,6 +39,23 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `zyntra_draw_line_dashed`, com as mesmas validações da API Zig
   (coordenadas não-finitas, espessura/dash/gap não-positivos e handle nulo
   são recusados sem enfileirar).
+- `c-abi`: **widgets de composição/exibição na fronteira C** (M115, aditivo)
+  — `zyntra_widget_combo` (dropdown que reusa `ZyntraButtonStyle`/
+  `ZyntraMenuStyle`; `options` 1..256 como `ZyntraStr`, `selected`/`open` do
+  chamador e `ZyntraComboResult` com `changed`/`open`), `_splitter`
+  (`ZYNTRA_HORIZONTAL`/`_VERTICAL`, `pos` do chamador e
+  `ZyntraSplitterResult` com `pos`/`changed`/`hovered`/`dragging`),
+  `_spinner` (display puro, `t` em segundos fornecido pelo chamador) e
+  `_group_box` (devolve a área útil em `out_content`, opcional). O
+  `zyntra_widget_tooltip` conta frames de hover em `ZyntraTooltipState` (do
+  chamador) e aparece ao atingir `delay_frames`, com
+  `ZyntraTooltipResult` (`visible`/`hovered`). Estilos do tema via
+  `zyntra_style_splitter`/`_spinner`/`_group_box`/`_tooltip`, com travas de
+  ABI (`Splitter=20`, `Spinner=20`, `GroupBox=24`, `Tooltip=20`,
+  `ComboResult=2`, `SplitterResult=8`, `TooltipState=4`,
+  `TooltipResult=2`). O consumidor C ganhou os frames 47–61 (combo
+  fechado/aberto/escolha, arraste de splitter com checagem de pixel, spinner,
+  groupbox e tooltip com atraso) e os inválidos dos cinco widgets.
 
 ## [1.34.0] - 2026-10-18
 
