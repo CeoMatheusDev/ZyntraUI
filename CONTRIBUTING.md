@@ -14,7 +14,7 @@
 zig build
 zig build test
 zig build run-example  # se aplicável
-zig fmt --check .
+zig fmt --check src/ examples/ build.zig  # mesmo comando do CI
 ```
 
 ## Padrão de commits

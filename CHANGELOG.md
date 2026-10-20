@@ -5,6 +5,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Corrigido
+
+- `docs`: o README contava 31 módulos de widget e omitia `image` e
+  `text_block`; agora lista os 33 módulos expostos em `widgets`.
+- `docs`: `SECURITY.md` ainda descrevia a série como pré-release `0.x`;
+  passou a refletir a série estável `1.x`.
+- `docs`: `CONTRIBUTING.md` pedia `zig fmt --check .`; agora usa o mesmo
+  comando do CI e do AGENTS.md (`src/ examples/ build.zig`).
+
 ## [1.39.0] - 2026-10-20
 
 MINOR estável, 100% compatível: o texto com fonte real ficou mais

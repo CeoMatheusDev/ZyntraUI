@@ -2,7 +2,7 @@
 
 ## Escopo
 
-Pré-release (`0.x`): sem garantia de suporte a versões antigas; correções de segurança entram na próxima versão de desenvolvimento.
+Série estável (`1.x`): sem garantia de suporte a versões antigas; correções de segurança entram na próxima release PATCH/MINOR.
 
 ## Como reportar
 
