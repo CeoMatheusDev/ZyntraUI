@@ -319,6 +319,86 @@ pub const DrawCommand = union(enum) {
         }
         return out;
     }
+    /// Cópia de `self` com toda a geometria multiplicada por `factor`
+    /// (logical → dispositivo, M125). Ângulos e cores não mudam; a
+    /// região de origem (`.image`) continua em pixels do atlas, que
+    /// deve estar na resolução do destino.
+    pub fn scaled(self: DrawCommand, factor: f32) DrawCommand {
+        var out = self;
+        switch (out) {
+            .clear => {},
+            .clip => |*c| {
+                if (!c.null_rect) scaleRect(&c.rect, factor);
+            },
+            .rect_filled => |*c| scaleRect(&c.rect, factor),
+            .rect_outline => |*c| {
+                scaleRect(&c.rect, factor);
+                c.thickness *= factor;
+            },
+            .rect_rounded => |*c| {
+                scaleRect(&c.rect, factor);
+                c.radius *= factor;
+            },
+            .rect_gradient => |*c| {
+                scaleRect(&c.rect, factor);
+                scaleVec(&c.p0, factor);
+                scaleVec(&c.p1, factor);
+            },
+            .rect_gradient_radial => |*c| {
+                scaleRect(&c.rect, factor);
+                c.radius *= factor;
+            },
+            .rect_gradient_conic => |*c| {
+                scaleRect(&c.rect, factor);
+                scaleVec(&c.center, factor);
+            },
+            .line => |*c| {
+                scaleVec(&c.p0, factor);
+                scaleVec(&c.p1, factor);
+                c.thickness *= factor;
+            },
+            .line_dashed => |*c| {
+                scaleVec(&c.p0, factor);
+                scaleVec(&c.p1, factor);
+                c.thickness *= factor;
+                c.dash_len *= factor;
+                c.gap_len *= factor;
+            },
+            .circle_filled => |*c| {
+                scaleVec(&c.center, factor);
+                c.radius *= factor;
+            },
+            .circle_outline => |*c| {
+                scaleVec(&c.center, factor);
+                c.radius *= factor;
+                c.thickness *= factor;
+            },
+            .circle_dashed => |*c| {
+                scaleVec(&c.center, factor);
+                c.radius *= factor;
+                c.thickness *= factor;
+                c.dash_len *= factor;
+                c.gap_len *= factor;
+            },
+            .text => |*c| {
+                scaleVec(&c.pos, factor);
+                c.size *= factor;
+                c.width *= factor;
+            },
+            .rect_shadow => |*c| {
+                scaleRect(&c.rect, factor);
+                c.radius *= factor;
+                scaleVec(&c.offset, factor);
+                c.blur *= factor;
+            },
+            .blur => |*c| {
+                scaleRect(&c.rect, factor);
+                c.radius *= factor;
+            },
+            .image => |*c| scaleRect(&c.rect, factor),
+        }
+        return out;
+    }
 };
 
 fn moveRect(r: *types.Rect, dx: f32, dy: f32) void {
@@ -326,9 +406,21 @@ fn moveRect(r: *types.Rect, dx: f32, dy: f32) void {
     r.y += dy;
 }
 
+fn scaleRect(r: *types.Rect, factor: f32) void {
+    r.x *= factor;
+    r.y *= factor;
+    r.w *= factor;
+    r.h *= factor;
+}
+
 fn moveVec(p: *types.Vec2, dx: f32, dy: f32) void {
     p.x += dx;
     p.y += dy;
+}
+
+fn scaleVec(p: *types.Vec2, factor: f32) void {
+    p.x *= factor;
+    p.y *= factor;
 }
 
 /// Lista de desenho do frame (bump por frame + retenção de capacidade).
@@ -404,6 +496,35 @@ pub const DrawList = struct {
             const start: u32 = @intCast(out.text_bytes.items.len);
             try out.text_bytes.appendSlice(gpa, bytes);
             var copy = cmd.translated(dx, dy);
+            copy.text.start = start;
+            copy.text.len = @intCast(bytes.len);
+            try out.push(gpa, copy);
+        }
+    }
+
+    /// Reconstrói `out` como esta lista projetada para o espaço de
+    /// DISPOSITIVO (M125): toda a geometria é multiplicada por `factor`
+    /// (ver `DrawCommand.scaled`) e os bytes de texto são remontados
+    /// (os offsets são reescritos). `out` deve ser OUTRA lista.
+    /// A região de origem das imagens NÃO escala: o atlas/fonte deve
+    /// estar na resolução do destino.
+    pub fn scaledInto(
+        self: *const Self,
+        gpa: std.mem.Allocator,
+        out: *Self,
+        factor: f32,
+    ) !void {
+        if (!std.math.isFinite(factor) or factor <= 0) return error.InvalidArgument;
+        out.clearRetainingCapacity();
+        for (self.list.items) |cmd| {
+            if (cmd != .text) {
+                try out.push(gpa, cmd.scaled(factor));
+                continue;
+            }
+            const bytes = self.textOf(cmd);
+            const start: u32 = @intCast(out.text_bytes.items.len);
+            try out.text_bytes.appendSlice(gpa, bytes);
+            var copy = cmd.scaled(factor);
             copy.text.start = start;
             copy.text.len = @intCast(bytes.len);
             try out.push(gpa, copy);
@@ -1170,4 +1291,66 @@ test "DrawList rectGradientConic + lineDashed + validação" {
         0,
     ));
     try stdt.testing.expectEqual(@as(usize, 2), dl.len());
+}
+
+test "DrawList scaledInto projeta para o espaço de dispositivo (M125)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var src = DrawList.initEmpty();
+    defer src.deinit(gpa);
+    var out = DrawList.initEmpty();
+    defer out.deinit(gpa);
+
+    try src.rectFilled(gpa, types.Rect.init(1, 2, 10, 20), types.Color.rgb(1, 2, 3));
+    try src.rectOutline(gpa, types.Rect.init(0, 0, 4, 4), types.Color.rgb(0, 0, 0), 1.0);
+    try src.line(gpa, types.Vec2.init(1, 1), types.Vec2.init(3, 3), types.Color.rgb(0, 0, 0), 2.0);
+    try src.circleFilled(gpa, types.Vec2.init(5, 5), 2.0, types.Color.rgb(0, 0, 0));
+    try src.clip(gpa, types.Rect.init(0, 0, 2, 2));
+    try src.pushText(
+        gpa,
+        types.Vec2.init(3, 4),
+        types.Color.rgb(255, 255, 255),
+        metrics_mod.FontMetrics.withSize(10),
+        "Hi",
+    );
+
+    try src.scaledInto(gpa, &out, 2.0);
+    try stdt.testing.expectEqual(src.len(), out.len());
+
+    try stdt.testing.expectEqual(types.Rect.init(2, 4, 20, 40), out.items()[0].rect_filled.rect);
+    try stdt.testing.expectEqual(@as(f32, 2.0), out.items()[1].rect_outline.thickness);
+    try stdt.testing.expectEqual(types.Vec2.init(2, 2), out.items()[2].line.p0);
+    try stdt.testing.expectEqual(types.Vec2.init(6, 6), out.items()[2].line.p1);
+    try stdt.testing.expectEqual(@as(f32, 4.0), out.items()[2].line.thickness);
+    try stdt.testing.expectEqual(types.Vec2.init(10, 10), out.items()[3].circle_filled.center);
+    try stdt.testing.expectEqual(@as(f32, 4.0), out.items()[3].circle_filled.radius);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 4, 4), out.items()[4].clip.rect);
+    // Texto: posição/tamanho escalam, bytes e offsets seguem válidos.
+    try stdt.testing.expectEqual(types.Vec2.init(6, 8), out.items()[5].text.pos);
+    try stdt.testing.expectEqual(@as(f32, 20.0), out.items()[5].text.size);
+    try stdt.testing.expectEqualStrings("Hi", out.textOf(out.items()[5]));
+
+    // Fator inválido é recusado.
+    try stdt.testing.expectError(error.InvalidArgument, src.scaledInto(gpa, &out, 0));
+    try stdt.testing.expectError(error.InvalidArgument, src.scaledInto(gpa, &out, std.math.nan(f32)));
+}
+
+test "DrawList scaledInto mantém a região de origem da imagem (M125)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var src = DrawList.initEmpty();
+    defer src.deinit(gpa);
+    var out = DrawList.initEmpty();
+    defer out.deinit(gpa);
+
+    var bytes: [16]u8 = undefined;
+    for (&bytes, 0..) |*b, i| b.* = @intCast(i);
+    const img = try image_mod.Image.init(2, 2, &bytes);
+    try src.image(gpa, types.Rect.init(0, 0, 4, 4), img, types.Color.rgb(255, 255, 255));
+
+    try src.scaledInto(gpa, &out, 2.0);
+    // Destino escala (lógico → dispositivo), a origem continua nos pixels
+    // do atlas (que já estão na resolução do destino).
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 8, 8), out.items()[0].image.rect);
+    try stdt.testing.expectEqual(image_mod.Region.init(0, 0, 2, 2), out.items()[0].image.src);
 }

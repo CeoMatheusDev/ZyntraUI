@@ -21,6 +21,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const id_mod = @import("id.zig");
+const scale_mod = @import("scale.zig");
 const event_mod = @import("../event/event.zig");
 const draw_mod = @import("../draw/commands.zig");
 const dnd_mod = @import("../dnd/service.zig");
@@ -41,6 +42,9 @@ pub const ContextConfig = struct {
     /// Deve ser <= max_widget_capacity.
     initial_widget_capacity: u32 = 256,
     max_widget_capacity: u32 = 65536,
+    /// Escala DPI da superfície (M125): pixels de dispositivo por pixel
+    /// lógico. O viewport e os eventos continuam em pixels lógicos.
+    scale: scale_mod.DpiScale = .{},
 };
 
 /// Estado do frame.
@@ -59,6 +63,9 @@ pub const FocusDirection = enum {
 pub const Context = struct {
     allocator: std.mem.Allocator,
     viewport: types.Rect,
+    /// Escala DPI vigente (M125): o resto da biblioteca fala em pixels
+    /// lógicos; o host converte entrada/saída com esta escala.
+    scale: scale_mod.DpiScale = .{},
     frame_index: u64,
     state: FrameState,
     events: event_mod.EventQueue,
@@ -115,6 +122,7 @@ pub const Context = struct {
         if (config.viewport.w < 0 or config.viewport.h < 0) {
             return error.InvalidArgument;
         }
+        if (!config.scale.isValid()) return error.InvalidArgument;
         if (config.initial_widget_capacity == 0) {
             return error.InvalidArgument;
         }
@@ -124,6 +132,7 @@ pub const Context = struct {
         return .{
             .allocator = allocator,
             .viewport = config.viewport,
+            .scale = config.scale,
             .frame_index = 0,
             .state = .idle,
             .events = event_mod.EventQueue.initEmpty(),
@@ -209,6 +218,35 @@ pub const Context = struct {
             },
             else => {},
         }
+    }
+
+    /// Troca a escala DPI da superfície (M125). Fator precisa ser
+    /// finito e > 0.
+    pub fn setScale(self: *Self, scale: scale_mod.DpiScale) ContextError!void {
+        if (!scale.isValid()) return error.InvalidArgument;
+        self.scale = scale;
+    }
+
+    /// Enfileira um evento cujo estado veio em pixels de DISPOSITIVO:
+    /// as posições do mouse e o tamanho do resize são convertidos para
+    /// pixels lógicos antes de entrar no frame. Eventos sem coordenada
+    /// (teclas, texto) passam direto.
+    pub fn pushDeviceEvent(self: *Self, ev: event_mod.Event) ContextError!void {
+        var converted = ev;
+        switch (converted) {
+            .mouse_move => |*m| m.pos = self.scale.vecToLogical(m.pos),
+            .mouse_button => |*b| b.pos = self.scale.vecToLogical(b.pos),
+            .mouse_wheel => |*w| w.pos = self.scale.vecToLogical(w.pos),
+            .resize => |*r| r.size = self.scale.sizeToLogical(r.size),
+            else => {},
+        }
+        return self.pushEvent(converted);
+    }
+
+    /// Define o viewport a partir de um rect em pixels de dispositivo
+    /// (convertido para pixels lógicos).
+    pub fn setDeviceViewport(self: *Self, device_rect: types.Rect) ContextError!void {
+        return self.setViewport(self.scale.rectToLogical(device_rect));
     }
 
     /// Libera captura de press órfã (ex.: widget sumiu, foco perdido).
@@ -664,4 +702,60 @@ test "Context M99b: mark_hot une bounds de ids distintos sem duplicar" {
     try std.testing.expect(ctx.was_hot(a));
     try std.testing.expect(!ctx.was_hot(b));
     ctx.endFrame();
+}
+
+test "Context M125: escala DPI converte viewport e eventos de dispositivo" {
+    const allocator = std.testing.allocator;
+    const scale = scale_mod.DpiScale{ .factor = 2.0 };
+    var ctx = try Context.init(allocator, .{ .scale = scale });
+    defer ctx.deinit();
+    try std.testing.expectEqual(scale, ctx.scale);
+
+    // Viewport em pixels de dispositivo → lógico.
+    try ctx.setDeviceViewport(types.Rect.init(0, 0, 1600, 900));
+    try std.testing.expectEqual(types.Rect.init(0, 0, 800, 450), ctx.viewport);
+
+    // Eventos de dispositivo → coordenadas lógicas.
+    ctx.beginFrame();
+    try ctx.pushDeviceEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(100, 50) } });
+    try ctx.pushDeviceEvent(.{ .mouse_button = .{
+        .button = .left,
+        .pressed = true,
+        .pos = types.Vec2.init(20, 30),
+    } });
+    try ctx.pushDeviceEvent(.{ .mouse_wheel = .{ .dx = 0, .dy = -2, .pos = types.Vec2.init(10, 10) } });
+    try ctx.pushDeviceEvent(.{ .resize = .{ .size = types.Size{ .w = 1200, .h = 800 } } });
+    const evs = ctx.pendingEvents();
+    try std.testing.expectEqual(@as(usize, 4), evs.len);
+    try std.testing.expectEqual(types.Vec2.init(50, 25), evs[0].mouse_move.pos);
+    try std.testing.expectEqual(types.Vec2.init(10, 15), evs[1].mouse_button.pos);
+    try std.testing.expectEqual(types.Vec2.init(5, 5), evs[2].mouse_wheel.pos);
+    try std.testing.expectEqual(types.Size{ .w = 600, .h = 400 }, evs[3].resize.size);
+    // O estado retido do mouse também fica em pixels lógicos.
+    try std.testing.expectEqual(types.Vec2.init(5, 5), ctx.mouse_pos.?);
+    ctx.endFrame();
+
+    // Troca de escala e escala inválida.
+    try ctx.setScale(.{ .factor = 1.5 });
+    try std.testing.expectEqual(@as(f32, 1.5), ctx.scale.factor);
+    try std.testing.expectError(error.InvalidArgument, ctx.setScale(.{ .factor = 0 }));
+    try std.testing.expectError(error.InvalidArgument, ctx.setScale(.{ .factor = std.math.nan(f32) }));
+    try std.testing.expectEqual(@as(f32, 1.5), ctx.scale.factor);
+
+    // Evento de dispositivo inválido é recusado como qualquer outro.
+    ctx.beginFrame();
+    try std.testing.expectError(error.InvalidEvent, ctx.pushDeviceEvent(.{ .mouse_move = .{
+        .pos = types.Vec2.init(std.math.nan(f32), 0),
+    } }));
+    ctx.endFrame();
+}
+
+test "Context M125: config com escala inválida é recusada" {
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(error.InvalidArgument, Context.init(allocator, .{
+        .scale = .{ .factor = 0 },
+    }));
+    try std.testing.expectError(error.InvalidArgument, Context.init(allocator, .{
+        .scale = .{ .factor = std.math.inf(f32) },
+    }));
 }

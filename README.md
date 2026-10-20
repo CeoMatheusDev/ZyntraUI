@@ -224,6 +224,28 @@ try zyntra_ui.text.atlas.drawRun(
 Glyph metrics are in logical pixels; `atlas.scale` records how many atlas
 pixels make one logical pixel, which is what high-DPI atlases need.
 
+### High-DPI surfaces
+
+The toolkit works in logical pixels; the host window works in device
+pixels. `DpiScale` converts between the two.
+
+```zig
+var ctx = try zyntra_ui.Context.init(allocator, .{
+    .viewport = zyntra_ui.Rect.init(0, 0, 800, 600), // logical
+    .scale = zyntra_ui.DpiScale{ .factor = 2.0 },    // 2 device px per logical px
+});
+
+try ctx.setDeviceViewport(zyntra_ui.Rect.init(0, 0, 1600, 1200)); // device px
+try ctx.pushDeviceEvent(.{ .mouse_move = .{ .pos = zyntra_ui.Vec2.init(100, 50) } });
+```
+
+To draw into a device-resolution framebuffer, project the frame's draw
+list: `ctx.draw.scaledInto(gpa, &out, ctx.scale.factor)` scales every
+geometry (and re-mounts the text bytes), so any backend — including the
+reference rasterizer — draws at the physical resolution. Glyph atlases
+should be built at the same scale (`atlas.scale`), so their regions map
+1:1 to the projected destination.
+
 ### Multi-window registry
 
 `WindowRegistry` is a pure, allocation-free model of the UI surfaces an

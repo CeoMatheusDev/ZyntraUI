@@ -13,6 +13,7 @@ pub const core = struct {
     pub const types = @import("core/types.zig");
     pub const context = @import("core/context.zig");
     pub const id = @import("core/id.zig");
+    pub const scale = @import("core/scale.zig");
 };
 
 pub const event = struct {
@@ -126,6 +127,7 @@ pub const Id = core.id.Id;
 pub const Context = core.context.Context;
 pub const ContextConfig = core.context.ContextConfig;
 pub const ContextError = core.context.ContextError;
+pub const DpiScale = core.scale.DpiScale;
 
 pub const Event = event.event_mod.Event;
 pub const EventQueue = event.event_mod.EventQueue;
@@ -309,6 +311,7 @@ test {
     _ = @import("core/types.zig");
     _ = @import("core/context.zig");
     _ = @import("core/id.zig");
+    _ = @import("core/scale.zig");
     _ = @import("event/event.zig");
     _ = @import("draw/commands.zig");
     _ = @import("draw/image.zig");

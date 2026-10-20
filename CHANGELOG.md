@@ -23,6 +23,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   blitando cada glifo do atlas. `GlyphMetrics` carrega avanço/bearing em
   pixels lógicos e o atlas tem `scale` (pixels do atlas por pixel lógico),
   pronto para telas HiDPI.
+- `core`: **escala DPI** (M125, aditivo) — `DpiScale` (fator de pixels de
+  dispositivo por pixel lógico) converte ponto/tamanho/rect, tem `fromDpi`
+  (96 DPI = 100%) e `snapDevice` (alinha o rect lógico à grade física, para
+  bordas nítidas). `ContextConfig.scale`/`Context.setScale` guardam a escala
+  vigente, `Context.pushDeviceEvent` converte eventos que chegam em pixels de
+  dispositivo (mouse e resize) para pixels lógicos e `Context.setDeviceViewport`
+  faz o mesmo com o viewport. `DrawList.scaledInto` projeta o frame para o
+  espaço de dispositivo (geometria multiplicada pelo fator, bytes de texto
+  remontados) para renderizar em framebuffer de alta resolução; a região de
+  origem das imagens/atlas não escala (o atlas deve estar na resolução do
+  destino).
 
 ## [1.35.0] - 2026-10-20
 
