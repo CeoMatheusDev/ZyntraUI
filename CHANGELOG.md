@@ -48,6 +48,12 @@ existia mudou de assinatura ou layout.
   comum do texto com atlas/fonte de bitmap), o rasterizador copia o pixel
   direto, sem amostragem bilinear. A cor resultante é idêntica à do
   caminho geral (mesma matemática de tint e mistura).
+- `widgets`: **bloco de texto multilinha** (M147, aditivo) —
+  `widgets.text_block.textBlock` (métricas de fallback) e
+  `textBlockAtlas` (fonte real) desenham texto de parágrafo com quebra
+  pela largura do rect, alinhamento por linha (`start`/`center`/`end`) e
+  espaçamento extra entre linhas. Com atlas, a quebra respeita a largura
+  REAL dos glifos (fonte proporcional) e cada linha vira um run.
 - `draw`: **run de glifos em lote** (M146, aditivo) — o novo comando
   `.glyph_run` desenha N glifos de um atlas em UM comando (antes era um
   comando de imagem por glifo): o texto com atlas ou fonte de bitmap

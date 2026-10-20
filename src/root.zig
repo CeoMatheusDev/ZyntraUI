@@ -121,6 +121,7 @@ pub const widgets = struct {
     pub const inspector_view = @import("widgets/inspector_view.zig");
     pub const drag_ghost = @import("widgets/drag_ghost.zig");
     pub const image = @import("widgets/image.zig");
+    pub const text_block = @import("widgets/text_block.zig");
 };
 
 // Re-exportações ergonômicas (M1..M4; compatível com anteriores).
@@ -211,6 +212,8 @@ pub const InspectorStyle = style.style_mod.InspectorStyle;
 pub const DragGhostStyle = style.style_mod.DragGhostStyle;
 pub const ImageFit = widgets.image.Fit;
 pub const ImageOptions = widgets.image.ImageOptions;
+pub const TextBlockOptions = widgets.text_block.Options;
+pub const TextBlockResult = widgets.text_block.TextBlockResult;
 
 pub const ButtonResult = widgets.button.ButtonResult;
 pub const CheckboxResult = widgets.checkbox.CheckboxResult;
@@ -388,4 +391,5 @@ test {
     _ = @import("widgets/inspector_view.zig");
     _ = @import("widgets/drag_ghost.zig");
     _ = @import("widgets/image.zig");
+    _ = @import("widgets/text_block.zig");
 }
