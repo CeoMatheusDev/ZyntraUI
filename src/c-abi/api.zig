@@ -65,6 +65,7 @@ const image_mod = @import("../draw/image.zig");
 const scale_mod = @import("../core/scale.zig");
 const ime_mod = @import("../text/ime.zig");
 const atlas_mod = @import("../text/atlas.zig");
+const bitmap_mod = @import("../text/bitmap.zig");
 const text_layout_mod = @import("../text/layout.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
@@ -124,6 +125,33 @@ pub export fn zyntra_draw_alpha(handle: ?*ZyntraContext, factor: f32) callconv(.
     if (!std.math.isFinite(factor) or factor < 0) return .invalid_argument;
     const ctx = toCtx(h);
     return pushDraw(ctx.draw.pushAlpha(ctx.allocator, factor));
+}
+
+/// Registra a fonte de bitmap global (M144): o atlas MONOESPAÇADO é
+/// usado por TODOS os widgets do contexto. `size` é o tamanho de fonte
+/// usado pelos widgets: o avanço do atlas precisa ser igual ao das
+/// métricas desse tamanho (senão a medida e o desenho divergiriam).
+pub export fn zyntra_context_set_bitmap_font(
+    handle: ?*ZyntraContext,
+    atlas: ?*ZyntraFontAtlas,
+    size: f32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const a = atlas orelse return .invalid_argument;
+    if (!std.math.isFinite(size) or size <= 0) return .invalid_argument;
+    const state = toFontAtlas(a);
+    state.refresh();
+    const bf = bitmap_mod.BitmapFont.init(&state.view) catch return .invalid_argument;
+    if (!bf.matches(metrics_mod.FontMetrics.withSize(size))) return .invalid_argument;
+    toCtx(h).setBitmapFont(bf);
+    return .ok;
+}
+
+/// Remove a fonte de bitmap global do contexto (volta ao texto normal).
+pub export fn zyntra_context_clear_bitmap_font(handle: ?*ZyntraContext) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    toCtx(h).setBitmapFont(null);
+    return .ok;
 }
 
 /// Desenha uma imagem RGBA8 (pixels emprestados do chamador) em `rect`.
@@ -254,16 +282,20 @@ const FontAtlas = struct {
     glyphs: std.ArrayList(atlas_mod.Glyph) = .empty,
     /// Imagem do atlas (emprestada do chamador).
     image: image_mod.Image = .{},
+    /// Vista estável do atlas (ponteiro válido enquanto o handle vive):
+    /// é o que a fonte de bitmap global referencia.
+    view: atlas_mod.FontAtlas = .{},
 
     fn deinit(self: *FontAtlas, gpa: std.mem.Allocator) void {
         self.builder.deinit(gpa);
         self.glyphs.deinit(gpa);
         self.image = .{};
+        self.view = .{};
     }
 
-    /// Vista do atlas para as funções de medição/desenho.
-    fn view(self: *const FontAtlas) atlas_mod.FontAtlas {
-        return .{ .image = self.image, .glyphs = self.glyphs.items, .scale = 1 };
+    /// Atualiza a vista depois de mutações (glifos/imagem).
+    fn refresh(self: *FontAtlas) void {
+        self.view = .{ .image = self.image, .glyphs = self.glyphs.items, .scale = 1 };
     }
 };
 
@@ -340,6 +372,7 @@ pub export fn zyntra_font_atlas_add_glyph(
         idx += 1;
     }
     state.glyphs.insert(gpa, idx, glyph) catch return .out_of_memory;
+    state.refresh();
     ox.* = glyph.region.x;
     oy.* = glyph.region.y;
     return .ok;
@@ -362,7 +395,8 @@ pub export fn zyntra_font_atlas_set_image(
     if (@as(u64, stride) < row_bytes) return .invalid_argument;
     const needed = @as(u64, stride) * height;
     if (needed > std.math.maxInt(usize)) return .invalid_argument;
-    toFontAtlas(a).image = .{
+    const state = toFontAtlas(a);
+    state.image = .{
         .width = width,
         .height = height,
         .stride = stride,
@@ -370,6 +404,7 @@ pub export fn zyntra_font_atlas_set_image(
         // garante que o buffer cobre `stride * height` bytes.
         .pixels = @as([*]const u8, px)[0..@intCast(needed)],
     };
+    state.refresh();
     return .ok;
 }
 
@@ -385,7 +420,7 @@ pub export fn zyntra_font_atlas_measure(
     if (utf8_len > 0 and utf8 == null) return .invalid_argument;
     const text: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
     const state = toFontAtlas(a);
-    out.* = state.view().measure(text) catch |err| return switch (err) {
+    out.* = state.view.measure(text) catch |err| return switch (err) {
         error.InvalidUtf8 => .invalid_text,
         error.InvalidMetrics => .invalid_argument,
         error.OutOfMemory => .out_of_memory,
@@ -403,7 +438,7 @@ pub export fn zyntra_font_atlas_line_height(
 ) callconv(.c) ct.ZyntraResult {
     const a = atlas orelse return .invalid_argument;
     const out = out_height orelse return .invalid_argument;
-    out.* = toFontAtlas(a).view().lineHeight();
+    out.* = toFontAtlas(a).view.lineHeight();
     return .ok;
 }
 
@@ -423,7 +458,7 @@ pub export fn zyntra_font_atlas_draw_run(
     const text: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
     const ctx = toCtx(h);
     const state = toFontAtlas(a);
-    const view = state.view();
+    const view = state.view;
     const baseline = ct.ZyntraVec2{
         .x = pos.x,
         .y = pos.y + view.ascent(),
@@ -457,7 +492,7 @@ pub export fn zyntra_widget_label_atlas(
     const text: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
     const ctx = toCtx(h);
     const state = toFontAtlas(a);
-    const view = state.view();
+    const view = state.view;
     const layout = text_layout_mod.Layout.fromAtlas(&view) catch return .invalid_argument;
     const baseline = ct.ZyntraVec2{
         .x = bounds.x,
@@ -1322,8 +1357,7 @@ pub export fn zyntra_draw_text(
     if (utf8_len > 0 and utf8 == null) return .invalid_argument;
     const bytes: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
     const ctx = toCtx(h);
-    ctx.draw.pushText(
-        ctx.allocator,
+    ctx.pushText(
         .{ .x = pos.x, .y = pos.y },
         .{ .r = color.r, .g = color.g, .b = color.b, .a = color.a },
         metrics_mod.FontMetrics.withSize(size),
@@ -7669,4 +7703,56 @@ test "C-ABI M140: alfa global (fade) nos draw commands" {
     try stdt.testing.expectEqual(ok, zyntra_framebuffer_pixel(fb, 0, 0, &px));
     try stdt.testing.expectEqual(@as(u8, 128), px.r);
     try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+}
+
+test "C-ABI M144: fonte de bitmap global no contexto C" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(ok, zyntra_context_create(.{
+        .x = 0,
+        .y = 0,
+        .w = 64,
+        .h = 32,
+    }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    // Atlas monoespaçado com avanço 6 (= métricas com size 10).
+    var atlas: ?*ZyntraFontAtlas = null;
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_create(16, 16, 1, &atlas));
+    defer _ = zyntra_font_atlas_destroy(atlas);
+    var gx: u32 = 0;
+    var gy: u32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_add_glyph(atlas, 'A', 5, 7, 6.0, -7.0, &gx, &gy));
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_add_glyph(atlas, 'B', 5, 7, 6.0, -7.0, &gx, &gy));
+    var pixels: [16 * 16 * 4]u8 = undefined;
+    for (&pixels, 0..) |*p, i| p.* = @truncate(i);
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_set_image(atlas, &pixels, 16, 16, 16 * 4));
+
+    // Tamanho incompatível (avanço 6 ≠ size 16 → 9.6) é recusado.
+    try stdt.testing.expectEqual(bad, zyntra_context_set_bitmap_font(handle, atlas, 16.0));
+    try stdt.testing.expectEqual(bad, zyntra_context_set_bitmap_font(handle, null, 10.0));
+    try stdt.testing.expectEqual(bad, zyntra_context_set_bitmap_font(handle, atlas, 0.0));
+    try stdt.testing.expectEqual(bad, zyntra_context_set_bitmap_font(null, atlas, 10.0));
+
+    // Com a fonte registrada, o texto vira blits.
+    try stdt.testing.expectEqual(ok, zyntra_context_set_bitmap_font(handle, atlas, 10.0));
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_draw_text(handle, .{ .x = 1, .y = 2 }, .{ .r = 255, .g = 255, .b = 255, .a = 255 }, 10.0, "AB", 2));
+    var n_draw: usize = 0;
+    try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expectEqual(@as(usize, 2), n_draw); // um blit por glifo
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // Removendo a fonte, o texto volta a ser comando `.text`.
+    try stdt.testing.expectEqual(ok, zyntra_context_clear_bitmap_font(handle));
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_draw_text(handle, .{ .x = 1, .y = 2 }, .{ .r = 255, .g = 255, .b = 255, .a = 255 }, 10.0, "AB", 2));
+    try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expectEqual(@as(usize, 1), n_draw);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // Nulos nunca crasham.
+    try stdt.testing.expectEqual(bad, zyntra_context_clear_bitmap_font(null));
 }

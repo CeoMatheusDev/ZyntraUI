@@ -28,6 +28,10 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - `examples`: **demo da fonte global** (M143) — o exemplo mínimo registra
   um atlas 5x7 monoespaçado e confere que o texto de um widget aparece
   no framebuffer (70 pixels acesos).
+- `c-abi`: **fonte de bitmap global** (M144, aditivo) —
+  `zyntra_context_set_bitmap_font`/`_clear_bitmap_font` registram no
+  contexto o atlas monoespaçado (`ZyntraFontAtlas`), usado por TODOS os
+  widgets; `zyntra_draw_text` passou a respeitar a fonte registrada.
 
 ## [1.37.0] - 2026-10-20
 

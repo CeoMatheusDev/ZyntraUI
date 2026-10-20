@@ -3680,6 +3680,18 @@ int main(void) {
         assert(n_draw == 2);
         CHECK(zyntra_context_end_frame(ctx));
 
+        /* Fonte de bitmap global: o texto de todos os widgets sai do
+         * atlas (blits) em vez do comando de texto. */
+        assert(zyntra_context_set_bitmap_font(ctx, atlas, 10.0f)
+            == ZYNTRA_INVALID_ARGUMENT); /* avanço 5/3 ≠ métricas de 10 */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_text(ctx, (ZyntraVec2){1, 2},
+            (ZyntraColor){255, 255, 255, 255}, 10.0f, "A", 1));
+        size_t n_text_draw = 0;
+        CHECK(zyntra_draw_count(ctx, &n_text_draw));
+        assert(n_text_draw == 1); /* sem a fonte: comando de texto */
+        CHECK(zyntra_context_end_frame(ctx));
+
         CHECK(zyntra_font_atlas_destroy(atlas));
         c139_atlas = (w == 8.0f && lh == 7.0f);
     }

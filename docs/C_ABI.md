@@ -886,6 +886,22 @@ zyntra_widget_text_input_ime(ctx, id, bounds, buffer, sizeof(buffer), &len,
   nulos ou inconsistentes, pré-edit maior que o buffer, cursor fora do
   buffer; UTF-8 malformado ⇒ `ZYNTRA_INVALID_TEXT`.
 
+### Fonte de bitmap global (M144)
+
+```c
+zyntra_context_set_bitmap_font(ctx, atlas, 10.0f); /* monoespaçado */
+/* agora TODOS os widgets do contexto desenham o texto do atlas */
+zyntra_context_clear_bitmap_font(ctx);
+```
+
+* O atlas precisa ser **monoespaçado** (todos os glifos com o mesmo
+  avanço) e o avanço precisa bater com o das métricas do `size` usado
+  pelos widgets — assim medido e desenhado nunca divergem.
+* `zyntra_draw_text` e os widgets passam a emitir blits do atlas (o
+  texto fica visível até no rasterizador de referência).
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: atlas nulo, `size` inválido, atlas
+  proporcional ou avanço incompatível com o `size`.
+
 ### Alfa global (fade) nos draw commands
 
 ```c

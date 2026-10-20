@@ -1539,6 +1539,12 @@ ZyntraResult zyntra_font_atlas_line_height(const ZyntraFontAtlas *atlas,
     float *out_height);
 /* Desenha um trecho: cada glifo vira um blit da sua região. `pos` é o
  * canto superior-esquerdo do texto. */
+/* Fonte de bitmap GLOBAL (monoespaçada): usada por todos os widgets do
+ * contexto. `size` é o tamanho de fonte dos widgets — o avanço do atlas
+ * precisa bater com o das métricas desse tamanho. */
+ZyntraResult zyntra_context_set_bitmap_font(ZyntraContext *ctx,
+    const ZyntraFontAtlas *atlas, float size);
+ZyntraResult zyntra_context_clear_bitmap_font(ZyntraContext *ctx);
 ZyntraResult zyntra_font_atlas_draw_run(ZyntraContext *ctx,
     const ZyntraFontAtlas *atlas, const char *utf8, size_t utf8_len,
     ZyntraVec2 pos, ZyntraColor tint);
