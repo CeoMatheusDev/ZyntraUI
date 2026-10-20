@@ -355,6 +355,58 @@ advance must match the `FontMetrics` the widgets use, so what the widgets
 measure is what they draw. Widgets that need a *proportional* font can
 use the per-widget variants (`labelAtlas`, `textInputAtlas`).
 
+### Performance toolkit
+
+- **Reserve before the frame** — `ctx.reserveDrawCommands(n, bytes)` (and
+  `DrawList.reserve`) pre-allocates the command/text buffers, so a
+  steady-state frame does not reallocate (the frame metrics report
+  `buffer_growths`).
+- **Frame metrics** — `ctx.frameMetrics()` returns `draw.stats.FrameMetrics`:
+  commands per type, text bytes, glyph runs, dirty rects and buffer
+  growths. `FrameStats` (the public `extern struct` the C ABI depends on)
+  is untouched; the C ABI gets the extended counters in
+  `ZyntraFrameMetrics`/`ZyntraRasterMetrics`.
+- **Virtualization** — `layout.virtual.fixedRange` (fixed item height) and
+  `variableRange` (variable height, binary search over accumulated
+  offsets) tell a list which items to build at all.
+- **Optional text cache** — `text.cache.TextCache` memoizes text
+  measurements with a bounded capacity; the key compares the exact text
+  bytes, the font identity and the available width. It belongs to the
+  app: the library does not enable it by default.
+
+```zig
+try ctx.reserveDrawCommands(2000, 64 * 1024);
+const range = zyntra_ui.layout.virtual.fixedRange(items.len, 18.0, scroll, view_h, 2);
+```
+
+### Optional 3D viewport
+
+`viewport3d` is a self-contained, optional module: a software triangle
+rasterizer (no GPU, no external dependencies) plus a **widget that is
+decoupled from it** — the widget receives a ready RGBA8 image from any
+producer (the built-in rasterizer, an external renderer or a future GPU
+backend) and presents it, handling drag (orbit), wheel (zoom) and focus.
+
+```zig
+var raster = try zyntra_ui.viewport3d.raster.Rasterizer.init(gpa, 240, 180);
+try raster.setTarget(.{ .pixels = &pixels, .width = 240, .height = 180, .stride = 240 * 4 });
+var cam = zyntra_ui.viewport3d.camera.Camera{ .distance = 5, .yaw = 0.7, .pitch = 0.45 };
+raster.clear(.{ .r = 12, .g = 14, .b = 20, .a = 255 });
+zyntra_ui.viewport3d.grid.drawGrid(&raster, cam, aspect, .{});
+raster.drawMesh(cube.mesh(), zyntra_ui.viewport3d.math.Mat4.identity(), cam, aspect, .{});
+
+// The widget only needs the image:
+try zyntra_ui.viewport3d.viewport.viewport3d(
+    &ctx, id, bounds,
+    .{ .pixels = &pixels, .width = 240, .height = 180, .stride = 240 * 4 },
+    &state, .{},
+);
+```
+
+Conventions: right-handed, the camera looks down `-Z`, `Mat4` is
+column-major, clip space is `x,y ∈ [-1,1]` with `z ∈ [0,1]`, and screen
+`y` grows downwards. See `docs/` and the module docs for the details.
+
 ### Multi-window registry
 
 `WindowRegistry` is a pure, allocation-free model of the UI surfaces an

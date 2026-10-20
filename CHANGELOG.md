@@ -17,6 +17,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   capacidade antes do frame (sem realocação no caminho quente; os buffers
   são reutilizados entre frames). O rasterizador ganha `RasterMetrics`
   (caminho rápido/genérico, pixels escritos) em `SoftwareFramebuffer`.
+- `viewport3d`: **viewport 3D modular e opcional** (M156/M157, aditivo) —
+  novo módulo `viewport3d` com `math` (Vec2/3/4 e Mat4 column-major, mão
+  direita, depth [0,1]), `camera` (dados + helpers de órbita/pan/zoom),
+  `mesh` (malhas + cubo pronto, sem alocação), `clipping` (recorte no plano
+  near ANTES da divisão perspectiva), `depth` (buffer de profundidade),
+  `raster` (rasterizador de triângulos em software: pipeline
+  modelo→visão→recorte→projeção→tela, teste de profundidade, culling de
+  face traseira opcional, cor sólida) e `viewport` (o WIDGET, que é
+  **desacoplado do rasterizador**: recebe uma imagem RGBA8 de qualquer
+  produtor e a apresenta, tratando arraste/roda/foco). `grid` desenha o
+  plano de grade e os eixos XYZ. Tudo opcional: a ZyntraUI continua sendo
+  uma biblioteca de UI leve, sem GPU e sem dependências externas.
 - `layout`: **helpers de virtualização** (M154, aditivo) —
   `layout.virtual.fixedRange` (altura fixa, cálculo direto) e
   `variableRange` (altura variável, offsets acumulados + busca binária)

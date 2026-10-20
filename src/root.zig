@@ -46,6 +46,10 @@ pub const software = struct {
     pub const raster = @import("software/raster.zig");
 };
 
+/// Viewport 3D (opcional): matemática, câmera, malhas, rasterizador em
+/// software e o widget (desacoplado do rasterizador).
+pub const viewport3d = @import("viewport3d/mod.zig");
+
 pub const anim = struct {
     pub const anim_mod = @import("anim/anim.zig");
 };
@@ -367,6 +371,7 @@ test {
     _ = @import("c-abi/api.zig");
     _ = @import("anim/anim.zig");
     _ = @import("software/raster.zig");
+    _ = @import("viewport3d/mod.zig");
     _ = @import("widgets/input.zig");
     _ = @import("widgets/button.zig");
     _ = @import("widgets/checkbox.zig");

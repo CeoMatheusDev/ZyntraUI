@@ -61,6 +61,44 @@ pub fn build(b: *std.Build) void {
     run_app.dependOn(&run_app_cmd.step);
     run_app_cmd.step.dependOn(b.getInstallStep());
 
+    // Exemplo de UI com reserva, virtualização e cache de texto.
+    const ui_perf_exe = b.addExecutable(.{
+        .name = "zyntra-ui-perf",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/ui_perf.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zyntra_ui", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(ui_perf_exe);
+
+    const run_ui_perf = b.step("run-ui-perf", "Executa o exemplo de UI otimizada");
+    const run_ui_perf_cmd = b.addRunArtifact(ui_perf_exe);
+    run_ui_perf.dependOn(&run_ui_perf_cmd.step);
+    run_ui_perf_cmd.step.dependOn(b.getInstallStep());
+
+    // Exemplo do viewport 3D (renderizador em software + widget).
+    const viewport3d_exe = b.addExecutable(.{
+        .name = "zyntra-viewport3d",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/viewport3d.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zyntra_ui", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(viewport3d_exe);
+
+    const run_viewport3d = b.step("run-viewport3d", "Executa o exemplo do viewport 3D");
+    const run_viewport3d_cmd = b.addRunArtifact(viewport3d_exe);
+    run_viewport3d.dependOn(&run_viewport3d_cmd.step);
+    run_viewport3d_cmd.step.dependOn(b.getInstallStep());
+
     // Benchmark da pipeline por frame (medir por fora; ver examples/bench.zig).
     const bench_exe = b.addExecutable(.{
         .name = "zyntra-bench",

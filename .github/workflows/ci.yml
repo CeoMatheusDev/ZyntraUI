@@ -31,6 +31,15 @@ jobs:
         run: |
           zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a -Isrc/c-abi -o /tmp/zyntra-c-test
           /tmp/zyntra-c-test
+      - name: New examples smoke test
+        # Os exemplos novos (UI otimizada e viewport 3D) imprimem um
+        # resumo; o grep valida que rodaram até o fim.
+        run: |
+          set -o pipefail
+          zig build run-ui-perf -Doptimize=${{ matrix.optimize }} 2>&1 | tee /tmp/zyntra-ui-perf.log
+          grep -q "^ui_perf items=" /tmp/zyntra-ui-perf.log
+          zig build run-viewport3d -Doptimize=${{ matrix.optimize }} 2>&1 | tee /tmp/zyntra-vp3d.log
+          grep -q "^viewport3d " /tmp/zyntra-vp3d.log
       - name: Benchmark smoke test
         # std.debug.print escreve em stderr: fundir para o grep validar.
         run: |
