@@ -365,6 +365,7 @@ pub export fn zyntra_font_atlas_add_glyph(
         error.DuplicateGlyph => .invalid_argument,
         error.OutOfMemory => .out_of_memory,
         error.InvalidUtf8 => .invalid_text,
+        error.InvalidCommand => .invalid_command,
     };
     // Mantém a tabela ordenada por codepoint (busca binária).
     var idx: usize = 0;
@@ -427,6 +428,7 @@ pub export fn zyntra_font_atlas_measure(
         error.InvalidGlyph => .invalid_argument,
         error.DuplicateGlyph => .invalid_argument,
         error.AtlasFull => .invalid_argument,
+        error.InvalidCommand => .invalid_command,
     };
     return .ok;
 }
@@ -470,6 +472,7 @@ pub export fn zyntra_font_atlas_draw_run(
         error.InvalidGlyph => .invalid_argument,
         error.DuplicateGlyph => .invalid_argument,
         error.AtlasFull => .invalid_argument,
+        error.InvalidCommand => .invalid_command,
     };
     return .ok;
 }
@@ -7640,16 +7643,16 @@ test "C-ABI M139: atlas de glifos (fonte real) na fronteira C" {
     try stdt.testing.expectEqual(bad, zyntra_font_atlas_measure(atlas, "AB", 2, null));
     try stdt.testing.expectEqual(ct.ZyntraResult.invalid_text, zyntra_font_atlas_measure(atlas, "\xff", 1, &width));
 
-    // Desenho: um blit por glifo.
+    // Desenho: um comando de run com os dois glifos.
     try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
     try stdt.testing.expectEqual(ok, zyntra_font_atlas_draw_run(handle, atlas, "AB", 2, .{ .x = 4, .y = 2 }, .{ .r = 255, .g = 255, .b = 255, .a = 255 }));
     var n_draw: usize = 0;
     try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
-    try stdt.testing.expectEqual(@as(usize, 2), n_draw);
-    // O rótulo com atlas também emite um blit por glifo.
+    try stdt.testing.expectEqual(@as(usize, 1), n_draw);
+    // O rótulo com atlas também emite um run.
     try stdt.testing.expectEqual(ok, zyntra_widget_label_atlas(handle, zyntra_id_from_string("m139:label", 10), .{ .x = 0, .y = 20, .w = 100, .h = 12 }, "AB", 2, .{ .r = 255, .g = 255, .b = 255, .a = 255 }, atlas));
     try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
-    try stdt.testing.expectEqual(@as(usize, 4), n_draw);
+    try stdt.testing.expectEqual(@as(usize, 2), n_draw);
     try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
 
     // Nulos nunca crasham.
@@ -7742,7 +7745,7 @@ test "C-ABI M144: fonte de bitmap global no contexto C" {
     try stdt.testing.expectEqual(ok, zyntra_draw_text(handle, .{ .x = 1, .y = 2 }, .{ .r = 255, .g = 255, .b = 255, .a = 255 }, 10.0, "AB", 2));
     var n_draw: usize = 0;
     try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
-    try stdt.testing.expectEqual(@as(usize, 2), n_draw); // um blit por glifo
+    try stdt.testing.expectEqual(@as(usize, 1), n_draw); // um run com os 2 glifos
     try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
 
     // Removendo a fonte, o texto volta a ser comando `.text`.

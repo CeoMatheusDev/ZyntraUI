@@ -2434,7 +2434,7 @@ pub fn main() !void {
             }
         }
         std.debug.print(
-            "m133 atlas w={d} blits={d} lit={d} ascent={d}\n",
+            "m133 atlas w={d} cmds={d} lit={d} ascent={d}\n",
             .{ @as(u32, @intFromFloat(res.metrics.width)), ctx.drawCommands().len, lit, @as(u32, @intFromFloat(atlas.ascent())) },
         );
     }
@@ -2585,7 +2585,13 @@ pub fn main() !void {
                 if (fb.get(@intCast(x), @intCast(y))[0] > 0) lit += 1;
             }
         }
-        std.debug.print("m143 bitmap lit={d} blits={d}\n", .{ lit, 2 });
+        // O texto virou UM run de glifos (um comando para os 2 glifos).
+        var runs: usize = 0;
+        for (ctx.drawCommands()) |cmd| {
+            if (cmd == .glyph_run) runs += 1;
+        }
+        std.debug.print("m143 bitmap lit={d} runs={d}\n", .{ lit, runs });
         std.debug.assert(lit == 70); // 2 glifos de 5x7
+        std.debug.assert(runs == 1);
     }
 }

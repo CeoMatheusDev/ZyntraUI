@@ -48,6 +48,14 @@ existia mudou de assinatura ou layout.
   comum do texto com atlas/fonte de bitmap), o rasterizador copia o pixel
   direto, sem amostragem bilinear. A cor resultante é idêntica à do
   caminho geral (mesma matemática de tint e mistura).
+- `draw`: **run de glifos em lote** (M146, aditivo) — o novo comando
+  `.glyph_run` desenha N glifos de um atlas em UM comando (antes era um
+  comando de imagem por glifo): o texto com atlas ou fonte de bitmap
+  passa a custar 1 comando por trecho (blocos de 256 glifos). Os glifos
+  ficam em BLOCOS ESTÁVEIS da `DrawList` (o ponteiro do comando vale
+  durante o frame e não há alocação por frame), o comando carrega os
+  bounds do run para o culling, e `translateInto`/`scaledInto` copiam os
+  glifos ajustando os deslocamentos.
 
 
 ## [1.37.0] - 2026-10-20

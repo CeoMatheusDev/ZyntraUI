@@ -3677,11 +3677,11 @@ int main(void) {
             (ZyntraColor){255, 255, 255, 255}, atlas));
         size_t n_draw = 0;
         CHECK(zyntra_draw_count(ctx, &n_draw));
-        assert(n_draw == 2);
+        assert(n_draw == 1); /* um run de glifos */
         CHECK(zyntra_context_end_frame(ctx));
 
         /* Fonte de bitmap global: o texto de todos os widgets sai do
-         * atlas (blits) em vez do comando de texto. */
+         * atlas (run de glifos) em vez do comando de texto. */
         assert(zyntra_context_set_bitmap_font(ctx, atlas, 10.0f)
             == ZYNTRA_INVALID_ARGUMENT); /* avanço 5/3 ≠ métricas de 10 */
         CHECK(zyntra_context_begin_frame(ctx));

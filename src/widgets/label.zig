@@ -253,17 +253,17 @@ test "labelAtlas mede pelos avanços reais e blita os glifos" {
     // Largura real: 5 + 3 = 8 (o fallback monospace daria 12).
     try stdt.testing.expectEqual(@as(f32, 8), r.metrics.width);
     try stdt.testing.expect(!r.truncated);
-    // Um blit por glifo (nada de comando `.text`).
-    try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len);
-    try stdt.testing.expect(ctx.drawCommands()[0] == .image);
-    try stdt.testing.expect(ctx.drawCommands()[1] == .image);
-    // A linha de base fica na ascente (8): o topo do glifo alinha com o
-    // topo do rect (y = bounds.y + asc + bearing_y = 3 + 8 - 8).
-    try stdt.testing.expectEqual(@as(f32, 3), ctx.drawCommands()[0].image.rect.y);
+    // Um comando de run com os dois glifos (nada de comando `.text`).
+    try stdt.testing.expectEqual(@as(usize, 1), ctx.drawCommands().len);
+    try stdt.testing.expect(ctx.drawCommands()[0] == .glyph_run);
+    const refs = ctx.draw.glyphsOf(ctx.drawCommands()[0]);
+    try stdt.testing.expectEqual(@as(usize, 2), refs.len);
     // O glifo tem 4x8 px no atlas (escala 1) e o segundo avança 5 px.
-    try stdt.testing.expectEqual(@as(f32, 4), ctx.drawCommands()[0].image.rect.w);
-    try stdt.testing.expectEqual(@as(f32, 8), ctx.drawCommands()[0].image.rect.h);
-    try stdt.testing.expectEqual(@as(f32, 2 + 5), ctx.drawCommands()[1].image.rect.x);
+    try stdt.testing.expectEqual(@as(u32, 4), refs[0].src_w);
+    try stdt.testing.expectEqual(@as(u32, 8), refs[0].src_h);
+    try stdt.testing.expectEqual(@as(f32, 5), refs[1].dx);
+    // O run nasce no topo do rect (a linha de base fica na ascente).
+    try stdt.testing.expectEqual(@as(f32, 3), ctx.drawCommands()[0].glyph_run.bounds.y);
     ctx.endFrame();
 
     // Truncation e inválidos.
@@ -278,7 +278,7 @@ test "labelAtlas mede pelos avanços reais e blita os glifos" {
         true,
     );
     try stdt.testing.expect(r2.truncated);
-    try stdt.testing.expectEqual(@as(usize, 3), ctx.drawCommands().len); // 2 blits + outline
+    try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len); // run + outline
     try stdt.testing.expectError(error.InvalidUtf8, labelAtlas(
         &ctx,
         id,
@@ -451,14 +451,14 @@ test "labelAtlasWrapped quebra pela largura real dos glifos (M137)" {
     );
     try stdt.testing.expectEqual(@as(f32, 18), r.metrics.width);
     try stdt.testing.expectEqual(@as(u32, 1), r.metrics.lines);
-    // Duas linhas ("AB" e "AB") ⇒ 4 blits (2 glifos por linha).
-    try stdt.testing.expectEqual(@as(usize, 4), ctx.drawCommands().len);
-    const y0 = ctx.drawCommands()[0].image.rect.y;
-    const y2 = ctx.drawCommands()[2].image.rect.y;
-    try stdt.testing.expect(y2 > y0);
+    // Duas linhas ("AB" e "AB") ⇒ 2 runs (um por linha).
+    try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len);
+    const y0 = ctx.drawCommands()[0].glyph_run.bounds.y;
+    const y1 = ctx.drawCommands()[1].glyph_run.bounds.y;
+    try stdt.testing.expect(y1 > y0);
     ctx.endFrame();
 
-    // Largura 18 ⇒ uma linha só (2 blits).
+    // Largura 18 ⇒ uma linha só (1 run com 5 glifos).
     ctx.beginFrame();
     _ = try labelAtlasWrapped(
         &ctx,
@@ -469,7 +469,8 @@ test "labelAtlasWrapped quebra pela largura real dos glifos (M137)" {
         &atlas,
         false,
     );
-    try stdt.testing.expectEqual(@as(usize, 5), ctx.drawCommands().len); // 4 glifos + espaço
+    try stdt.testing.expectEqual(@as(usize, 1), ctx.drawCommands().len);
+    try stdt.testing.expectEqual(@as(usize, 5), ctx.draw.glyphsOf(ctx.drawCommands()[0]).len);
     ctx.endFrame();
 
     // Contratos.

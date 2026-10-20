@@ -1843,14 +1843,14 @@ test "textInputAtlas usa os avanços reais do atlas (M135)" {
     try stdt.testing.expectEqualStrings("AB", buf[0..len]);
     try stdt.testing.expectEqual(@as(usize, 2), cursor);
 
-    // Dois blits (um por glifo) + caixa/borda; nenhum comando `.text`.
-    var blits: usize = 0;
+    // Um run de glifos (2 glifos) + caixa/borda; nenhum comando `.text`.
+    var runs: usize = 0;
     var texts: usize = 0;
     for (ctx.drawCommands()) |cmd| {
-        if (cmd == .image) blits += 1;
+        if (cmd == .glyph_run) runs += 1;
         if (cmd == .text) texts += 1;
     }
-    try stdt.testing.expectEqual(@as(usize, 2), blits);
+    try stdt.testing.expectEqual(@as(usize, 1), runs);
     try stdt.testing.expectEqual(@as(usize, 0), texts);
     ctx.endFrame();
 

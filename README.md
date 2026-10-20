@@ -238,7 +238,9 @@ try zyntra_ui.text.atlas.drawRun(
 ```
 
 Glyph metrics are in logical pixels; `atlas.scale` records how many atlas
-pixels make one logical pixel, which is what high-DPI atlases need.
+pixels make one logical pixel, which is what high-DPI atlases need. A text
+run becomes a single `.glyph_run` command (one per 256 glyphs), not one
+image command per glyph.
 
 `text.layout.Layout` measures and draws with the *same* source — either
 the fallback metrics or a real atlas — so the measured width never drifts

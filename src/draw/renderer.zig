@@ -90,6 +90,7 @@ pub fn commandBounds(cmd: commands.DrawCommand) ?types.Rect {
         },
         .rect_rounded => |c| return c.rect,
         .image => |c| return c.rect,
+        .glyph_run => |c| return c.bounds,
         .rect_gradient => |c| return c.rect,
         .rect_shadow => |c| {
             // União da silhueta e da silhueta deslocada, expandida pelo

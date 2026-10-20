@@ -296,6 +296,7 @@ pub const Context = struct {
                     error.InvalidGlyph,
                     error.DuplicateGlyph,
                     error.AtlasFull,
+                    error.InvalidCommand,
                     => error.InvalidCommand,
                 };
                 return;
@@ -847,15 +848,16 @@ test "Context M142: fonte de bitmap global desenha o texto dos widgets (M142)" {
     try stdt.testing.expect(ctx.drawCommands()[0] == .text);
     ctx.endFrame();
 
-    // Com a fonte: o texto vira blits (um por glifo).
+    // Com a fonte: o texto vira um run de glifos (um comando).
     ctx.setBitmapFont(font);
     ctx.beginFrame();
     try ctx.pushText(types.Vec2.init(1, 2), types.Color.rgb(255, 255, 255), metrics, "AB");
-    try stdt.testing.expectEqual(@as(usize, 2), ctx.drawCommands().len);
-    try stdt.testing.expect(ctx.drawCommands()[0] == .image);
-    try stdt.testing.expect(ctx.drawCommands()[1] == .image);
-    // O segundo glifo avança 6 px (o avanço da fonte).
-    try stdt.testing.expectEqual(@as(f32, 7), ctx.drawCommands()[1].image.rect.x);
+    try stdt.testing.expectEqual(@as(usize, 1), ctx.drawCommands().len);
+    try stdt.testing.expect(ctx.drawCommands()[0] == .glyph_run);
+    const refs = ctx.draw.glyphsOf(ctx.drawCommands()[0]);
+    try stdt.testing.expectEqual(@as(usize, 2), refs.len);
+    // O segundo glifo avança 6 px (o avanço da fonte), relativo ao run.
+    try stdt.testing.expectEqual(@as(f32, 6), refs[1].dx);
     ctx.endFrame();
 
     // Métricas de outro avanço => fallback (medida e desenho seguem a

@@ -15,6 +15,19 @@ const types = @import("../core/types.zig");
 const metrics_mod = @import("../text/metrics.zig");
 const image_mod = @import("image.zig");
 
+/// Glifo de um run: região na imagem do atlas + deslocamento no run
+/// (pixels lógicos). Ver `DrawCommand.glyph_run`.
+pub const GlyphRef = extern struct {
+    src_x: u32 = 0,
+    src_y: u32 = 0,
+    src_w: u32 = 0,
+    src_h: u32 = 0,
+    /// Deslocamento horizontal do glifo no run (px lógicos).
+    dx: f32 = 0,
+    /// Deslocamento vertical do glifo no run (px lógicos).
+    dy: f32 = 0,
+};
+
 /// Comando único de desenho.
 pub const DrawCommand = union(enum) {
     /// Limpa o viewport com cor sólida (normalmente primeiro).
@@ -70,6 +83,24 @@ pub const DrawCommand = union(enum) {
         width: f32,
         start: u32,
         len: u32,
+    },
+    /// Run de glifos de um atlas: N glifos de uma imagem, cada um com
+    /// sua região de origem e deslocamento. `refs` aponta para os
+    /// glifos (copiados pela `DrawList` em blocos estáveis — o ponteiro
+    /// do comando não muda enquanto o frame vive).
+    /// `scale` = pixels do atlas por pixel lógico (1 = 1:1).
+    glyph_run: extern struct {
+        pos: types.Vec2,
+        color: types.Color,
+        pixels: ?[*]const u8,
+        width: u32,
+        height: u32,
+        stride: u32,
+        scale: f32 = 1.0,
+        /// Bounds do run (usado no culling).
+        bounds: types.Rect,
+        refs: ?[*]const GlyphRef,
+        count: u32,
     },
     /// Alfa global para os comandos SEGUINTES (até o próximo `.alpha`).
     /// `factor` em 0..1 multiplica o alfa das cores desenhadas depois
@@ -218,6 +249,20 @@ pub const DrawCommand = union(enum) {
             .alpha => |c| {
                 return finite(c.factor) and c.factor >= 0;
             },
+            .glyph_run => |c| {
+                if (!finite(c.pos.x) or !finite(c.pos.y)) return false;
+                if (c.pixels == null) return false;
+                if (c.width == 0 or c.height == 0) return false;
+                const row_bytes = @as(u64, c.width) * image_mod.bytes_per_pixel;
+                if (row_bytes > std.math.maxInt(u32)) return false;
+                if (@as(u64, c.stride) < row_bytes) return false;
+                if (@as(u64, c.stride) * c.height > std.math.maxInt(usize)) return false;
+                if (!finite(c.scale) or c.scale <= 0) return false;
+                if (!finite(c.bounds.x) or !finite(c.bounds.y) or
+                    !finite(c.bounds.w) or !finite(c.bounds.h)) return false;
+                if (c.bounds.w < 0 or c.bounds.h < 0) return false;
+                return c.count == 0 or c.refs != null;
+            },
             .image => |c| {
                 if (!finite(c.rect.x) or !finite(c.rect.y) or
                     !finite(c.rect.w) or !finite(c.rect.h) or
@@ -318,6 +363,11 @@ pub const DrawCommand = union(enum) {
             .rect_shadow => |*c| moveRect(&c.rect, dx, dy),
             .blur => |*c| moveRect(&c.rect, dx, dy),
             .image => |*c| moveRect(&c.rect, dx, dy),
+            .glyph_run => |*c| {
+                c.pos.x += dx;
+                c.pos.y += dy;
+                moveRect(&c.bounds, dx, dy);
+            },
             .alpha => {},
             .line => |*c| {
                 moveVec(&c.p0, dx, dy);
@@ -407,6 +457,14 @@ pub const DrawCommand = union(enum) {
                 c.radius *= factor;
             },
             .image => |*c| scaleRect(&c.rect, factor),
+            .glyph_run => |*c| {
+                c.pos.x *= factor;
+                c.pos.y *= factor;
+                scaleRect(&c.bounds, factor);
+                // O destino do glifo cresce com o frame: o atlas
+                // (pixels de origem) fica, o fator atlas/lógico divide.
+                c.scale = c.scale / factor;
+            },
             .alpha => {},
         }
         return out;
@@ -441,6 +499,13 @@ fn scaleVec(p: *types.Vec2, factor: f32) void {
 pub const DrawList = struct {
     list: std.ArrayList(DrawCommand),
     text_bytes: std.ArrayList(u8) = .empty,
+    /// Blocos de glifos dos runs (ver `DrawCommand.glyph_run`). O
+    /// ponteiro do comando precisa ser estável ⇒ os blocos nunca são
+    /// movidos (quando um enche, outro é alocado).
+    glyph_blocks: std.ArrayList([]GlyphRef) = .empty,
+    /// Glifos usados no bloco atual (o bloco é reaproveitado no frame
+    /// seguinte: sem alocação por frame).
+    glyph_block_len: usize = 0,
 
     const Self = @This();
 
@@ -451,11 +516,17 @@ pub const DrawList = struct {
     pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
         self.list.deinit(gpa);
         self.text_bytes.deinit(gpa);
+        for (self.glyph_blocks.items) |block| gpa.free(block);
+        self.glyph_blocks.deinit(gpa);
+        self.glyph_block_len = 0;
     }
 
     pub fn clearRetainingCapacity(self: *Self) void {
         self.list.clearRetainingCapacity();
         self.text_bytes.clearRetainingCapacity();
+        // Os blocos são REUSADOS no frame seguinte (mesmo endereço ⇒ os
+        // comandos do frame anterior, já descartados, não importam).
+        self.glyph_block_len = 0;
     }
 
     pub fn len(self: *const Self) usize {
@@ -500,6 +571,10 @@ pub const DrawList = struct {
     ) !void {
         out.clearRetainingCapacity();
         for (self.list.items) |cmd| {
+            if (cmd == .glyph_run) {
+                try self.copyGlyphRun(gpa, out, cmd, dx, dy, 1.0);
+                continue;
+            }
             if (cmd != .text) {
                 try out.push(gpa, cmd.translated(dx, dy));
                 continue;
@@ -529,6 +604,10 @@ pub const DrawList = struct {
         if (!std.math.isFinite(factor) or factor <= 0) return error.InvalidArgument;
         out.clearRetainingCapacity();
         for (self.list.items) |cmd| {
+            if (cmd == .glyph_run) {
+                try self.copyGlyphRun(gpa, out, cmd, 0, 0, factor);
+                continue;
+            }
             if (cmd != .text) {
                 try out.push(gpa, cmd.scaled(factor));
                 continue;
@@ -541,6 +620,43 @@ pub const DrawList = struct {
             copy.text.len = @intCast(bytes.len);
             try out.push(gpa, copy);
         }
+    }
+
+    /// Copia um run de glifos para outra lista: os offsets dos glifos
+    /// são multiplicados por `factor` (escala) e a posição do run é
+    /// transladada por (dx, dy).
+    fn copyGlyphRun(
+        self: *const Self,
+        gpa: std.mem.Allocator,
+        out: *Self,
+        cmd: DrawCommand,
+        dx: f32,
+        dy: f32,
+        factor: f32,
+    ) !void {
+        const refs = self.glyphsOf(cmd);
+        var scaled: [256]GlyphRef = undefined;
+        var list: []const GlyphRef = refs;
+        if (factor != 1.0) {
+            // Blocos locais (o caso comum cabe em 256 glifos).
+            if (refs.len > scaled.len) return error.OutOfMemory;
+            for (refs, 0..) |r, i| {
+                scaled[i] = .{
+                    .src_x = r.src_x,
+                    .src_y = r.src_y,
+                    .src_w = r.src_w,
+                    .src_h = r.src_h,
+                    .dx = r.dx * factor,
+                    .dy = r.dy * factor,
+                };
+            }
+            list = scaled[0..refs.len];
+        }
+        const ptr = if (list.len == 0) null else try out.allocGlyphs(gpa, list);
+        var copy = if (factor == 1.0) cmd.translated(dx, dy) else cmd.scaled(factor);
+        copy.glyph_run.refs = ptr;
+        copy.glyph_run.count = @intCast(list.len);
+        try out.push(gpa, copy);
     }
 
     pub fn clear(self: *Self, gpa: std.mem.Allocator, color: types.Color) !void {
@@ -720,6 +836,84 @@ pub const DrawList = struct {
     /// de 1 são tratados como 1 pelo backend). Ver `DrawCommand.alpha`.
     pub fn pushAlpha(self: *Self, gpa: std.mem.Allocator, factor: f32) !void {
         try self.push(gpa, .{ .alpha = .{ .factor = factor } });
+    }
+
+    /// Enfileira um run de glifos (atlas de fonte): os `refs` são
+    /// copiados para a arena interna e o comando aponta para eles.
+    /// `scale` = pixels do atlas por pixel lógico (1 = 1:1); o tamanho
+    /// de cada glifo no destino é `src_w / scale`.
+    pub fn glyphRun(
+        self: *Self,
+        gpa: std.mem.Allocator,
+        pos: types.Vec2,
+        color: types.Color,
+        img: image_mod.Image,
+        refs: []const GlyphRef,
+        scale: f32,
+    ) !void {
+        if (!img.isValid()) return error.InvalidCommand;
+        if (!std.math.isFinite(scale) or scale <= 0) return error.InvalidCommand;
+        for (refs) |r| {
+            const region = image_mod.Region.init(r.src_x, r.src_y, r.src_w, r.src_h);
+            if (!region.isValidFor(img.width, img.height)) return error.InvalidCommand;
+            if (!std.math.isFinite(r.dx) or !std.math.isFinite(r.dy)) return error.InvalidCommand;
+        }
+        // Bloco estável para os glifos (o ponteiro do comando não muda).
+        const refs_ptr = if (refs.len == 0) null else try self.allocGlyphs(gpa, refs);
+        // Bounds: união dos glifos no destino.
+        var bounds = types.Rect.init(pos.x, pos.y, 0, 0);
+        var first = true;
+        for (refs) |r| {
+            const w = @as(f32, @floatFromInt(r.src_w)) / scale;
+            const h = @as(f32, @floatFromInt(r.src_h)) / scale;
+            const g = types.Rect.init(pos.x + r.dx, pos.y + r.dy, w, h);
+            bounds = if (first) g else bounds.unionWith(g);
+            first = false;
+        }
+        try self.push(gpa, .{ .glyph_run = .{
+            .pos = pos,
+            .color = color,
+            .pixels = img.pixels.ptr,
+            .width = img.width,
+            .height = img.height,
+            .stride = img.stride,
+            .scale = scale,
+            .bounds = bounds,
+            .refs = refs_ptr,
+            .count = @intCast(refs.len),
+        } });
+    }
+
+    /// Copia `refs` para um bloco estável da lista (aloca um bloco novo
+    /// quando o atual não cabe) e devolve o ponteiro.
+    fn allocGlyphs(self: *Self, gpa: std.mem.Allocator, refs: []const GlyphRef) ![*]const GlyphRef {
+        const block_cap: usize = 256;
+        if (self.glyph_blocks.items.len == 0 or
+            self.glyph_block_len + refs.len > self.glyph_blocks.items[self.glyph_blocks.items.len - 1].len)
+        {
+            const cap = @max(block_cap, refs.len);
+            const block = try gpa.alloc(GlyphRef, cap);
+            errdefer gpa.free(block);
+            try self.glyph_blocks.append(gpa, block);
+            self.glyph_block_len = 0;
+        }
+        const block = self.glyph_blocks.items[self.glyph_blocks.items.len - 1];
+        const dst = block.ptr + self.glyph_block_len;
+        @memcpy(dst[0..refs.len], refs);
+        self.glyph_block_len += refs.len;
+        return dst;
+    }
+
+    /// Glifos de um run. Retorna vazio se o comando não for um run ou
+    /// os offsets forem inconsistentes (defensivo).
+    pub fn glyphsOf(self: *const Self, cmd: DrawCommand) []const GlyphRef {
+        _ = self;
+        const g = switch (cmd) {
+            .glyph_run => |p| p,
+            else => return &.{},
+        };
+        const ptr = g.refs orelse return &.{};
+        return ptr[0..g.count];
     }
 
     /// Enfileira a imagem inteira em `rect` (blit escalável).
@@ -1371,4 +1565,76 @@ test "DrawList scaledInto mantém a região de origem da imagem (M125)" {
     // do atlas (que já estão na resolução do destino).
     try stdt.testing.expectEqual(types.Rect.init(0, 0, 8, 8), out.items()[0].image.rect);
     try stdt.testing.expectEqual(image_mod.Region.init(0, 0, 2, 2), out.items()[0].image.src);
+}
+
+test "DrawList glyphRun: um comando por run de glifos (M146)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var dl = DrawList.initEmpty();
+    defer dl.deinit(gpa);
+
+    var bytes: [16]u8 = undefined;
+    for (&bytes, 0..) |*p, i| p.* = @intCast(i);
+    const img = try image_mod.Image.init(2, 2, &bytes);
+    const refs = [_]GlyphRef{
+        .{ .src_x = 0, .src_y = 0, .src_w = 2, .src_h = 2, .dx = 0, .dy = 0 },
+        .{ .src_x = 0, .src_y = 0, .src_w = 2, .src_h = 2, .dx = 4, .dy = 1 },
+    };
+
+    try dl.glyphRun(gpa, types.Vec2.init(10, 20), types.Color.rgb(255, 255, 255), img, &refs, 1.0);
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    const cmd = dl.items()[0];
+    try stdt.testing.expect(cmd == .glyph_run);
+    try stdt.testing.expectEqual(types.Vec2.init(10, 20), cmd.glyph_run.pos);
+    try stdt.testing.expectEqual(@as(u32, 2), cmd.glyph_run.count);
+    try stdt.testing.expect(cmd.glyph_run.pixels != null);
+    // Os glifos ficam acessíveis pela lista (cópia estável).
+    const got = dl.glyphsOf(cmd);
+    try stdt.testing.expectEqual(@as(usize, 2), got.len);
+    try stdt.testing.expectEqual(@as(f32, 4), got[1].dx);
+    // Bounds = união dos glifos no destino.
+    try stdt.testing.expectEqual(types.Rect.init(10, 20, 6, 3), cmd.glyph_run.bounds);
+
+    // Inválidos: escala, imagem e região fora.
+    try stdt.testing.expectError(error.InvalidCommand, dl.glyphRun(gpa, .{}, .{}, img, &refs, 0));
+    try stdt.testing.expectError(error.InvalidCommand, dl.glyphRun(gpa, .{}, .{}, img, &refs, std.math.nan(f32)));
+    const bad_img = image_mod.Image{ .width = 0, .height = 0, .stride = 0, .pixels = &.{} };
+    try stdt.testing.expectError(error.InvalidCommand, dl.glyphRun(gpa, .{}, .{}, bad_img, &refs, 1.0));
+    const outside = [_]GlyphRef{.{ .src_x = 1, .src_y = 0, .src_w = 2, .src_h = 2 }};
+    try stdt.testing.expectError(error.InvalidCommand, dl.glyphRun(gpa, .{}, .{}, img, &outside, 1.0));
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+}
+
+test "DrawList translateInto/scaledInto copiam os glifos do run (M146)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var src = DrawList.initEmpty();
+    defer src.deinit(gpa);
+    var out = DrawList.initEmpty();
+    defer out.deinit(gpa);
+
+    var bytes: [16]u8 = undefined;
+    for (&bytes, 0..) |*p, i| p.* = @intCast(i);
+    const img = try image_mod.Image.init(2, 2, &bytes);
+    const refs = [_]GlyphRef{
+        .{ .src_x = 0, .src_y = 0, .src_w = 2, .src_h = 2, .dx = 0, .dy = 0 },
+        .{ .src_x = 0, .src_y = 0, .src_w = 2, .src_h = 2, .dx = 4, .dy = 0 },
+    };
+    try src.glyphRun(gpa, types.Vec2.init(1, 2), types.Color.rgb(255, 255, 255), img, &refs, 1.0);
+
+    // Translação: a posição do run muda, os glifos (relativos) ficam.
+    try src.translateInto(gpa, &out, 10, 20);
+    try stdt.testing.expectEqual(@as(usize, 1), out.len());
+    try stdt.testing.expectEqual(types.Vec2.init(11, 22), out.items()[0].glyph_run.pos);
+    const moved = out.glyphsOf(out.items()[0]);
+    try stdt.testing.expectEqual(@as(usize, 2), moved.len);
+    try stdt.testing.expectEqual(@as(f32, 4), moved[1].dx);
+
+    // Escala: os deslocamentos dos glifos escalam; a escala do atlas
+    // divide (o destino cresce).
+    try src.scaledInto(gpa, &out, 2.0);
+    try stdt.testing.expectEqual(types.Vec2.init(2, 4), out.items()[0].glyph_run.pos);
+    try stdt.testing.expectEqual(@as(f32, 0.5), out.items()[0].glyph_run.scale);
+    const scaled = out.glyphsOf(out.items()[0]);
+    try stdt.testing.expectEqual(@as(f32, 8), scaled[1].dx);
 }

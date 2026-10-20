@@ -70,6 +70,8 @@ pub const Error = error{
     InvalidUtf8,
     /// Falta de memória ao growar a tabela de glifos.
     OutOfMemory,
+    /// Comando de desenho inválido (região fora da imagem, etc.).
+    InvalidCommand,
 };
 
 /// Empacotador de glifos ("shelf"): linhas horizontais empilhadas.
@@ -252,6 +254,13 @@ pub const FontAtlas = struct {
 /// Desenha um trecho de texto usando o atlas: cada glifo vira um blit
 /// da sua região na imagem do atlas. `baseline` é a origem da linha de
 /// base. Glifos ausentes são ignorados.
+/// Glifos por run (limite por comando: texto longo vira vários runs).
+pub const max_glyphs_per_run: usize = 256;
+
+/// Desenha um trecho de texto usando o atlas: os glifos viram um ÚNICO
+/// comando `.glyph_run` (um por bloco de `max_glyphs_per_run`), em vez
+/// de um comando de imagem por glifo. `baseline` é a origem da linha de
+/// base. Glifos ausentes são ignorados.
 pub fn drawRun(
     dl: *commands.DrawList,
     gpa: std.mem.Allocator,
@@ -261,27 +270,38 @@ pub fn drawRun(
     tint: types.Color,
 ) Error!void {
     const scale = if (atlas.scale > 0) atlas.scale else 1.0;
+    var refs: [max_glyphs_per_run]commands.GlyphRef = undefined;
+    var n: usize = 0;
     var pen: f32 = 0;
     var i: usize = 0;
     while (i < text.len) {
         const d = metrics_mod.decodeOne(text[i..]) catch return error.InvalidUtf8;
         if (atlas.glyph(d.codepoint)) |g| {
-            const w = @as(f32, @floatFromInt(g.region.w)) / scale;
-            const h = @as(f32, @floatFromInt(g.region.h)) / scale;
-            const dest = types.Rect.init(
-                baseline.x + pen + g.metrics.bearing_x,
-                baseline.y + g.metrics.bearing_y,
-                w,
-                h,
-            );
-            dl.imageRegion(gpa, dest, atlas.image, g.region, tint) catch |err| switch (err) {
-                error.OutOfMemory => return error.OutOfMemory,
-                error.InvalidCommand => return error.InvalidGlyph,
+            if (n == refs.len) {
+                dl.glyphRun(gpa, baseline, tint, atlas.image, refs[0..n], scale) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    error.InvalidCommand => return error.InvalidGlyph,
+                };
+                n = 0;
+            }
+            refs[n] = .{
+                .src_x = g.region.x,
+                .src_y = g.region.y,
+                .src_w = g.region.w,
+                .src_h = g.region.h,
+                .dx = pen + g.metrics.bearing_x,
+                .dy = g.metrics.bearing_y,
             };
+            n += 1;
             pen += g.metrics.advance;
         }
         i += d.len;
     }
+    if (n == 0) return;
+    dl.glyphRun(gpa, baseline, tint, atlas.image, refs[0..n], scale) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidCommand => return error.InvalidGlyph,
+    };
 }
 
 test "Builder empacota glifos em prateleiras" {
@@ -376,10 +396,18 @@ test "drawRun blita cada glifo na posição do avanço" {
     defer dl.deinit(gpa);
     try drawRun(&dl, gpa, &atlas, "AB", types.Vec2.init(10, 20), types.Color.rgb(255, 255, 255));
 
-    try stdt.testing.expectEqual(@as(usize, 2), dl.len());
-    try stdt.testing.expectEqual(types.Rect.init(10, 16, 2, 4), dl.items()[0].image.rect);
-    try stdt.testing.expectEqual(types.Rect.init(13, 16, 2, 4), dl.items()[1].image.rect);
-    try stdt.testing.expectEqual(atlas.glyph('A').?.region, dl.items()[0].image.src);
+    // UM comando de run com os dois glifos (não um por glifo).
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
+    try stdt.testing.expect(dl.items()[0] == .glyph_run);
+    const refs = dl.glyphsOf(dl.items()[0]);
+    try stdt.testing.expectEqual(@as(usize, 2), refs.len);
+    // Glifo 'A': offset 0; 'B': o avanço de 'A' (3).
+    try stdt.testing.expectEqual(@as(f32, 0), refs[0].dx);
+    try stdt.testing.expectEqual(@as(f32, 3), refs[1].dx);
+    try stdt.testing.expectEqual(atlas.glyph('A').?.region.x, refs[0].src_x);
+    try stdt.testing.expectEqual(atlas.glyph('B').?.region.x, refs[1].src_x);
+    // A linha de base do run é a origem do texto.
+    try stdt.testing.expectEqual(@as(f32, 20), dl.items()[0].glyph_run.pos.y);
 
     // Texto inválido não enfileira nada.
     try stdt.testing.expectError(error.InvalidUtf8, drawRun(
@@ -390,7 +418,7 @@ test "drawRun blita cada glifo na posição do avanço" {
         types.Vec2.init(0, 0),
         types.Color.rgb(255, 255, 255),
     ));
-    try stdt.testing.expectEqual(@as(usize, 2), dl.len());
+    try stdt.testing.expectEqual(@as(usize, 1), dl.len());
 }
 
 test "drawRun respeita a escala do atlas" {
@@ -411,6 +439,8 @@ test "drawRun respeita a escala do atlas" {
     var dl = commands.DrawList.initEmpty();
     defer dl.deinit(gpa);
     try drawRun(&dl, gpa, &atlas, "A", types.Vec2.init(0, 0), types.Color.rgb(255, 255, 255));
-    // 4x8 pixels do atlas a 2x => 2x4 pixels lógicos.
-    try stdt.testing.expectEqual(types.Rect.init(0, -4, 2, 4), dl.items()[0].image.rect);
+    // 4x8 pixels do atlas a 2x => 2x4 pixels lógicos; o run carrega a
+    // escala (o backend divide o tamanho da região).
+    try stdt.testing.expectEqual(@as(f32, 2.0), dl.items()[0].glyph_run.scale);
+    try stdt.testing.expectEqual(types.Rect.init(0, -4, 2, 4), dl.items()[0].glyph_run.bounds);
 }

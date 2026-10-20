@@ -989,6 +989,38 @@ fn renderInternal(
                 alpha = std.math.clamp(c.factor, 0.0, 1.0);
                 out.drawn += 1;
             },
+            .glyph_run => |c| {
+                if (!boundsVisible(cmd, cull_rect)) {
+                    out.culled += 1;
+                    continue;
+                }
+                // Os glifos do run vêm do próprio comando (bloco
+                // estável); o rasterizador desenha um por um.
+                const refs: []const commands.GlyphRef = if (c.refs) |ptr|
+                    ptr[0..c.count]
+                else
+                    &.{};
+                for (refs) |r| {
+                    const w = @as(f32, @floatFromInt(r.src_w)) / c.scale;
+                    const h = @as(f32, @floatFromInt(r.src_h)) / c.scale;
+                    fb.blitImage(
+                        .{
+                            .x = c.pos.x + r.dx,
+                            .y = c.pos.y + r.dy,
+                            .w = w,
+                            .h = h,
+                        },
+                        image_mod.Region.init(r.src_x, r.src_y, r.src_w, r.src_h),
+                        c.pixels.?,
+                        c.width,
+                        c.height,
+                        c.stride,
+                        withAlpha(c.color, alpha),
+                        mergeClip(clip, area),
+                    );
+                }
+                out.drawn += 1;
+            },
             .text => {
                 out.skipped_text += 1;
             },
@@ -2228,4 +2260,36 @@ test "blit 1:1 copia o pixel exato (caminho rápido) (M145)" {
     try stdt.testing.expect(corner[0] > corner[1]);
     try stdt.testing.expect(corner[0] > corner[2]);
     try stdt.testing.expect(corner[0] > 128);
+}
+
+test "run de glifos desenha os glifos do atlas (M146)" {
+    const stdt = @import("std");
+    const gpa = stdt.testing.allocator;
+    var fb = try SoftwareFramebuffer.init(gpa, 8, 4);
+    defer fb.deinit(gpa);
+    fb.clear(types.Color.rgb(0, 0, 0));
+
+    // Atlas 2x2: vermelho, verde / azul, branco.
+    var pixels = [_]u8{
+        255, 0, 0,   255, 0,   255, 0,   255,
+        0,   0, 255, 255, 255, 255, 255, 255,
+    };
+    const img = try image_mod.Image.init(2, 2, &pixels);
+
+    var dl = commands.DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    const refs = [_]commands.GlyphRef{
+        .{ .src_x = 0, .src_y = 0, .src_w = 1, .src_h = 1, .dx = 0, .dy = 0 },
+        .{ .src_x = 1, .src_y = 0, .src_w = 1, .src_h = 1, .dx = 2, .dy = 0 },
+        .{ .src_x = 0, .src_y = 1, .src_w = 1, .src_h = 1, .dx = 0, .dy = 1 },
+    };
+    try dl.glyphRun(gpa, types.Vec2.init(1, 1), types.Color.rgb(255, 255, 255), img, &refs, 1.0);
+    const stats = try render(&fb, dl.items(), types.Rect.init(0, 0, 8, 4));
+    try stdt.testing.expectEqual(@as(u32, 1), stats.drawn);
+    // Cada glifo no seu lugar.
+    try stdt.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(1, 1));
+    try stdt.testing.expectEqual([4]u8{ 0, 255, 0, 255 }, fb.get(3, 1));
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 255, 255 }, fb.get(1, 2));
+    // Onde não há glifo, o fundo permanece.
+    try stdt.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(5, 1));
 }

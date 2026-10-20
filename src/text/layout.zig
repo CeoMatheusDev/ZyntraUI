@@ -43,6 +43,7 @@ fn mapAtlasErr(err: atlas_mod.Error) Error {
         error.InvalidGlyph,
         error.DuplicateGlyph,
         error.AtlasFull,
+        error.InvalidCommand,
         => error.InvalidGlyph,
     };
 }
@@ -193,6 +194,7 @@ pub const Layout = struct {
                     error.InvalidGlyph => error.InvalidGlyph,
                     error.DuplicateGlyph => error.InvalidGlyph,
                     error.AtlasFull => error.InvalidGlyph,
+                    error.InvalidCommand => error.InvalidCommand,
                 };
             },
         }
@@ -305,9 +307,11 @@ test "Layout.draw usa o atlas (blits) ou o fallback (comando de texto)" {
     defer dl2.deinit(gpa);
     const l2 = try Layout.fromAtlas(&atlas);
     try l2.draw(&dl2, gpa, "AB", types.Vec2.init(0, 0), types.Color.rgb(255, 255, 255));
-    try stdt.testing.expectEqual(@as(usize, 2), dl2.len());
-    try stdt.testing.expect(dl2.items()[0] == .image);
-    try stdt.testing.expect(dl2.items()[1] == .image);
+    // Um único comando de run com os dois glifos.
+    try stdt.testing.expectEqual(@as(usize, 1), dl2.len());
+    try stdt.testing.expect(dl2.items()[0] == .glyph_run);
+    const refs = dl2.glyphsOf(dl2.items()[0]);
+    try stdt.testing.expectEqual(@as(usize, 2), refs.len);
     // O segundo glifo avança pelo avanço real (5 px).
-    try stdt.testing.expectEqual(@as(f32, 5), dl2.items()[1].image.rect.x);
+    try stdt.testing.expectEqual(@as(f32, 5), refs[1].dx);
 }
