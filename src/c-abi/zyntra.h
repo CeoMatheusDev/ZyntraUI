@@ -1510,6 +1510,40 @@ ZyntraResult zyntra_widget_inspector_view(ZyntraContext *handle, ZyntraId id,
     ZyntraInspectorViewResult *out_result);
 
 /* ------------------------------------------------------------------ */
+/* Atlas de glifos: fonte real para texto (M139)                      */
+/* ------------------------------------------------------------------ */
+
+/* Handle opaco do atlas de glifos. O atlas é construído pelo CHAMADOR:
+ *   1) zyntra_font_atlas_create   (dimensões + padding)
+ *   2) zyntra_font_atlas_add_glyph (por glifo; devolve x/y para rasterizar)
+ *   3) zyntra_font_atlas_set_image (aponta a imagem RGBA8 já rasterizada)
+ * A imagem é EMPRESTADA e precisa viver enquanto o atlas for usado.
+ * `advance`/`bearing_y` são em pixels LÓGICOS; `bearing_y` negativo = o
+ * bitmap fica acima da linha de base. */
+typedef struct ZyntraFontAtlas ZyntraFontAtlas;
+
+ZyntraResult zyntra_font_atlas_create(uint32_t width, uint32_t height,
+    uint32_t padding, ZyntraFontAtlas **out_atlas);
+ZyntraResult zyntra_font_atlas_destroy(ZyntraFontAtlas *atlas);
+ZyntraResult zyntra_font_atlas_add_glyph(ZyntraFontAtlas *atlas,
+    uint32_t codepoint, uint32_t width, uint32_t height, float advance,
+    float bearing_y, uint32_t *out_x, uint32_t *out_y);
+ZyntraResult zyntra_font_atlas_set_image(ZyntraFontAtlas *atlas,
+    const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t stride);
+ZyntraResult zyntra_font_atlas_measure(const ZyntraFontAtlas *atlas,
+    const char *utf8, size_t utf8_len, float *out_width);
+ZyntraResult zyntra_font_atlas_line_height(const ZyntraFontAtlas *atlas,
+    float *out_height);
+/* Desenha um trecho: cada glifo vira um blit da sua região. `pos` é o
+ * canto superior-esquerdo do texto. */
+ZyntraResult zyntra_font_atlas_draw_run(ZyntraContext *ctx,
+    const ZyntraFontAtlas *atlas, const char *utf8, size_t utf8_len,
+    ZyntraVec2 pos, ZyntraColor tint);
+ZyntraResult zyntra_widget_label_atlas(ZyntraContext *ctx, ZyntraId id,
+    ZyntraRect bounds, const char *utf8, size_t utf8_len, ZyntraColor color,
+    const ZyntraFontAtlas *atlas);
+
+/* ------------------------------------------------------------------ */
 /* Animação: easing, tween, timer e cor (M122)                        */
 /* ------------------------------------------------------------------ */
 

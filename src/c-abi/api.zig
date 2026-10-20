@@ -64,6 +64,8 @@ const commands_mod = @import("../draw/commands.zig");
 const image_mod = @import("../draw/image.zig");
 const scale_mod = @import("../core/scale.zig");
 const ime_mod = @import("../text/ime.zig");
+const atlas_mod = @import("../text/atlas.zig");
+const text_layout_mod = @import("../text/layout.zig");
 const dock_layout_mod = @import("../dock/layout.zig");
 const dock_view_mod = @import("../widgets/dock_view.zig");
 const ct = @import("types.zig");
@@ -221,6 +223,246 @@ pub export fn zyntra_version_prerelease() callconv(.c) [*:0]const u8 {
 // interno (como `ZyntraFramebuffer`). O chamador cria com `zyntra_dock_create`
 // e destrói com `zyntra_dock_destroy` exatamente uma vez; todos os mutadores e
 // consultas operam sobre esse handle. Nada é exposto do layout interno.
+
+/// Handle opaco do atlas de glifos (M139). Nunca desreferenciar, copiar
+/// o struct interno (não existe na fronteira) ou liberar com `free`.
+///
+/// O atlas é construído pelo CHAMADOR em três passos:
+/// 1. `zyntra_font_atlas_create` (dimensões do atlas e padding);
+/// 2. `zyntra_font_atlas_add_glyph` por glifo — devolve a região
+///    (x, y) onde o chamador rasteriza o bitmap;
+/// 3. `zyntra_font_atlas_set_image` aponta o atlas para a imagem
+///    RGBA8 (emprestada) já rasterizada.
+///
+/// O handle é destruído com `zyntra_font_atlas_destroy` exatamente uma vez.
+pub const ZyntraFontAtlas = opaque {};
+
+/// Estado interno do atlas de glifos (nunca cruza a fronteira).
+const FontAtlas = struct {
+    builder: atlas_mod.Builder,
+    /// Glifos ordenados por codepoint (busca binária).
+    glyphs: std.ArrayList(atlas_mod.Glyph) = .empty,
+    /// Imagem do atlas (emprestada do chamador).
+    image: image_mod.Image = .{},
+
+    fn deinit(self: *FontAtlas, gpa: std.mem.Allocator) void {
+        self.builder.deinit(gpa);
+        self.glyphs.deinit(gpa);
+        self.image = .{};
+    }
+
+    /// Vista do atlas para as funções de medição/desenho.
+    fn view(self: *const FontAtlas) atlas_mod.FontAtlas {
+        return .{ .image = self.image, .glyphs = self.glyphs.items, .scale = 1 };
+    }
+};
+
+fn toFontAtlas(h: *ZyntraFontAtlas) *FontAtlas {
+    return @ptrCast(@alignCast(h));
+}
+
+/// Cria um atlas de glifos vazio (`width`×`height` em pixels do atlas e
+/// `padding` entre glifos). O atlas é construído pelo chamador:
+/// `zyntra_font_atlas_add_glyph` reserva a região de cada glifo e
+/// `zyntra_font_atlas_set_image` aponta para a imagem já rasterizada.
+pub export fn zyntra_font_atlas_create(
+    width: u32,
+    height: u32,
+    padding: u32,
+    out: ?*?*ZyntraFontAtlas,
+) callconv(.c) ct.ZyntraResult {
+    const o = out orelse return .invalid_argument;
+    if (width == 0 or height == 0) return .invalid_argument;
+    const gpa = std.heap.page_allocator;
+    const atlas = gpa.create(FontAtlas) catch return .out_of_memory;
+    atlas.* = .{ .builder = atlas_mod.Builder.init(width, height, padding) };
+    o.* = @ptrCast(atlas);
+    return .ok;
+}
+
+/// Destrói o atlas (o chamador DEVE chamar exatamente uma vez).
+pub export fn zyntra_font_atlas_destroy(atlas: ?*ZyntraFontAtlas) callconv(.c) ct.ZyntraResult {
+    const a = atlas orelse return .invalid_argument;
+    const gpa = std.heap.page_allocator;
+    const state = toFontAtlas(a);
+    state.deinit(gpa);
+    gpa.destroy(state);
+    return .ok;
+}
+
+/// Reserva a região de um glifo e devolve (x, y) no atlas: o chamador
+/// rasteriza ali o bitmap do glifo. `advance`/`bearing_y` são em pixels
+/// LÓGICOS (avanço horizontal e deslocamento vertical do bitmap em
+/// relação à linha de base; negativo = acima da base).
+pub export fn zyntra_font_atlas_add_glyph(
+    atlas: ?*ZyntraFontAtlas,
+    codepoint: u32,
+    width: u32,
+    height: u32,
+    advance: f32,
+    bearing_y: f32,
+    out_x: ?*u32,
+    out_y: ?*u32,
+) callconv(.c) ct.ZyntraResult {
+    const a = atlas orelse return .invalid_argument;
+    const ox = out_x orelse return .invalid_argument;
+    const oy = out_y orelse return .invalid_argument;
+    if (codepoint > 0x10FFFF or (codepoint >= 0xD800 and codepoint <= 0xDFFF)) {
+        return .invalid_argument;
+    }
+    const gpa = std.heap.page_allocator;
+    const state = toFontAtlas(a);
+    const glyph = state.builder.addGlyph(gpa, @intCast(codepoint), width, height, .{
+        .advance = advance,
+        .bearing_y = bearing_y,
+        .height = @floatFromInt(height),
+    }) catch |err| return switch (err) {
+        error.AtlasFull => .invalid_argument,
+        error.InvalidMetrics => .invalid_argument,
+        error.InvalidGlyph => .invalid_argument,
+        error.DuplicateGlyph => .invalid_argument,
+        error.OutOfMemory => .out_of_memory,
+        error.InvalidUtf8 => .invalid_text,
+    };
+    // Mantém a tabela ordenada por codepoint (busca binária).
+    var idx: usize = 0;
+    while (idx < state.glyphs.items.len and state.glyphs.items[idx].codepoint < glyph.codepoint) {
+        idx += 1;
+    }
+    state.glyphs.insert(gpa, idx, glyph) catch return .out_of_memory;
+    ox.* = glyph.region.x;
+    oy.* = glyph.region.y;
+    return .ok;
+}
+
+/// Define a imagem do atlas (pixels RGBA8 emprestados do chamador).
+/// `stride` é a distância em bytes entre linhas.
+pub export fn zyntra_font_atlas_set_image(
+    atlas: ?*ZyntraFontAtlas,
+    pixels: ?[*]const u8,
+    width: u32,
+    height: u32,
+    stride: u32,
+) callconv(.c) ct.ZyntraResult {
+    const a = atlas orelse return .invalid_argument;
+    const px = pixels orelse return .invalid_argument;
+    if (width == 0 or height == 0) return .invalid_argument;
+    const row_bytes = @as(u64, width) * image_mod.bytes_per_pixel;
+    if (row_bytes > std.math.maxInt(u32)) return .invalid_argument;
+    if (@as(u64, stride) < row_bytes) return .invalid_argument;
+    const needed = @as(u64, stride) * height;
+    if (needed > std.math.maxInt(usize)) return .invalid_argument;
+    toFontAtlas(a).image = .{
+        .width = width,
+        .height = height,
+        .stride = stride,
+        // O comprimento real é desconhecido na fronteira: o chamador
+        // garante que o buffer cobre `stride * height` bytes.
+        .pixels = @as([*]const u8, px)[0..@intCast(needed)],
+    };
+    return .ok;
+}
+
+/// Largura (pixels lógicos) de um trecho com os AVANÇOS do atlas.
+pub export fn zyntra_font_atlas_measure(
+    atlas: ?*ZyntraFontAtlas,
+    utf8: ?[*]const u8,
+    utf8_len: usize,
+    out_width: ?*f32,
+) callconv(.c) ct.ZyntraResult {
+    const a = atlas orelse return .invalid_argument;
+    const out = out_width orelse return .invalid_argument;
+    if (utf8_len > 0 and utf8 == null) return .invalid_argument;
+    const text: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
+    const state = toFontAtlas(a);
+    out.* = state.view().measure(text) catch |err| return switch (err) {
+        error.InvalidUtf8 => .invalid_text,
+        error.InvalidMetrics => .invalid_argument,
+        error.OutOfMemory => .out_of_memory,
+        error.InvalidGlyph => .invalid_argument,
+        error.DuplicateGlyph => .invalid_argument,
+        error.AtlasFull => .invalid_argument,
+    };
+    return .ok;
+}
+
+/// Altura de linha do atlas (ascente + descida, em pixels lógicos).
+pub export fn zyntra_font_atlas_line_height(
+    atlas: ?*ZyntraFontAtlas,
+    out_height: ?*f32,
+) callconv(.c) ct.ZyntraResult {
+    const a = atlas orelse return .invalid_argument;
+    const out = out_height orelse return .invalid_argument;
+    out.* = toFontAtlas(a).view().lineHeight();
+    return .ok;
+}
+
+/// Desenha um trecho de texto com o atlas: cada glifo vira um blit da
+/// sua região. `pos` é o canto superior-esquerdo do texto.
+pub export fn zyntra_font_atlas_draw_run(
+    handle: ?*ZyntraContext,
+    atlas: ?*ZyntraFontAtlas,
+    utf8: ?[*]const u8,
+    utf8_len: usize,
+    pos: ct.ZyntraVec2,
+    tint: ct.ZyntraColor,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const a = atlas orelse return .invalid_argument;
+    if (utf8_len > 0 and utf8 == null) return .invalid_argument;
+    const text: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
+    const ctx = toCtx(h);
+    const state = toFontAtlas(a);
+    const view = state.view();
+    const baseline = ct.ZyntraVec2{
+        .x = pos.x,
+        .y = pos.y + view.ascent(),
+    };
+    atlas_mod.drawRun(&ctx.draw, ctx.allocator, &view, text, toVec2(baseline), toColor(tint)) catch |err| return switch (err) {
+        error.OutOfMemory => .out_of_memory,
+        error.InvalidUtf8 => .invalid_text,
+        error.InvalidMetrics => .invalid_argument,
+        error.InvalidGlyph => .invalid_argument,
+        error.DuplicateGlyph => .invalid_argument,
+        error.AtlasFull => .invalid_argument,
+    };
+    return .ok;
+}
+
+/// Rótulo desenhado com o atlas de glifos (fonte real). O texto sai
+/// como blits — visível até no rasterizador de referência.
+pub export fn zyntra_widget_label_atlas(
+    handle: ?*ZyntraContext,
+    id: ct.ZyntraId,
+    bounds: ct.ZyntraRect,
+    utf8: ?[*]const u8,
+    utf8_len: usize,
+    color: ct.ZyntraColor,
+    atlas: ?*ZyntraFontAtlas,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const a = atlas orelse return .invalid_argument;
+    if (id == 0) return .invalid_argument;
+    if (utf8_len > 0 and utf8 == null) return .invalid_argument;
+    const text: []const u8 = if (utf8_len == 0) &.{} else utf8.?[0..utf8_len];
+    const ctx = toCtx(h);
+    const state = toFontAtlas(a);
+    const view = state.view();
+    const layout = text_layout_mod.Layout.fromAtlas(&view) catch return .invalid_argument;
+    const baseline = ct.ZyntraVec2{
+        .x = bounds.x,
+        .y = bounds.y + view.ascent(),
+    };
+    layout.draw(&ctx.draw, ctx.allocator, text, toVec2(baseline), toColor(color)) catch |err| return switch (err) {
+        error.OutOfMemory => .out_of_memory,
+        error.InvalidCommand => .invalid_command,
+        error.InvalidUtf8 => .invalid_text,
+        error.InvalidMetrics => .invalid_argument,
+        error.InvalidGlyph => .invalid_argument,
+        error.InvalidArgument => .invalid_argument,
+    };
+    return .ok;
+}
 
 /// Handle opaco do layout de docking. Nunca desreferenciar, copiar o struct
 /// interno (não existe na fronteira) ou liberar com `free`.
@@ -7301,4 +7543,76 @@ test "C-ABI M130: composição de IME no campo de texto" {
         &style,
         &res,
     ));
+}
+
+test "C-ABI M139: atlas de glifos (fonte real) na fronteira C" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var handle: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(ok, zyntra_context_create(.{
+        .x = 0,
+        .y = 0,
+        .w = 200,
+        .h = 100,
+    }, &handle));
+    defer zyntra_context_destroy(handle);
+
+    // Atlas 16x16 com dois glifos 5x7 ('A' avanço 5, 'B' avanço 3).
+    var atlas: ?*ZyntraFontAtlas = null;
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_create(16, 16, 1, &atlas));
+    defer _ = zyntra_font_atlas_destroy(atlas);
+
+    var gx: u32 = 0;
+    var gy: u32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_add_glyph(atlas, 'A', 5, 7, 5.0, -7.0, &gx, &gy));
+    try stdt.testing.expectEqual(@as(u32, 0), gx);
+    try stdt.testing.expectEqual(@as(u32, 0), gy);
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_add_glyph(atlas, 'B', 5, 7, 3.0, -7.0, &gx, &gy));
+    try stdt.testing.expectEqual(@as(u32, 6), gx);
+    // Codepoint inválido e glifo duplicado são recusados.
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_add_glyph(atlas, 0x110000, 5, 7, 5.0, -7.0, &gx, &gy));
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_add_glyph(atlas, 'A', 5, 7, 5.0, -7.0, &gx, &gy));
+    // Avanço negativo é recusado.
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_add_glyph(atlas, 'C', 5, 7, -1.0, -7.0, &gx, &gy));
+    // Glifo que não cabe no atlas é recusado.
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_add_glyph(atlas, 'C', 32, 32, 5.0, -7.0, &gx, &gy));
+
+    // Imagem 16x16 RGBA8 (o chamador rasteriza os glifos).
+    var pixels: [16 * 16 * 4]u8 = undefined;
+    for (&pixels, 0..) |*p, i| p.* = @truncate(i);
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_set_image(atlas, &pixels, 16, 16, 16 * 4));
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_set_image(atlas, null, 16, 16, 16 * 4));
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_set_image(atlas, &pixels, 0, 16, 16 * 4));
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_set_image(atlas, &pixels, 16, 16, 4));
+
+    // Medição com os avanços reais: "AB" = 5 + 3 = 8.
+    var width: f32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_measure(atlas, "AB", 2, &width));
+    try stdt.testing.expectEqual(@as(f32, 8), width);
+    var line_h: f32 = 0;
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_line_height(atlas, &line_h));
+    try stdt.testing.expectEqual(@as(f32, 7), line_h);
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_measure(atlas, "AB", 2, null));
+    try stdt.testing.expectEqual(ct.ZyntraResult.invalid_text, zyntra_font_atlas_measure(atlas, "\xff", 1, &width));
+
+    // Desenho: um blit por glifo.
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(handle));
+    try stdt.testing.expectEqual(ok, zyntra_font_atlas_draw_run(handle, atlas, "AB", 2, .{ .x = 4, .y = 2 }, .{ .r = 255, .g = 255, .b = 255, .a = 255 }));
+    var n_draw: usize = 0;
+    try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expectEqual(@as(usize, 2), n_draw);
+    // O rótulo com atlas também emite um blit por glifo.
+    try stdt.testing.expectEqual(ok, zyntra_widget_label_atlas(handle, zyntra_id_from_string("m139:label", 10), .{ .x = 0, .y = 20, .w = 100, .h = 12 }, "AB", 2, .{ .r = 255, .g = 255, .b = 255, .a = 255 }, atlas));
+    try stdt.testing.expectEqual(ok, zyntra_draw_count(handle, &n_draw));
+    try stdt.testing.expectEqual(@as(usize, 4), n_draw);
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(handle));
+
+    // Nulos nunca crasham.
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_create(16, 16, 1, null));
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_create(0, 16, 1, &atlas));
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_add_glyph(null, 'A', 5, 7, 5.0, -7.0, &gx, &gy));
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_measure(null, "A", 1, &width));
+    try stdt.testing.expectEqual(bad, zyntra_font_atlas_draw_run(handle, null, "A", 1, .{}, .{}));
+    try stdt.testing.expectEqual(bad, zyntra_widget_label_atlas(handle, 0, .{}, "A", 1, .{}, atlas));
 }

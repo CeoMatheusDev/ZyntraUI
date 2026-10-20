@@ -46,6 +46,15 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   `cover` e a projeção do frame para o espaço de dispositivo (DPI 2x),
   conferindo os comandos resultantes.
 
+- `c-abi`: **atlas de glifos na fronteira C** (M139, aditivo) — handle
+  opaco `ZyntraFontAtlas` construído pelo chamador (`zyntra_font_atlas_create`
+  → `zyntra_font_atlas_add_glyph`, que devolve a região para rasterizar →
+  `zyntra_font_atlas_set_image`), com `zyntra_font_atlas_measure`/
+  `_line_height` (avanços reais da fonte) e `zyntra_font_atlas_draw_run`/
+  `zyntra_widget_label_atlas` (cada glifo vira um blit da sua região). O
+  consumidor C ganhou o frame do atlas (medição + texto visível no
+  framebuffer).
+
 ## [1.36.0] - 2026-10-20
 
 MINOR estável, 100% compatível: a base de UI ganha **imagens** (RGBA8 nos

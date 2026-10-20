@@ -886,6 +886,39 @@ zyntra_widget_text_input_ime(ctx, id, bounds, buffer, sizeof(buffer), &len,
   nulos ou inconsistentes, pré-edit maior que o buffer, cursor fora do
   buffer; UTF-8 malformado ⇒ `ZYNTRA_INVALID_TEXT`.
 
+### Décimo sétimo lote (M139): atlas de glifos (fonte real)
+
+```c
+ZyntraFontAtlas *atlas = NULL;
+zyntra_font_atlas_create(16, 16, 1, &atlas);
+
+uint32_t x = 0, y = 0;
+zyntra_font_atlas_add_glyph(atlas, 'A', 5, 7, 5.0f, -7.0f, &x, &y);
+/* O chamador rasteriza o glifo em (x, y) na própria imagem. */
+zyntra_font_atlas_set_image(atlas, pixels, 16, 16, 16 * 4);
+
+float w = 0;
+zyntra_font_atlas_measure(atlas, "AB", 2, &w);   /* 8.0 (avanços reais) */
+zyntra_widget_label_atlas(ctx, id, bounds, "AB", 2, color, atlas);
+```
+
+* O atlas é construído pelo CHAMADOR: `create` (dimensões + padding),
+  `add_glyph` (devolve a região `x`/`y` onde rasterizar) e `set_image`
+  (aponta a imagem RGBA8, **emprestada**, já rasterizada). A imagem precisa
+  viver enquanto o atlas for usado; `destroy` fecha o ciclo.
+* `advance`/`bearing_y` são em pixels **lógicos** (`bearing_y` negativo =
+  o bitmap fica acima da linha de base). A medição usa os avanços reais
+  (fonte proporcional), então o que se mede é o que se desenha.
+* `zyntra_font_atlas_draw_run` desenha um trecho (cada glifo vira um blit
+  da sua região — o texto fica visível até no rasterizador de referência,
+  que não rasteriza glifos); `zyntra_widget_label_atlas` faz o mesmo
+  posicionando pelo canto superior-esquerdo do rect.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: atlas/ponteiros nulos, dimensões
+  zero, `stride` menor que `width * 4`, codepoint fora de
+  `0..0x10FFFF` (ou surrogate), avanço/medida inválidos, glifo
+  duplicado, glifo que não cabe no atlas e ponteiros de saída nulos;
+  UTF-8 malformado ⇒ `ZYNTRA_INVALID_TEXT`.
+
 ## Strings, buffers, callbacks
 
 * M6: `zyntra_draw_text(handle, pos, color, size, utf8, utf8_len)` copia os
@@ -961,6 +994,8 @@ zyntra_widget_text_input_ime(ctx, id, bounds, buffer, sizeof(buffer), &len,
   escalares e o buffer do chamador (nenhuma trava de layout nova).
 * M130: travado `ZyntraImeComposition=40` (ponteiro + 3 `size_t` + 2
   `bool`, alinhamento 8).
+* M139: handle opaco `ZyntraFontAtlas` (sem layout exposto) — nenhuma
+  trava de layout nova.
 * Símbolos C estáveis listados em `src/c-abi/zyntra.h`.
 * Quebra de layout/assinatura exige MAJOR bump.
 
@@ -981,5 +1016,5 @@ Consumidor C real em `tests/c/test_c_abi.c`:
 zig build                          # gera zig-out/lib/libzyntra_ui.a
 zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a \
   -Isrc/c-abi -o /tmp/opencode/zyntra-c-test
-/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..." + "C-ABI inspector ..." + "C-ABI anim ..." + "C-ABI imagem ..." + "C-ABI ime ..."
+/tmp/opencode/zyntra-c-test        # esperado: "C-ABI OK ..." + "C-ABI modern ..." + "C-ABI pixels ..." + "C-ABI widgets ..." + "C-ABI lists ..." + "C-ABI rich ..." + "C-ABI tree ..." + "C-ABI keys ..." + "C-ABI text ..." + "C-ABI dock ..." + "C-ABI widgets2 ..." + "C-ABI containers ..." + "C-ABI dnd ..." + "C-ABI bars ..." + "C-ABI graph ..." + "C-ABI timeline ..." + "C-ABI inspector ..." + "C-ABI anim ..." + "C-ABI imagem ..." + "C-ABI ime ..." + "C-ABI atlas ..."
 ```

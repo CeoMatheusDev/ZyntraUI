@@ -3619,6 +3619,71 @@ int main(void) {
         c130_ime = (len == 2 && strcmp(buf, "ni") == 0);
     }
 
+    /* Atlas de glifos / fonte real (M139). */
+    int c139_atlas = 0;
+    {
+        uint8_t atlas_px[16 * 16 * 4];
+        memset(atlas_px, 0, sizeof(atlas_px));
+        ZyntraFontAtlas *atlas = NULL;
+        CHECK(zyntra_font_atlas_create(16, 16, 1, &atlas));
+
+        uint32_t gx = 0, gy = 0;
+        CHECK(zyntra_font_atlas_add_glyph(atlas, 'A', 5, 7, 5.0f, -7.0f,
+            &gx, &gy));
+        assert(gx == 0 && gy == 0);
+        CHECK(zyntra_font_atlas_add_glyph(atlas, 'B', 5, 7, 3.0f, -7.0f,
+            &gx, &gy));
+        assert(gx == 6);
+        assert(zyntra_font_atlas_add_glyph(atlas, 'A', 5, 7, 5.0f, -7.0f,
+            &gx, &gy) == ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_font_atlas_add_glyph(atlas, 0x110000, 5, 7, 5.0f, -7.0f,
+            &gx, &gy) == ZYNTRA_INVALID_ARGUMENT);
+
+        /* O chamador rasteriza os glifos na imagem do atlas. */
+        for (int i = 0; i < 5 * 7; i++) {
+            size_t o = (size_t)(i / 5) * 16 * 4 + (size_t)(i % 5) * 4;
+            atlas_px[o] = 255;
+            atlas_px[o + 3] = 255;
+        }
+        CHECK(zyntra_font_atlas_set_image(atlas, atlas_px, 16, 16, 16 * 4));
+        assert(zyntra_font_atlas_set_image(atlas, NULL, 16, 16, 16 * 4)
+            == ZYNTRA_INVALID_ARGUMENT);
+
+        /* Medição com os avanços reais: "AB" = 5 + 3 = 8. */
+        float w = 0.0f;
+        CHECK(zyntra_font_atlas_measure(atlas, "AB", 2, &w));
+        assert(w == 8.0f);
+        float lh = 0.0f;
+        CHECK(zyntra_font_atlas_line_height(atlas, &lh));
+        assert(lh == 7.0f);
+
+        /* Desenho: um blit por glifo, e o texto aparece no framebuffer. */
+        ZyntraFramebuffer *fbatlas = NULL;
+        CHECK(zyntra_framebuffer_create(32, 16, &fbatlas));
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_font_atlas_draw_run(ctx, atlas, "AB", 2,
+            (ZyntraVec2){2, 2}, (ZyntraColor){255, 255, 255, 255}));
+        CHECK(zyntra_framebuffer_render(fbatlas, ctx, NULL));
+        ZyntraColor px = {0, 0, 0, 0};
+        CHECK(zyntra_framebuffer_pixel(fbatlas, 2, 2, &px));
+        assert(px.r == 255 && px.a == 255);
+        CHECK(zyntra_context_end_frame(ctx));
+        zyntra_framebuffer_destroy(fbatlas);
+
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_widget_label_atlas(ctx,
+            zyntra_id_from_string("m139:label", 10),
+            (ZyntraRect){0, 0, 100, 12}, "AB", 2,
+            (ZyntraColor){255, 255, 255, 255}, atlas));
+        size_t n_draw = 0;
+        CHECK(zyntra_draw_count(ctx, &n_draw));
+        assert(n_draw == 2);
+        CHECK(zyntra_context_end_frame(ctx));
+
+        CHECK(zyntra_font_atlas_destroy(atlas));
+        c139_atlas = (w == 8.0f && lh == 7.0f);
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -3694,6 +3759,7 @@ int main(void) {
         c122_ease, c122_tween, c122_timer, c122_color);
     printf("C-ABI imagem px=%d dpi=%d\n", c129_image, c129_dpi);
     printf("C-ABI ime=%d\n", c130_ime);
+    printf("C-ABI atlas=%d\n", c139_atlas);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }
