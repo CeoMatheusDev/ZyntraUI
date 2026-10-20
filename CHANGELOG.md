@@ -5,6 +5,20 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Adicionado
+
+- `draw`/`software`/`c-abi`: **caminhos vetoriais** (M158–M161, aditivo) —
+  novo módulo `draw.path` (a geometria: construtor de caminhos,
+  achatamento em polilinhas, bbox), o parser de path SVG (`draw.svg`: M/L/
+  H/V/C/S/Q/T/A/Z, com o arco convertido em cúbicas), o comando de desenho
+  `.path` (preenchimento `nonzero`/`evenodd` ou traço com junta e ponta)
+  e o rasterizador de software dos caminhos (4 sub-scanlines por linha +
+  cobertura exata em X ⇒ bordas anti-serrilhadas). A fronteira C ganha
+  `zyntra_draw_path` e `zyntra_draw_svg_path` (com o tipo
+  `ZyntraPathContour`). O novo exemplo `examples/paths.zig` (step
+  `run-paths`) mostra o ícone SVG desenhado no framebuffer de software.
+  Nenhuma API pública mudou de assinatura.
+
 ## [1.40.1] - 2026-10-20
 
 PATCH de correção e ajustes, 100% compatível: a revisão geral do projeto

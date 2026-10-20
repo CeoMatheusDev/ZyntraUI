@@ -68,6 +68,8 @@ const atlas_mod = @import("../text/atlas.zig");
 const bitmap_mod = @import("../text/bitmap.zig");
 const text_layout_mod = @import("../text/layout.zig");
 const text_block_mod = @import("../widgets/text_block.zig");
+const path_mod = @import("../draw/path.zig");
+const svg_mod = @import("../draw/svg.zig");
 const image_widget_mod = @import("../widgets/image.zig");
 const vp3d_math = @import("../viewport3d/math.zig");
 const vp3d_camera = @import("../viewport3d/camera.zig");
@@ -1929,6 +1931,173 @@ pub export fn zyntra_image_fit_rect(
     sw.* = place.src.w;
     sh.* = place.src.h;
     return .ok;
+}
+
+// ---------------------------------------------------------------------------
+// Caminhos vetoriais (M161)
+// ---------------------------------------------------------------------------
+
+/// Preenche ou traça um caminho vetorial.
+///
+/// `points` são os pontos (em pixels lógicos) e `contours` dizem quais
+/// faixas formam cada contorno (aberto ou fechado). `thickness` 0 =
+/// preenchimento, > 0 = traço com essa espessura. `rule` 0 = nonzero,
+/// 1 = evenodd; `join` 0 = miter, 1 = round, 2 = bevel; `cap` 0 = butt,
+/// 1 = round, 2 = square.
+///
+/// Os pontos são COPIADOS pelo comando (o app pode liberar o buffer
+/// depois da chamada).
+pub export fn zyntra_draw_path(
+    handle: ?*ZyntraContext,
+    points: ?[*]const ct.ZyntraVec2,
+    point_count: u32,
+    contours: ?[*]const ct.ZyntraPathContour,
+    contour_count: u32,
+    color: ct.ZyntraColor,
+    thickness: f32,
+    rule: i32,
+    join: i32,
+    cap: i32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const ctx = toCtx(h);
+    if (point_count == 0) return .invalid_argument;
+    const pts_ptr = points orelse return .invalid_argument;
+    const fill_rule = switch (rule) {
+        0 => path_mod.FillRule.nonzero,
+        1 => path_mod.FillRule.evenodd,
+        else => return .invalid_argument,
+    };
+    const stroke_join = switch (join) {
+        0 => path_mod.StrokeJoin.miter,
+        1 => path_mod.StrokeJoin.round,
+        2 => path_mod.StrokeJoin.bevel,
+        else => return .invalid_argument,
+    };
+    const stroke_cap = switch (cap) {
+        0 => path_mod.StrokeCap.butt,
+        1 => path_mod.StrokeCap.round,
+        2 => path_mod.StrokeCap.square,
+        else => return .invalid_argument,
+    };
+    if (!std.math.isFinite(thickness) or thickness < 0) return .invalid_argument;
+
+    // Converte para a geometria interna (cópia temporária).
+    const gpa = std.heap.page_allocator;
+    const pts = gpa.alloc(types_mod.Vec2, point_count) catch return .out_of_memory;
+    defer gpa.free(pts);
+    for (pts, 0..) |*p, i| {
+        const src = pts_ptr[i];
+        if (!std.math.isFinite(src.x) or !std.math.isFinite(src.y)) return .invalid_argument;
+        p.* = .{ .x = src.x, .y = src.y };
+    }
+    var ranges: []path_mod.ContourRange = &.{};
+    defer if (ranges.len != 0) gpa.free(ranges);
+    if (contour_count > 0) {
+        const cont_ptr = contours orelse return .invalid_argument;
+        ranges = gpa.alloc(path_mod.ContourRange, contour_count) catch return .out_of_memory;
+        for (ranges, 0..) |*r, i| {
+            const src = cont_ptr[i];
+            if (src.len < 2) return .invalid_argument;
+            if (src.start + src.len > point_count) return .invalid_argument;
+            r.* = .{
+                .start = src.start,
+                .len = src.len,
+                .closed = src.closed != 0,
+            };
+        }
+    }
+    const flat = path_mod.Flat{ .points = pts, .contours = ranges };
+    return pushDraw(ctx.draw.path(
+        ctx.allocator,
+        flat,
+        toColor(color),
+        thickness,
+        fill_rule,
+        stroke_join,
+        stroke_cap,
+    ));
+}
+
+/// Desenha um path SVG ("M 0 0 L 10 10 Z"): a string é analisada,
+/// achatada e desenhada (mesmos parâmetros de `zyntra_draw_path`).
+/// A string é lida durante a chamada (o app pode liberá-la depois).
+pub export fn zyntra_draw_svg_path(
+    handle: ?*ZyntraContext,
+    svg: ?[*]const u8,
+    svg_len: u32,
+    color: ct.ZyntraColor,
+    thickness: f32,
+    rule: i32,
+    join: i32,
+    cap: i32,
+) callconv(.c) ct.ZyntraResult {
+    const h = checkHandle(handle) catch return .invalid_argument;
+    const ctx = toCtx(h);
+    const text_ptr = svg orelse return .invalid_argument;
+    if (svg_len == 0) return .invalid_argument;
+    if (!std.math.isFinite(thickness) or thickness < 0) return .invalid_argument;
+    const fill_rule = switch (rule) {
+        0 => path_mod.FillRule.nonzero,
+        1 => path_mod.FillRule.evenodd,
+        else => return .invalid_argument,
+    };
+    const stroke_join = switch (join) {
+        0 => path_mod.StrokeJoin.miter,
+        1 => path_mod.StrokeJoin.round,
+        2 => path_mod.StrokeJoin.bevel,
+        else => return .invalid_argument,
+    };
+    const stroke_cap = switch (cap) {
+        0 => path_mod.StrokeCap.butt,
+        1 => path_mod.StrokeCap.round,
+        2 => path_mod.StrokeCap.square,
+        else => return .invalid_argument,
+    };
+    const text = text_ptr[0..svg_len];
+    const gpa = std.heap.page_allocator;
+    // Segmentos: uma estimativa generosa (2 por número do path).
+    const seg_cap = @max(16, text.len * 2);
+    const segs = gpa.alloc(path_mod.Segment, seg_cap) catch return .out_of_memory;
+    defer gpa.free(segs);
+    const builder = svg_mod.parsePath(text, segs) catch return .invalid_argument;
+    // Achatamento: os buffers crescem até caber.
+    var point_cap: usize = 64;
+    var range_cap: usize = 16;
+    var points = gpa.alloc(types_mod.Vec2, point_cap) catch return .out_of_memory;
+    defer gpa.free(points);
+    var ranges = gpa.alloc(path_mod.ContourRange, range_cap) catch return .out_of_memory;
+    defer gpa.free(ranges);
+    var flat = path_mod.Flat{};
+    while (true) {
+        const res = path_mod.flatten(builder.segments(), 0.25, points, ranges);
+        if (res) |ok| {
+            flat = ok;
+            break;
+        } else |err| switch (err) {
+            error.InvalidArgument => return .invalid_argument,
+            error.NoSpaceLeft => {
+                if (point_cap > 1 << 20 or range_cap > 1 << 16) return .invalid_argument;
+                point_cap *= 2;
+                range_cap *= 2;
+                const new_points = gpa.alloc(types_mod.Vec2, point_cap) catch return .out_of_memory;
+                gpa.free(points);
+                points = new_points;
+                const new_ranges = gpa.alloc(path_mod.ContourRange, range_cap) catch return .out_of_memory;
+                gpa.free(ranges);
+                ranges = new_ranges;
+            },
+        }
+    }
+    return pushDraw(ctx.draw.path(
+        ctx.allocator,
+        flat,
+        toColor(color),
+        thickness,
+        fill_rule,
+        stroke_join,
+        stroke_cap,
+    ));
 }
 
 // Widgets: primeira superfície C (M107)
@@ -8574,4 +8743,88 @@ test "C-ABI M146: modos de ajuste da imagem" {
     try stdt.testing.expectEqual(bad, zyntra_image_fit_rect(bounds, 2, 2, 9, &dest, &sx, &sy, &sw, &sh));
     try stdt.testing.expectEqual(bad, zyntra_image_fit_rect(bounds, 0, 2, 0, &dest, &sx, &sy, &sw, &sh));
     try stdt.testing.expectEqual(bad, zyntra_image_fit_rect(bounds, 2, 2, 0, null, &sx, &sy, &sw, &sh));
+}
+
+test "C-ABI M161: caminhos vetoriais (pontos, contornos e path SVG)" {
+    const stdt = @import("std");
+    const ok = ct.ZyntraResult.ok;
+    const bad = ct.ZyntraResult.invalid_argument;
+    var ctx: ?*ZyntraContext = null;
+    try stdt.testing.expectEqual(ok, zyntra_context_create(.{ .x = 0, .y = 0, .w = 64, .h = 64 }, &ctx));
+    defer _ = zyntra_context_destroy(ctx);
+
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(ctx));
+    const pts = [_]ct.ZyntraVec2{
+        .{ .x = 10, .y = 10 },
+        .{ .x = 40, .y = 10 },
+        .{ .x = 40, .y = 40 },
+        .{ .x = 10, .y = 40 },
+    };
+    const contours = [_]ct.ZyntraPathContour{.{ .start = 0, .len = 4, .closed = 1 }};
+    try stdt.testing.expectEqual(ok, zyntra_draw_path(
+        ctx,
+        &pts,
+        4,
+        &contours,
+        1,
+        ct.ZyntraColor{ .r = 240, .g = 200, .b = 90, .a = 255 },
+        0,
+        0,
+        1,
+        0,
+    ));
+    // Traço do mesmo caminho.
+    try stdt.testing.expectEqual(ok, zyntra_draw_path(
+        ctx,
+        &pts,
+        4,
+        &contours,
+        1,
+        ct.ZyntraColor{ .r = 30, .g = 30, .b = 40, .a = 255 },
+        2,
+        0,
+        1,
+        1,
+    ));
+    // Path SVG.
+    const svg = "M 10 50 L 25 60 L 40 50 Z";
+    try stdt.testing.expectEqual(ok, zyntra_draw_svg_path(
+        ctx,
+        svg,
+        @intCast(svg.len),
+        ct.ZyntraColor{ .r = 120, .g = 200, .b = 240, .a = 255 },
+        0,
+        0,
+        1,
+        0,
+    ));
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(ctx));
+
+    // O framebuffer mostra o caminho.
+    var fb: ?*ZyntraFramebuffer = null;
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_create(64, 64, &fb));
+    defer _ = zyntra_framebuffer_destroy(fb);
+    try stdt.testing.expectEqual(ok, zyntra_framebuffer_render(fb, ctx, null));
+    var lit: u32 = 0;
+    var y: u32 = 0;
+    while (y < 64) : (y += 1) {
+        var x: u32 = 0;
+        while (x < 64) : (x += 1) {
+            var px = ct.ZyntraColor{};
+            try stdt.testing.expectEqual(ok, zyntra_framebuffer_pixel(fb, x, y, &px));
+            if (px.r > 40 or px.g > 40 or px.b > 40) lit += 1;
+        }
+    }
+    try stdt.testing.expect(lit > 100);
+
+    // Erros.
+    try stdt.testing.expectEqual(ok, zyntra_context_begin_frame(ctx));
+    try stdt.testing.expectEqual(bad, zyntra_draw_path(ctx, null, 4, &contours, 1, ct.ZyntraColor{}, 0, 0, 1, 0));
+    try stdt.testing.expectEqual(bad, zyntra_draw_path(ctx, &pts, 4, &contours, 1, ct.ZyntraColor{}, 0, 9, 1, 0));
+    try stdt.testing.expectEqual(bad, zyntra_draw_path(ctx, &pts, 4, &contours, 1, ct.ZyntraColor{}, -1, 0, 1, 0));
+    const bad_contour = [_]ct.ZyntraPathContour{.{ .start = 0, .len = 99, .closed = 1 }};
+    try stdt.testing.expectEqual(bad, zyntra_draw_path(ctx, &pts, 4, &bad_contour, 1, ct.ZyntraColor{}, 0, 0, 1, 0));
+    try stdt.testing.expectEqual(bad, zyntra_draw_svg_path(ctx, "zzz", 3, ct.ZyntraColor{}, 0, 0, 1, 0));
+    try stdt.testing.expectEqual(bad, zyntra_draw_svg_path(ctx, null, 3, ct.ZyntraColor{}, 0, 0, 1, 0));
+    try stdt.testing.expectEqual(ok, zyntra_context_end_frame(ctx));
 }

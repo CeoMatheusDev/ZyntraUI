@@ -305,6 +305,34 @@ ZyntraResult zyntra_image_fit_rect(ZyntraRect bounds, uint32_t img_w,
     uint32_t *out_src_x, uint32_t *out_src_y, uint32_t *out_src_w,
     uint32_t *out_src_h);
 
+/* ------------------------------------------------------------------ */
+/* Caminhos vetoriais (M161): preenchimento e traço                  */
+/* ------------------------------------------------------------------ */
+
+/* Contorno de um caminho: a faixa de pontos (em pixels lógicos) que
+ * forma um contorno aberto ou fechado. */
+typedef struct ZyntraPathContour {
+    uint32_t start;  /* primeiro ponto do contorno */
+    uint32_t len;    /* quantidade de pontos (>= 2) */
+    uint8_t closed;  /* 0 = aberto, 1 = fecha no primeiro ponto */
+} ZyntraPathContour;
+
+/* Preenche ou traça um caminho. `thickness` 0 = preenchimento, > 0 =
+ * traço. `rule` 0 = nonzero, 1 = evenodd; `join` 0 = miter, 1 = round,
+ * 2 = bevel; `cap` 0 = butt, 1 = round, 2 = square. Os pontos são
+ * COPIADOS pelo comando (o app pode liberar o buffer depois). */
+ZyntraResult zyntra_draw_path(ZyntraContext *ctx,
+    const ZyntraVec2 *points, uint32_t point_count,
+    const ZyntraPathContour *contours, uint32_t contour_count,
+    ZyntraColor color, float thickness, int32_t rule, int32_t join,
+    int32_t cap);
+
+/* Desenha um path SVG ("M 0 0 L 10 10 Z"): a string é analisada,
+ * achatada e desenhada (mesmos parâmetros de `zyntra_draw_path`). */
+ZyntraResult zyntra_draw_svg_path(ZyntraContext *ctx, const uint8_t *svg,
+    uint32_t svg_len, ZyntraColor color, float thickness, int32_t rule,
+    int32_t join, int32_t cap);
+
 /* Widgets (M107): primeira superfície C. Os estilos são os mesmos `extern
  * struct` da API Zig (uma definição só por widget; as travas de layout em
  * src/c-abi/types.zig falham o build se mudarem). `ZyntraId` é o `u64`

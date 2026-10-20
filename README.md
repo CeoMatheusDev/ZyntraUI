@@ -33,6 +33,7 @@ Rather than tying UI logic to a window system or GPU API, ZyntraUI keeps those c
 - **Deterministic behavior:** Explicit inputs and draw lists make UI logic suitable for automated and snapshot testing.
 - **Pure Zig core:** Use the native Zig API or the optional C ABI without introducing a heavyweight GUI runtime.
 - **Multi-surface ready:** A window registry, per-surface input routing, repaint composition and draggable/resizable window frames, all on top of the same draw-command pipeline.
+- **Vector paths:** Build shapes and icons with paths (curves, arcs, SVG path data) filled or stroked with anti-aliased edges — no image assets and no external dependencies.
 
 ## Widgets
 

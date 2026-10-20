@@ -328,6 +328,17 @@ pub const ZyntraInspectorStyle = style_mod.InspectorStyle;
 
 // Resultados: definidos aqui como `extern struct` (a API Zig usa structs
 // comuns; a cópia campo a campo nos wrappers evita depender do layout deles).
+/// Contorno de um caminho vetorial: a faixa de pontos (em pixels
+/// lógicos) que forma um contorno fechado ou aberto.
+pub const ZyntraPathContour = extern struct {
+    /// Primeiro ponto do contorno (índice em `points`).
+    start: u32 = 0,
+    /// Quantidade de pontos (>= 2).
+    len: u32 = 0,
+    /// O contorno fecha sozinho (o último ponto liga no primeiro).
+    closed: u8 = 0,
+};
+
 pub const ZyntraLabelResult = extern struct {
     metrics: ZyntraTextMetrics = .{},
     truncated: bool = false,

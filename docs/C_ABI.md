@@ -1010,6 +1010,37 @@ zyntra_vp3d_destroy(vp);
   zero, `distance <= 0`, câmera inválida, tamanho de objeto não
   positivo, valores não-finitos, modo de ajuste desconhecido.
 
+### Décimo nono lote (M161): caminhos vetoriais
+
+```c
+const ZyntraVec2 pts[4] = {{10, 10}, {40, 10}, {40, 40}, {10, 40}};
+const ZyntraPathContour contours[1] = {{0, 4, 1}};
+
+zyntra_draw_path(ctx, pts, 4, contours, 1,
+    (ZyntraColor){240, 200, 90, 255}, 0.0f, 0, 1, 0);
+/* thickness 0 = preenchimento; > 0 = traço. */
+
+/* Path SVG: a string é analisada, achatada e desenhada. */
+const char *svg = "M 10 50 L 25 70 L 40 50 Z";
+zyntra_draw_svg_path(ctx, (const uint8_t *)svg, (uint32_t)strlen(svg),
+    (ZyntraColor){120, 200, 240, 255}, 0.0f, 0, 1, 0);
+```
+
+* O caminho vetorial é a mesma geometria da API Zig (`draw.path`): os
+  pontos são polilinhas (contornos) e o desenho é feito pelo rasterizador
+  de software com anti-serrilhamento (preenchimento `nonzero`/`evenodd`
+  e traço com junta e ponta).
+* `ZyntraPathContour` diz a faixa de pontos de cada contorno
+  (`start`, `len`) e se ele fecha sozinho (`closed`).
+* `rule` 0 = nonzero, 1 = evenodd; `join` 0 = miter, 1 = round,
+  2 = bevel; `cap` 0 = butt, 1 = round, 2 = square.
+* Os pontos são COPIADOS pelo comando (o app pode liberar o buffer
+  depois da chamada) e a string SVG é lida durante a chamada.
+* Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: handle/ponteiros nulos, zero
+  pontos, contorno com menos de 2 pontos ou fora do range dos pontos,
+  espessura negativa ou não-finita, modo desconhecido e path SVG
+  inválido.
+
 ## Ownership de atlas e fontes de bitmap
 
 * `ZyntraFontAtlas` é um handle **opaco**: a imagem do atlas e os seus
@@ -1183,11 +1214,13 @@ zyntra_draw_image
 zyntra_draw_image_region
 zyntra_draw_line
 zyntra_draw_line_dashed
+zyntra_draw_path
 zyntra_draw_rect_filled
 zyntra_draw_rect_gradient
 zyntra_draw_rect_outline
 zyntra_draw_rect_rounded
 zyntra_draw_rect_shadow
+zyntra_draw_svg_path
 zyntra_draw_text
 ```
 
@@ -1458,6 +1491,7 @@ ZyntraModalStyle
 ZyntraPanelOptions
 ZyntraPanelResult
 ZyntraPanelStyle
+ZyntraPathContour
 ZyntraPopupResult
 ZyntraPopupStyle
 ZyntraProgressStyle

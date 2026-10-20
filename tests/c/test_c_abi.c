@@ -3808,6 +3808,64 @@ int main(void) {
         c146_vp3d = (picked == 42 && lit > 20);
     }
 
+    /* Caminhos vetoriais em C (M161): pontos, contornos e path SVG. */
+    int c161_paths = 0;
+    {
+        CHECK(zyntra_context_begin_frame(ctx));
+        const ZyntraVec2 pts[4] = {
+            {10, 10}, {40, 10}, {40, 40}, {10, 40},
+        };
+        const ZyntraPathContour contours[1] = {
+            {0, 4, 1},
+        };
+        CHECK(zyntra_draw_path(ctx, pts, 4, contours, 1,
+            (ZyntraColor){240, 200, 90, 255}, 0.0f, 0, 1, 0));
+        /* Traço do mesmo caminho. */
+        CHECK(zyntra_draw_path(ctx, pts, 4, contours, 1,
+            (ZyntraColor){30, 30, 40, 255}, 2.0f, 0, 1, 1));
+        /* Path SVG (ícone). */
+        const char *svg = "M 10 50 L 25 70 L 40 50 Z";
+        CHECK(zyntra_draw_svg_path(ctx, (const uint8_t *)svg,
+            (uint32_t)strlen(svg), (ZyntraColor){120, 200, 240, 255}, 0.0f,
+            0, 1, 0));
+        CHECK(zyntra_context_end_frame(ctx));
+
+        /* O framebuffer mostra o caminho desenhado. */
+        ZyntraFramebuffer *fb = NULL;
+        CHECK(zyntra_framebuffer_create(64, 64, &fb));
+        ZyntraRenderStats rs;
+        CHECK(zyntra_framebuffer_render(fb, ctx, &rs));
+        uint32_t lit = 0;
+        for (uint32_t y = 0; y < 64; y++) {
+            for (uint32_t x = 0; x < 64; x++) {
+                ZyntraColor p;
+                CHECK(zyntra_framebuffer_pixel(fb, x, y, &p));
+                if (p.r > 40 || p.g > 40 || p.b > 40) lit++;
+            }
+        }
+        zyntra_framebuffer_destroy(fb);
+        assert(lit > 100);
+
+        /* Erros: geometria inválida, contorno fora do range e modo
+         * desconhecido. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        assert(zyntra_draw_path(ctx, NULL, 4, contours, 1,
+                   (ZyntraColor){255, 255, 255, 255}, 0.0f, 0, 1, 0) ==
+            ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_draw_path(ctx, pts, 4, contours, 1,
+                   (ZyntraColor){255, 255, 255, 255}, 0.0f, 9, 1, 0) ==
+            ZYNTRA_INVALID_ARGUMENT);
+        const ZyntraPathContour bad_contour[1] = {{0, 99, 1}};
+        assert(zyntra_draw_path(ctx, pts, 4, bad_contour, 1,
+                   (ZyntraColor){255, 255, 255, 255}, 0.0f, 0, 1, 0) ==
+            ZYNTRA_INVALID_ARGUMENT);
+        assert(zyntra_draw_svg_path(ctx, (const uint8_t *)"zzz", 3,
+                   (ZyntraColor){255, 255, 255, 255}, 0.0f, 0, 1, 0) ==
+            ZYNTRA_INVALID_ARGUMENT);
+        CHECK(zyntra_context_end_frame(ctx));
+        c161_paths = (lit > 100);
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);
@@ -3885,6 +3943,7 @@ int main(void) {
     printf("C-ABI ime=%d\n", c130_ime);
     printf("C-ABI atlas=%d\n", c139_atlas);
     printf("C-ABI vp3d=%d\n", c146_vp3d);
+    printf("C-ABI paths=%d\n", c161_paths);
     zyntra_framebuffer_destroy(fb);
     return 0;
 }
