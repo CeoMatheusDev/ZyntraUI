@@ -115,7 +115,7 @@ pub const Color = extern struct {
 /// (`zyntra_version_*`); assinaturas e layouts inalterados.
 pub const version_major: u32 = 1;
 pub const version_minor: u32 = 44;
-pub const version_patch: u32 = 0;
+pub const version_patch: u32 = 1;
 /// Sufixo de pré-lançamento (vazio quando estável).
 pub const version_prerelease: [:0]const u8 = "";
 

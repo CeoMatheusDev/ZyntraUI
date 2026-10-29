@@ -166,7 +166,7 @@ pub fn main() !void {
         "raster timing={d}us per_frame={d}us fast={d} generic={d} pixels={d}\n",
         .{
             rt / 1000,
-            rt / RFRAMES,
+            rt / RFRAMES / 1000,
             fb.metrics.rect_fast_path,
             fb.metrics.rect_generic_path,
             fb.metrics.pixels_written,
@@ -245,7 +245,7 @@ pub fn main() !void {
         }
         const dt = clock.since(t0);
         std.debug.print("partial frames={d} painted={d}\n", .{ PARTIAL_FRAMES, partial_painted });
-        std.debug.print("partial timing={d}us per_frame={d}us\n", .{ dt / 1000, dt / PARTIAL_FRAMES });
+        std.debug.print("partial timing={d}us per_frame={d}us\n", .{ dt / 1000, dt / PARTIAL_FRAMES / 1000 });
     }
 
     // ---- Fase 5: parsing de path SVG -----------------------------------

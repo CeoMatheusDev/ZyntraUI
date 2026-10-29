@@ -92,7 +92,7 @@ pub const Run = struct {
 pub fn styleAt(spans: []const Span, offset: u32) Style {
     var out = Style{};
     for (spans) |s| {
-        if (offset < s.start or offset >= s.start + s.len) continue;
+        if (offset < s.start or offset - s.start >= s.len) continue;
         out = s.style;
     }
     return out;
@@ -153,7 +153,7 @@ pub fn layoutRuns(
     if (!std.math.isFinite(max_width) or max_width < 0) return error.InvalidArgument;
     if (!std.math.isFinite(origin.x) or !std.math.isFinite(origin.y)) return error.InvalidArgument;
     for (spans) |s| {
-        if (s.start + s.len > text.len) return error.InvalidArgument;
+        if (s.start > text.len or s.len > text.len - s.start) return error.InvalidArgument;
     }
 
     // 1) As linhas (a quebra usa a mesma fonte da medição).
@@ -226,6 +226,11 @@ pub fn drawRuns(
     text: []const u8,
     runs: []const Run,
 ) Error!void {
+    // Valida todas as faixas antes de desenhar: runs também podem ser
+    // construídos diretamente pelo chamador, sem passar pelo layout.
+    for (runs) |r| {
+        if (r.start > text.len or r.len > text.len - r.start) return error.InvalidArgument;
+    }
     for (runs) |r| {
         const slice = text[r.start..][0..r.len];
         layout.draw(dl, gpa, slice, types.Vec2.init(r.x, r.y), r.style.color) catch |err| return switch (err) {
@@ -387,4 +392,36 @@ test "rich: desenhar um trecho por comando" {
     try stdt.testing.expectEqualStrings("cd", dl.textOf(dl.items()[1]));
     try stdt.testing.expectEqual(red, dl.items()[1].text.color);
     try stdt.testing.expectEqualStrings("ef", dl.textOf(dl.items()[2]));
+}
+
+test "rich: spans com overflow são rejeitadas sem trap" {
+    const layout = try layout_mod.Layout.fromMetrics(@import("metrics.zig").FontMetrics.withSize(10));
+    var runs: [2]Run = undefined;
+    const bad = [_]Span{.{ .start = 1, .len = std.math.maxInt(u32) }};
+    try std.testing.expectError(error.InvalidArgument, layoutRuns(layout, "abc", &bad, 0, .{}, .start, &runs));
+    const outside = [_]Span{.{ .start = std.math.maxInt(u32), .len = 2 }};
+    try std.testing.expectError(error.InvalidArgument, layoutRuns(layout, "abc", &outside, 0, .{}, .start, &runs));
+}
+
+test "rich: styleAt compara faixas sem overflow" {
+    const spans = [_]Span{.{ .start = 2, .len = std.math.maxInt(u32), .style = .{ .tag = 42 } }};
+    try std.testing.expectEqual(@as(u32, 0), styleAt(&spans, 1).tag);
+    try std.testing.expectEqual(@as(u32, 42), styleAt(&spans, 2).tag);
+    try std.testing.expectEqual(@as(u32, 42), styleAt(&spans, std.math.maxInt(u32)).tag);
+    try std.testing.expectEqual(@as(u32, 0), styleAt(&.{.{ .start = 2, .len = 0 }}, 2).tag);
+}
+
+test "rich: drawRuns rejeita faixas inválidas antes de emitir comandos" {
+    const gpa = std.testing.allocator;
+    const layout = try layout_mod.Layout.fromMetrics(@import("metrics.zig").FontMetrics.withSize(10));
+    var dl = @import("../draw/commands.zig").DrawList.initEmpty();
+    defer dl.deinit(gpa);
+    const invalid = [_]Run{
+        .{ .start = 0, .len = 1 },
+        .{ .start = 1, .len = std.math.maxInt(u32) },
+    };
+    try std.testing.expectError(error.InvalidArgument, drawRuns(layout, &dl, gpa, "abc", &invalid));
+    try std.testing.expectEqual(@as(usize, 0), dl.len());
+    try std.testing.expectError(error.InvalidArgument, drawRuns(layout, &dl, gpa, "abc", &.{.{ .start = 4 }}));
+    try drawRuns(layout, &dl, gpa, "abc", &.{.{ .start = 3, .len = 0 }});
 }
