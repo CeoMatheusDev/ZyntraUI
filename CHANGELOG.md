@@ -5,6 +5,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Corrigido
+
+- `core`/`a11y` (continuidade M167): `Context.a11yChanges()` deixa de
+  truncar o diff em 64 mudanças. A reserva cobre todas as entradas,
+  saídas, substituições e a mudança de foco, com capacidade reutilizada
+  entre frames e soma verificada contra overflow. Sem memória, não
+  publica diff parcial; a árvore completa continua disponível e o foco
+  anterior acompanha o frame, evitando notificações atrasadas.
+- Testes de regressão cobrem 130 nós (261 mudanças com substituição e
+  foco), remoções, frame estável, reuso de capacidade e falha de alocação.
+  Correção compatível (impacto PATCH), sem alteração de ABI ou dependências.
+
 ## [1.44.0] - 2026-10-20
 
 MINOR estável, 100% compatível: o **texto deixa de ser uma string só** —
