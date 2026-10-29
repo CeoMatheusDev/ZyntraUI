@@ -5,6 +5,32 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+## [1.44.1] - 2026-10-29
+
+PATCH estável: corrige a publicação de mudanças de acessibilidade em
+frames grandes, valida faixas de texto rico sem overflow e corrige as
+unidades de tempo do benchmark. Sem novas dependências ou alteração de ABI.
+
+### Corrigido
+
+- `core`/`a11y` (continuidade M167): `Context.a11yChanges()` deixa de
+  truncar o diff em 64 mudanças. A reserva cobre todas as entradas,
+  saídas, substituições e a mudança de foco, com capacidade reutilizada
+  entre frames e soma verificada contra overflow. Sem memória, não
+  publica diff parcial; a árvore completa continua disponível e o foco
+  anterior acompanha o frame, evitando notificações atrasadas.
+- Testes de regressão cobrem 130 nós (261 mudanças com substituição e
+  foco), remoções, frame estável, reuso de capacidade e falha de alocação.
+  Correção compatível (impacto PATCH), sem alteração de ABI ou dependências.
+
+- `text.rich` (M165): valida spans por subtração, sem overflow na soma
+  de início e comprimento; `styleAt` também aceita faixas grandes sem
+  trap. `drawRuns` rejeita faixas fora do texto antes de emitir comandos.
+  Três testes cobrem overflow, spans vazias e runs inválidos.
+- `examples/bench.zig`: os tempos por frame de raster e repintura parcial
+  agora convertem nanossegundos para microssegundos, conforme o rótulo.
+  Nenhuma medição histórica foi recalculada.
+
 ## [1.44.0] - 2026-10-20
 
 MINOR estável, 100% compatível: o **texto deixa de ser uma string só** —

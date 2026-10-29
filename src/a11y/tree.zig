@@ -489,3 +489,76 @@ test "a11y: a validação da hierarquia" {
     try std.testing.expectEqual(@as(usize, 1), validate(&tree2, &issues));
     try std.testing.expectEqual(Issue.out_of_order_parent, issues[0]);
 }
+
+test "a11y: Context publica mais de 64 mudanças e retém capacidade" {
+    const ctx_mod = @import("../core/context.zig");
+    const id_mod = @import("../core/id.zig");
+    var ctx = try ctx_mod.Context.init(std.testing.allocator, .{});
+    defer ctx.deinit();
+
+    ctx.beginFrame();
+    for (1..131) |i| {
+        try ctx.pushA11y(.{ .id = @intCast(i), .role = .button });
+    }
+    ctx.focus_owner = id_mod.Id.fromString("focus");
+    ctx.endFrame();
+    try std.testing.expectEqual(@as(usize, 131), ctx.a11yChanges().len);
+    try std.testing.expectEqual(@as(u64, 130), ctx.a11yChanges()[129].added.id);
+    try std.testing.expect(ctx.a11yChanges()[130] == .focus);
+
+    // Substituição completa: até duas mudanças por posição, mais foco.
+    ctx.beginFrame();
+    for (131..261) |i| {
+        try ctx.pushA11y(.{ .id = @intCast(i), .role = .button });
+    }
+    ctx.focus_owner = null;
+    ctx.endFrame();
+    const changes = ctx.a11yChanges();
+    try std.testing.expectEqual(@as(usize, 261), changes.len);
+    try std.testing.expectEqual(@as(u64, 130), changes[258].removed.id);
+    try std.testing.expectEqual(@as(u64, 260), changes[259].added.id);
+    try std.testing.expect(changes[260] == .focus);
+    const capacity = ctx.a11y_changes.capacity;
+    const ptr = ctx.a11y_changes.items.ptr;
+
+    // Repetir a árvore não gera mudanças e reutiliza o armazenamento.
+    ctx.beginFrame();
+    for (131..261) |i| {
+        try ctx.pushA11y(.{ .id = @intCast(i), .role = .button });
+    }
+    ctx.endFrame();
+    try std.testing.expectEqual(@as(usize, 0), ctx.a11yChanges().len);
+    try std.testing.expectEqual(capacity, ctx.a11y_changes.capacity);
+    try std.testing.expectEqual(ptr, ctx.a11y_changes.items.ptr);
+
+    ctx.beginFrame();
+    ctx.endFrame();
+    try std.testing.expectEqual(@as(usize, 130), ctx.a11yChanges().len);
+    try std.testing.expectEqual(@as(u64, 260), ctx.a11yChanges()[129].removed.id);
+}
+
+test "a11y: falha de reserva não publica diff parcial nem mantém foco obsoleto" {
+    const ctx_mod = @import("../core/context.zig");
+    const id_mod = @import("../core/id.zig");
+    const gpa = std.testing.allocator;
+    var ctx = try ctx_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+
+    ctx.beginFrame();
+    try ctx.pushA11y(.{ .id = 1, .role = .button });
+    const focus = id_mod.Id.fromString("focus");
+    ctx.focus_owner = focus;
+    var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = 0 });
+    ctx.allocator = failing.allocator();
+    ctx.endFrame();
+    ctx.allocator = gpa;
+    try std.testing.expect(failing.has_induced_failure);
+    try std.testing.expectEqual(@as(usize, 0), ctx.a11yChanges().len);
+    try std.testing.expectEqual(@as(usize, 1), ctx.a11y.len());
+    try std.testing.expectEqual(@as(?u64, focus.value()), ctx.a11y_prev_focus);
+
+    ctx.beginFrame();
+    try ctx.pushA11y(.{ .id = 1, .role = .button });
+    ctx.endFrame();
+    try std.testing.expectEqual(@as(usize, 0), ctx.a11yChanges().len);
+}

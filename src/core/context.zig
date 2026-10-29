@@ -258,20 +258,26 @@ pub const Context = struct {
     fn computeA11yChanges(self: *Self) void {
         self.a11y_changes.clearRetainingCapacity();
         const cur_focus: ?u64 = if (self.focus_owner) |f| f.value() else null;
-        var buf: [64]a11y_mod.Change = undefined;
+        // O limite superior é uma remoção por nó anterior, uma entrada
+        // por nó atual e uma mudança de foco. Retém a capacidade entre
+        // frames: depois do aquecimento, não aloca no caminho quente.
+        // O foco acompanha o frame mesmo se faltar memória para o diff.
+        defer self.a11y_prev_focus = cur_focus;
+        const nodes = std.math.add(usize, self.a11y_prev.len(), self.a11y.len()) catch return;
+        const capacity = std.math.add(usize, nodes, @intFromBool(self.a11y_prev_focus != cur_focus)) catch return;
+        self.a11y_changes.ensureTotalCapacity(self.allocator, capacity) catch {
+            // Sem memória: não publica um diff parcial; a árvore completa
+            // continua disponível para ressincronizar a tecnologia assistiva.
+            return;
+        };
         const n = a11y_mod.diff(
             &self.a11y_prev,
             &self.a11y,
             self.a11y_prev_focus,
             cur_focus,
-            &buf,
+            self.a11y_changes.unusedCapacitySlice(),
         );
-        self.a11y_changes.appendSlice(self.allocator, buf[0..n]) catch {
-            // Sem memória: as mudanças ficam de fora (o app continua
-            // funcionando; a árvore completa segue disponível).
-            return;
-        };
-        self.a11y_prev_focus = cur_focus;
+        self.a11y_changes.items.len = n;
     }
 
     /// Valida a hierarquia da árvore a11y (M167): devolve quantos
