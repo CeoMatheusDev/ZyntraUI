@@ -48,6 +48,13 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   suave não divide grafemas e pode recortar um cluster maior que a largura
   útil. Regressões incluem IME, seleção, casos
   reproduzíveis e API C (impacto PATCH, sem alteração de assinatura ou ABI).
+- `widgets.textarea` com quebra suave: o caret distingue o fim de uma linha
+  do início da seguinte, mesmo quando compartilham o mesmo offset de byte.
+  Clique, arrasto, `Home`/`End` e navegação vertical preservam essa afinidade
+  entre frames; o contexto guarda apenas um pequeno estado sem alocação.
+  Undo/redo restaura o offset, mas usa o lado anterior padrão da quebra,
+  pois o histórico ainda não armazena a afinidade (impacto PATCH, sem
+  alteração de assinatura ou ABI C).
 
 ## [1.44.1] - 2026-10-29
 

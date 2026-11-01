@@ -97,6 +97,15 @@ pub const Context = struct {
     /// Click em widget focável assume o foco; `Escape` ou
     /// `clearFocus` liberam. Retido entre frames como o mouse.
     focus_owner: ?id_mod.Id = null,
+    /// Afinidade visual da área de texto focada em uma quebra suave.
+    /// Apenas offsets e id: não retém buffer emprestado nem aloca. Mudanças
+    /// no cursor efetivo, comprimento ou número de colunas a invalidam.
+    textarea_downstream: ?struct {
+        id: id_mod.Id,
+        offset: usize,
+        len: usize,
+        wrap_cols: usize,
+    } = null,
     /// Focáveis registrados no frame anterior, em ordem de registro
     /// (ordem de chamada dos widgets). Recontruído a cada frame.
     focusables: std.ArrayList(id_mod.Id),
@@ -207,6 +216,7 @@ pub const Context = struct {
         self.mouse_down_left = false;
         self.press_owner = null;
         self.focus_owner = null;
+        self.textarea_downstream = null;
         self.pending_focus_advance = null;
         self.dnd = .{};
         self.dirty_rect = types.Rect.init(0, 0, 0, 0);
@@ -225,6 +235,9 @@ pub const Context = struct {
         if (self.pending_focus_advance) |dir| {
             self.applyFocusAdvance(dir);
             self.pending_focus_advance = null;
+        }
+        if (self.textarea_downstream) |affinity| {
+            if (self.focus_owner != affinity.id) self.textarea_downstream = null;
         }
         self.dnd.beginFrame(self.mouse_down_left);
         self.events.clearRetainingCapacity();
@@ -363,6 +376,7 @@ pub const Context = struct {
     /// Libera o foco de teclado (ex.: click fora, troca de tela).
     pub fn clearFocus(self: *Self) void {
         self.focus_owner = null;
+        self.textarea_downstream = null;
     }
 
     /// Registra (ou remove, com `null`) a fonte de bitmap global (M142).

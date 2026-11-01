@@ -6,6 +6,11 @@
 //!   `cursor`/`anchor` (offsets de byte, sempre fronteira UTF-8) e
 //!   `scroll_y` (px, clampado). Seleção = `[min(cursor,anchor), max)`.
 //!   Offsets internos a um grafema são ajustados ao início do cluster.
+//!   Em quebra suave, o contexto retém sem alocar a afinidade visual do
+//!   cursor focado para distinguir o fim da linha do início da próxima.
+//!   Sem afinidade prévia, um offset compartilhado representa o fim da
+//!   linha anterior; mudar foco, cursor, comprimento ou colunas a invalida.
+//!   Undo/redo restaura o offset, não a afinidade visual anterior.
 //! - Foco: click dentro foca; `Escape`/`clearFocus` liberam; `Tab`
 //!   circula o foco (Shift volta).
 //! - Edição: texto (inclui `\n`), `Enter` insere quebra de linha,
@@ -318,19 +323,33 @@ fn visualLineAt(buf: []const u8, len: usize, max_cols: usize, index: usize) Visu
 }
 
 /// Posição visual do offset, com coluna medida em codepoints (avanço
-/// uniforme do fallback). Um limite de quebra suave pertence à linha
-/// anterior, preservando o comportamento anterior do widget.
-fn visualPosOf(buf: []const u8, len: usize, max_cols: usize, offset: usize) struct { index: usize, start: usize, col: usize } {
+/// uniforme do fallback). Em uma quebra suave o mesmo offset pode ser o
+/// fim de uma linha ou o começo da próxima; `downstream` escolhe o começo.
+fn visualPosOf(buf: []const u8, len: usize, max_cols: usize, offset: usize, downstream: bool) struct { index: usize, start: usize, col: usize } {
     const text = buf[0..@min(len, buf.len)];
     const off = unicode_mod.snapToGrapheme(text, @min(offset, text.len));
     var lines = VisualLines{ .text = text, .max_cols = max_cols };
     var i: usize = 0;
     while (lines.next()) |line| : (i += 1) {
-        if (off <= line.end) return .{
-            .index = i,
-            .start = line.start,
-            .col = codepointCount(text[line.start..off]),
-        };
+        if (off <= line.end) {
+            var selected = line;
+            var index = i;
+            if (downstream and off == line.end) {
+                if (lines.next()) |next| {
+                    // CRLF/LF têm offsets diferentes em cada lado, logo
+                    // só um limite realmente compartilhado muda de linha.
+                    if (next.start == off) {
+                        selected = next;
+                        index += 1;
+                    }
+                }
+            }
+            return .{
+                .index = index,
+                .start = selected.start,
+                .col = codepointCount(text[selected.start..off]),
+            };
+        }
     }
     unreachable; // a última linha sempre termina em text.len
 }
@@ -602,6 +621,16 @@ fn textAreaInner(
     // A quebra suave é por COLUNAS (fonte monoespaçada): no caminho
     // atlas (proporcional) ela não se aplica.
     const wrap_cols: usize = if (wrap) wrapCols(fallbackMetrics(source), vis_w) else 0;
+    // O offset em uma quebra suave descreve dois lados visualmente
+    // distintos. A preferência é retida apenas para o widget focado e
+    // somente enquanto o estado externo e a largura continuam compatíveis.
+    var downstream = false;
+    if (wrap_cols != 0 and ctx.hasFocus(id)) {
+        if (ctx.textarea_downstream) |affinity| {
+            downstream = affinity.id == id and affinity.offset == cursor.* and
+                affinity.len == len.* and affinity.wrap_cols == wrap_cols;
+        }
+    }
     const nlines0 = visualCount(buffer, len.*, wrap_cols);
     const xoff: f32 = if (wrap_cols != 0) 0 else blk: {
         const caret_line0 = lineOfOffset(buffer, @min(cursor.*, len.*));
@@ -634,6 +663,7 @@ fn textAreaInner(
                 const at = unicode_mod.snapToGrapheme(buffer[0..len.*], @min(seg.start + col, len.*));
                 cursor.* = at;
                 anchor.* = at;
+                downstream = at == seg.start;
                 moved = true;
             }
             ctx.press_owner = id;
@@ -646,6 +676,7 @@ fn textAreaInner(
             const seg = visualLineAt(buffer, len.*, wrap_cols, vline);
             const col = layout.offsetAtX(buffer[seg.start..seg.end], mp.x - text_x);
             cursor.* = unicode_mod.snapToGrapheme(buffer[0..len.*], @min(seg.start + col, len.*));
+            downstream = cursor.* == seg.start;
             moved = true;
         }
     }
@@ -671,9 +702,17 @@ fn textAreaInner(
         }.f;
 
         for (ctx.pendingEvents()) |ev| {
+            const old_cursor = cursor.*;
+            const old_len = len.*;
+            var explicit_affinity = false;
             // Uma edição pode unir clusters em ambos os lados do caret;
-            // normaliza antes de processar o próximo evento da fila.
-            defer normalizeAfterEdit(buffer[0..len.*], cursor, anchor);
+            // normaliza antes de processar o próximo evento da fila. Uma
+            // mudança sem preferência explícita aponta ao início da próxima
+            // linha, se o novo offset for um limite de quebra suave.
+            defer {
+                normalizeAfterEdit(buffer[0..len.*], cursor, anchor);
+                if (!explicit_affinity and (cursor.* != old_cursor or len.* != old_len)) downstream = true;
+            }
             switch (ev) {
                 .text => |t| {
                     if (t.codepoint == '\r') continue;
@@ -708,6 +747,10 @@ fn textAreaInner(
                     // Undo/redo consomem o evento antes de todo o resto.
                     if (use_hist and k.modifiers.ctrl and !k.modifiers.shift and k.key == .z) {
                         if (hist.undo(buffer, len, cursor, anchor)) {
+                            // O histórico guarda o offset, mas não o lado de
+                            // uma quebra compartilhada: volta ao padrão.
+                            downstream = false;
+                            explicit_affinity = true;
                             res.undone = true;
                             res.changed = true;
                             moved = true;
@@ -718,6 +761,8 @@ fn textAreaInner(
                         ((!k.modifiers.shift and k.key == .y) or (k.modifiers.shift and k.key == .z)))
                     {
                         if (hist.redo(buffer, len, cursor, anchor)) {
+                            downstream = false;
+                            explicit_affinity = true;
                             res.redone = true;
                             res.changed = true;
                             moved = true;
@@ -850,7 +895,7 @@ fn textAreaInner(
                         },
                         .up, .down => {
                             if (use_hist) hist.closeGroup();
-                            const cur = visualPosOf(buffer, len.*, wrap_cols, cursor.*);
+                            const cur = visualPosOf(buffer, len.*, wrap_cols, cursor.*, downstream);
                             var target = cur.index;
                             if (k.key == .up and cur.index > 0) {
                                 target = cur.index - 1;
@@ -860,6 +905,8 @@ fn textAreaInner(
                             const seg = visualLineAt(buffer, len.*, wrap_cols, target);
                             const at = colByteOffset(buffer, seg.start, seg.end, cur.col);
                             cursor.* = unicode_mod.snapToGrapheme(buffer[0..len.*], at);
+                            downstream = cursor.* == seg.start;
+                            explicit_affinity = true;
                             if (!extend) anchor.* = cursor.*;
                             moved = true;
                         },
@@ -869,7 +916,7 @@ fn textAreaInner(
                                 @max(1, @as(usize, @intFromFloat(@floor(view_h / line_h))))
                             else
                                 1;
-                            const cur = visualPosOf(buffer, len.*, wrap_cols, cursor.*);
+                            const cur = visualPosOf(buffer, len.*, wrap_cols, cursor.*, downstream);
                             var target = cur.index;
                             if (k.key == .page_up) {
                                 target = if (cur.index > page) cur.index - page else 0;
@@ -879,6 +926,8 @@ fn textAreaInner(
                             const seg = visualLineAt(buffer, len.*, wrap_cols, target);
                             const at = colByteOffset(buffer, seg.start, seg.end, cur.col);
                             cursor.* = unicode_mod.snapToGrapheme(buffer[0..len.*], at);
+                            downstream = cursor.* == seg.start;
+                            explicit_affinity = true;
                             if (!extend) anchor.* = cursor.*;
                             moved = true;
                         },
@@ -886,12 +935,16 @@ fn textAreaInner(
                             if (use_hist) hist.closeGroup();
                             if (k.modifiers.ctrl) {
                                 cursor.* = 0;
+                                downstream = false;
                             } else if (wrap_cols != 0) {
-                                cursor.* = visualPosOf(buffer, len.*, wrap_cols, cursor.*).start;
+                                cursor.* = visualPosOf(buffer, len.*, wrap_cols, cursor.*, downstream).start;
+                                downstream = true;
                             } else {
                                 const line = lineOfOffset(buffer, cursor.*);
                                 cursor.* = lineStart(buffer, len.*, line);
+                                downstream = false;
                             }
+                            explicit_affinity = true;
                             if (!extend) anchor.* = cursor.*;
                             moved = true;
                         },
@@ -900,12 +953,14 @@ fn textAreaInner(
                             if (k.modifiers.ctrl) {
                                 cursor.* = len.*;
                             } else if (wrap_cols != 0) {
-                                const vp = visualPosOf(buffer, len.*, wrap_cols, cursor.*);
+                                const vp = visualPosOf(buffer, len.*, wrap_cols, cursor.*, downstream);
                                 cursor.* = visualLineAt(buffer, len.*, wrap_cols, vp.index).end;
                             } else {
                                 const line = lineOfOffset(buffer, cursor.*);
                                 cursor.* = lineEnd(buffer, len.*, line);
                             }
+                            downstream = false;
+                            explicit_affinity = true;
                             if (!extend) anchor.* = cursor.*;
                             moved = true;
                         },
@@ -945,6 +1000,7 @@ fn textAreaInner(
             };
             if (!c.committed) {
                 normalizeAfterEdit(buffer[0..len.*], cursor, anchor);
+                downstream = true;
                 res.changed = true;
                 moved = true;
             }
@@ -956,6 +1012,12 @@ fn textAreaInner(
     if (!ctx.hasFocus(id)) res.focused = false;
     res.selected = res.focused and anchor.* != cursor.*;
 
+    if (wrap_cols != 0 and res.focused and downstream) {
+        ctx.textarea_downstream = .{ .id = id, .offset = cursor.*, .len = len.*, .wrap_cols = wrap_cols };
+    } else if (ctx.textarea_downstream) |affinity| {
+        if (affinity.id == id) ctx.textarea_downstream = null;
+    }
+
     // Rolagem vertical: clampa e acompanha o caret quando houve movimento.
     // `nlines` conta LINHAS VISUAIS (quebra suave inclusa).
     const nlines = visualCount(buffer, len.*, wrap_cols);
@@ -963,7 +1025,7 @@ fn textAreaInner(
     const max_scroll = @max(0, content_h - view_h);
     scroll_y.* = std.math.clamp(scroll_y.*, 0, max_scroll);
     if (moved and focused and line_h > 0) {
-        const cl = visualPosOf(buffer, len.*, wrap_cols, cursor.*).index;
+        const cl = visualPosOf(buffer, len.*, wrap_cols, cursor.*, downstream).index;
         const c_top = @as(f32, @floatFromInt(cl)) * line_h;
         const c_bottom = c_top + line_h;
         if (c_top < scroll_y.*) {
@@ -1003,7 +1065,7 @@ fn textAreaInner(
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
     };
-    try drawTextAreaContent(ctx, buffer, len.*, cursor.*, anchor.*, res.selected, res.focused, bounds, scroll_y.*, text_top, text_x, line_h, wrap_cols, source, layout, style, comp);
+    try drawTextAreaContent(ctx, buffer, len.*, cursor.*, anchor.*, res.selected, res.focused, bounds, scroll_y.*, text_top, text_x, line_h, wrap_cols, downstream, source, layout, style, comp);
     ctx.draw.push(ctx.allocator, .{ .clip = .{ .rect = .{}, .null_rect = true } }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidCommand => return error.InvalidCommand,
@@ -1026,6 +1088,7 @@ fn drawTextAreaContent(
     text_x: f32,
     line_h: f32,
     wrap_cols: usize,
+    downstream: bool,
     source: layout_mod.Source,
     layout: layout_mod.Layout,
     style: style_mod.TextInputStyle,
@@ -1105,7 +1168,7 @@ fn drawTextAreaContent(
     }
 
     if (focused and vis_w > 0) {
-        const vp = visualPosOf(buffer, len, wrap_cols, @min(cursor, len));
+        const vp = visualPosOf(buffer, len, wrap_cols, @min(cursor, len), downstream);
         // No fallback o `advance` é uniforme: a coluna visual (codepoints)
         // dá o x exato. Com atlas, o x vem do AVANÇO REAL do prefixo.
         var cx = switch (source) {
@@ -1833,9 +1896,9 @@ test "TextArea quebra suave: helpers de linha visual" {
     try stdt.testing.expect(h1.start == 3 and h1.end == 5);
 
     // Posição visual do caret: offset 4 = coluna 1 da 2ª linha visual.
-    const p = visualPosOf("abcdef", 6, 3, 4);
+    const p = visualPosOf("abcdef", 6, 3, 4, false);
     try stdt.testing.expect(p.index == 1 and p.start == 3 and p.col == 1);
-    const e = visualPosOf("abcdef", 6, 3, 6);
+    const e = visualPosOf("abcdef", 6, 3, 6, false);
     try stdt.testing.expect(e.index == 1 and e.col == 3);
 
     // colByteOffset: clampado; multibyte conta por codepoint ("A€B").
@@ -2458,8 +2521,14 @@ test "TextArea: linhas visuais preservam fronteiras em casos reproduzíveis" {
                 if (width > 0 and codepointCount(line_text) > width) {
                     try std.testing.expectEqual(@as(usize, 1), unicode_mod.graphemeCount(line_text));
                 }
-                const pos = visualPosOf(text, text.len, width, line.end);
+                const pos = visualPosOf(text, text.len, width, line.end, false);
                 try std.testing.expect(pos.index <= count and pos.start <= line.end);
+                const forward = visualPosOf(text, text.len, width, line.end, true);
+                try std.testing.expect(forward.index == pos.index or forward.index == pos.index + 1);
+                if (forward.index != pos.index) {
+                    try std.testing.expectEqual(line.end, forward.start);
+                    try std.testing.expectEqual(@as(usize, 0), forward.col);
+                }
                 previous_end = line.end;
                 count += 1;
             }
@@ -2674,10 +2743,15 @@ test "TextArea wrapped: clique usa linha visual rolada" {
     var anchor: usize = 0;
     var scroll: f32 = font.lineHeight();
     ctx.beginFrame();
-    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(11, 5) } });
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(5, 5) } });
     _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
-    try std.testing.expectEqual(@as(usize, 4), cursor); // coluna 1 da segunda linha
+    try std.testing.expectEqual(@as(usize, 3), cursor); // início da segunda linha
     try std.testing.expectApproxEqAbs(font.lineHeight(), scroll, 0.001);
+    var caret_y: ?f32 = null;
+    for (ctx.drawCommands()) |cmd| if (cmd == .line) {
+        caret_y = cmd.line.p0.y;
+    };
+    try std.testing.expectApproxEqAbs(@as(f32, 4), caret_y.?, 0.001);
     ctx.endFrame();
 }
 
@@ -2714,4 +2788,392 @@ test "TextArea: hit-test satura quando coordenadas finitas transbordam" {
     const max = std.math.floatMax(f32);
     try std.testing.expectEqual(@as(usize, 3), lineAtY(max, -max, 10, 4));
     try std.testing.expectEqual(@as(usize, 0), lineAtY(-max, max, 10, 4));
+}
+
+test "TextArea wrapped: afinidade visual permite navegar pelas fronteiras" {
+    const allocator = std.testing.allocator;
+    var ctx = try context_mod.Context.init(allocator, .{});
+    defer ctx.deinit();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    const bounds = types.Rect.init(0, 0, 26, 60); // três colunas
+    const id = id_mod.Id.fromString("ta:wrap-affinity-nav");
+    const text = "abc👩🏽‍💻def"; // a linha do emoji excede o orçamento
+    var buf: [64]u8 = undefined;
+    @memcpy(buf[0..text.len], text);
+    var len: usize = text.len;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    ctx.focus_owner = id;
+
+    const cases = [_]struct { key: @import("../event/event.zig").Key, offset: usize, line: f32 }{
+        .{ .key = .down, .offset = 3, .line = 1 },
+        .{ .key = .down, .offset = 18, .line = 2 },
+        .{ .key = .up, .offset = 3, .line = 1 },
+        .{ .key = .up, .offset = 0, .line = 0 },
+    };
+    for (cases) |case| {
+        ctx.beginFrame();
+        try ctx.pushEvent(.{ .key = .{ .key = case.key, .pressed = true, .modifiers = .{} } });
+        _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+        try std.testing.expectEqual(case.offset, cursor);
+        try std.testing.expectEqual(cursor, anchor);
+        var caret_y: ?f32 = null;
+        for (ctx.drawCommands()) |cmd| if (cmd == .line) {
+            caret_y = cmd.line.p0.y;
+        };
+        try std.testing.expectApproxEqAbs(@as(f32, 4) + case.line * font.lineHeight(), caret_y.?, 0.001);
+        ctx.endFrame();
+    }
+}
+
+test "TextArea wrapped: Home e End preservam lados da mesma fronteira" {
+    const allocator = std.testing.allocator;
+    var ctx = try context_mod.Context.init(allocator, .{});
+    defer ctx.deinit();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    const bounds = types.Rect.init(0, 0, 26, 60);
+    const id = id_mod.Id.fromString("ta:wrap-affinity-home-end");
+    var buf: [32]u8 = undefined;
+    @memcpy(buf[0..9], "abcdefghi");
+    var len: usize = 9;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+
+    // Clique no começo da segunda linha: offset 3 na linha 2, não no fim da 1.
+    ctx.beginFrame();
+    const pt = types.Vec2.init(5, 5 + font.lineHeight());
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = true, .pos = pt } });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try std.testing.expectEqual(@as(usize, 3), cursor);
+    var caret_y: ?f32 = null;
+    for (ctx.drawCommands()) |cmd| if (cmd == .line) {
+        caret_y = cmd.line.p0.y;
+    };
+    try std.testing.expectApproxEqAbs(@as(f32, 4) + font.lineHeight(), caret_y.?, 0.001);
+    ctx.endFrame();
+
+    // Home mantém o início da segunda linha; End escolhe o fim dela.
+    for ([_]struct { key: @import("../event/event.zig").Key, offset: usize }{
+        .{ .key = .home, .offset = 3 },
+        .{ .key = .end, .offset = 6 },
+        .{ .key = .home, .offset = 3 },
+    }) |case| {
+        ctx.beginFrame();
+        try ctx.pushEvent(.{ .key = .{ .key = case.key, .pressed = true, .modifiers = .{} } });
+        _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+        try std.testing.expectEqual(case.offset, cursor);
+        caret_y = null;
+        for (ctx.drawCommands()) |cmd| if (cmd == .line) {
+            caret_y = cmd.line.p0.y;
+        };
+        try std.testing.expectApproxEqAbs(@as(f32, 4) + font.lineHeight(), caret_y.?, 0.001);
+        ctx.endFrame();
+    }
+
+    // Sem eventos, a preferência permanece. Uma alteração externa do cursor
+    // invalida o estado; ao voltar ao offset 3, vale o lado anterior padrão.
+    ctx.beginFrame();
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    caret_y = null;
+    for (ctx.drawCommands()) |cmd| if (cmd == .line) {
+        caret_y = cmd.line.p0.y;
+    };
+    try std.testing.expectApproxEqAbs(@as(f32, 4) + font.lineHeight(), caret_y.?, 0.001);
+    ctx.endFrame();
+
+    cursor = 4;
+    anchor = 4;
+    ctx.beginFrame();
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    ctx.endFrame();
+    cursor = 3;
+    anchor = 3;
+    ctx.beginFrame();
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    caret_y = null;
+    for (ctx.drawCommands()) |cmd| if (cmd == .line) {
+        caret_y = cmd.line.p0.y;
+    };
+    try std.testing.expectApproxEqAbs(@as(f32, 4), caret_y.?, 0.001);
+    ctx.endFrame();
+}
+
+test "TextArea wrapped: PageDown com seleção acompanha linha e rolagem" {
+    const allocator = std.testing.allocator;
+    var ctx = try context_mod.Context.init(allocator, .{});
+    defer ctx.deinit();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    const lh = font.lineHeight();
+    const bounds = types.Rect.init(0, 0, 26, 8 + 2 * lh);
+    const id = id_mod.Id.fromString("ta:wrap-affinity-page");
+    const text = "abcdefghijklmnopqr";
+    var buf: [64]u8 = undefined;
+    @memcpy(buf[0..text.len], text);
+    var len: usize = text.len;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    ctx.focus_owner = id;
+
+    for ([_]usize{ 6, 12 }) |expected| {
+        ctx.beginFrame();
+        try ctx.pushEvent(.{ .key = .{ .key = .page_down, .pressed = true, .modifiers = .{ .shift = true } } });
+        const result = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+        try std.testing.expect(result.selected);
+        try std.testing.expectEqual(expected, cursor);
+        try std.testing.expectEqual(@as(usize, 0), anchor);
+        try std.testing.expectApproxEqAbs(@as(f32, @floatFromInt(expected / 3 - 1)) * lh, scroll, 0.001);
+        var caret_y: ?f32 = null;
+        for (ctx.drawCommands()) |cmd| {
+            if (cmd == .line) caret_y = cmd.line.p0.y;
+        }
+        try std.testing.expectApproxEqAbs(@as(f32, 4) + lh, caret_y.?, 0.001);
+        ctx.endFrame();
+    }
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .page_up, .pressed = true, .modifiers = .{ .shift = true } } });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try std.testing.expectEqual(@as(usize, 6), cursor);
+    try std.testing.expectEqual(@as(usize, 0), anchor);
+    try std.testing.expectApproxEqAbs(2 * lh, scroll, 0.001);
+    ctx.endFrame();
+}
+
+test "TextArea wrapped: afinidade expira com texto, largura e foco" {
+    const allocator = std.testing.allocator;
+    var ctx = try context_mod.Context.init(allocator, .{});
+    defer ctx.deinit();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    const id = id_mod.Id.fromString("ta:wrap-affinity-invalidation");
+    const bounds = types.Rect.init(0, 0, 26, 120);
+    var buf: [32]u8 = undefined;
+    @memcpy(buf[0..9], "abcdefghi");
+    var len: usize = 9;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    ctx.focus_owner = id;
+
+    // Down deixa o cursor no início da segunda linha (offset 3).
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try std.testing.expectEqual(@as(usize, 3), cursor);
+    try std.testing.expect(ctx.textarea_downstream != null);
+    ctx.endFrame();
+
+    // Se o chamador muda o comprimento, o mesmo offset é interpretado
+    // pelo padrão upstream, independentemente da preferência anterior.
+    buf[9] = 'j';
+    len = 10;
+    ctx.beginFrame();
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    var caret_y: ?f32 = null;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .line) caret_y = cmd.line.p0.y;
+    }
+    try std.testing.expectApproxEqAbs(@as(f32, 4), caret_y.?, 0.001);
+    try std.testing.expect(ctx.textarea_downstream == null);
+    ctx.endFrame();
+
+    // Restabelece a preferência e reduz a largura para uma coluna: o
+    // offset 3 passa a ser fim da terceira linha (padrão upstream).
+    cursor = 0;
+    anchor = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try std.testing.expectEqual(@as(usize, 3), cursor);
+    ctx.endFrame();
+    ctx.beginFrame();
+    const narrow = types.Rect.init(0, 0, 14, 120);
+    _ = try textAreaWrapped(&ctx, id, narrow, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    caret_y = null;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .line) caret_y = cmd.line.p0.y;
+    }
+    try std.testing.expectApproxEqAbs(@as(f32, 4) + 2 * font.lineHeight(), caret_y.?, 0.001);
+    try std.testing.expect(ctx.textarea_downstream == null);
+    ctx.endFrame();
+
+    cursor = 0;
+    anchor = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try std.testing.expect(ctx.textarea_downstream != null);
+    ctx.endFrame();
+    ctx.clearFocus();
+    try std.testing.expect(ctx.textarea_downstream == null);
+    ctx.focus_owner = id;
+    ctx.beginFrame();
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    caret_y = null;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .line) caret_y = cmd.line.p0.y;
+    }
+    try std.testing.expectApproxEqAbs(@as(f32, 4), caret_y.?, 0.001);
+    ctx.endFrame();
+
+    // A troca direta de dono do foco também não transfere a preferência
+    // a outra área com o mesmo cursor e comprimento.
+    cursor = 0;
+    anchor = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .down, .pressed = true, .modifiers = .{} } });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try std.testing.expect(ctx.textarea_downstream != null);
+    ctx.endFrame();
+    const other_id = id_mod.Id.fromString("ta:wrap-affinity-other");
+    ctx.focus_owner = other_id;
+    ctx.beginFrame();
+    try std.testing.expect(ctx.textarea_downstream == null);
+    _ = try textAreaWrapped(&ctx, other_id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    caret_y = null;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .line) caret_y = cmd.line.p0.y;
+    }
+    try std.testing.expectApproxEqAbs(@as(f32, 4), caret_y.?, 0.001);
+    ctx.endFrame();
+}
+
+test "TextArea: afinidade não atravessa LF nem CRLF" {
+    const text = "abc\r\ndef\n";
+    for ([_]bool{ false, true }) |downstream| {
+        const first_end = visualPosOf(text, text.len, 3, 3, downstream);
+        try std.testing.expectEqual(@as(usize, 0), first_end.index);
+        try std.testing.expectEqual(@as(usize, 3), first_end.col);
+        const second_start = visualPosOf(text, text.len, 3, 5, downstream);
+        try std.testing.expectEqual(@as(usize, 1), second_start.index);
+        try std.testing.expectEqual(@as(usize, 0), second_start.col);
+        const second_end = visualPosOf(text, text.len, 3, 8, downstream);
+        try std.testing.expectEqual(@as(usize, 1), second_end.index);
+        const last_empty = visualPosOf(text, text.len, 3, 9, downstream);
+        try std.testing.expectEqual(@as(usize, 2), last_empty.index);
+        try std.testing.expectEqual(@as(usize, 0), last_empty.col);
+    }
+}
+
+test "TextArea wrapped: arrasto distingue os dois lados da quebra" {
+    const allocator = std.testing.allocator;
+    var ctx = try context_mod.Context.init(allocator, .{});
+    defer ctx.deinit();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    const bounds = types.Rect.init(0, 0, 26, 60);
+    const id = id_mod.Id.fromString("ta:wrap-affinity-drag");
+    var buf: [32]u8 = undefined;
+    @memcpy(buf[0..9], "abcdefghi");
+    var len: usize = 9;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_button = .{ .button = .left, .pressed = true, .pos = types.Vec2.init(4, 5) } });
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    ctx.endFrame();
+
+    const cases = [_]struct { pos: types.Vec2, caret_x: f32, caret_y: f32 }{
+        .{ .pos = types.Vec2.init(5, 5 + font.lineHeight()), .caret_x = 4, .caret_y = 4 + font.lineHeight() },
+        .{ .pos = types.Vec2.init(23, 5), .caret_x = 22, .caret_y = 4 },
+        .{ .pos = types.Vec2.init(5, 5 + font.lineHeight()), .caret_x = 4, .caret_y = 4 + font.lineHeight() },
+    };
+    for (cases) |case| {
+        ctx.beginFrame();
+        try ctx.pushEvent(.{ .mouse_move = .{ .pos = case.pos } });
+        const result = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+        try std.testing.expect(result.selected);
+        try std.testing.expectEqual(@as(usize, 3), cursor);
+        try std.testing.expectEqual(@as(usize, 0), anchor);
+        var caret: ?types.Vec2 = null;
+        for (ctx.drawCommands()) |cmd| {
+            if (cmd == .line) caret = cmd.line.p0;
+        }
+        try std.testing.expectApproxEqAbs(case.caret_x, caret.?.x, 0.001);
+        try std.testing.expectApproxEqAbs(case.caret_y, caret.?.y, 0.001);
+        ctx.endFrame();
+    }
+}
+
+test "TextArea wrapped: afinidade é atualizada entre eventos na mesma fila" {
+    const allocator = std.testing.allocator;
+    var ctx = try context_mod.Context.init(allocator, .{});
+    defer ctx.deinit();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    const bounds = types.Rect.init(0, 0, 26, 60);
+    const id = id_mod.Id.fromString("ta:wrap-affinity-queued");
+    var buf: [32]u8 = undefined;
+    @memcpy(buf[0..9], "abcdefghi");
+    var len: usize = 9;
+    var cursor: usize = 0;
+    var anchor: usize = 0;
+    var scroll: f32 = 0;
+    ctx.focus_owner = id;
+    ctx.beginFrame();
+    for ([_]@import("../event/event.zig").Key{ .down, .down, .home, .end, .home }) |key| {
+        try ctx.pushEvent(.{ .key = .{ .key = key, .pressed = true, .modifiers = .{} } });
+    }
+    _ = try textAreaWrapped(&ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, font, style);
+    try std.testing.expectEqual(@as(usize, 6), cursor);
+    var caret_y: ?f32 = null;
+    for (ctx.drawCommands()) |cmd| {
+        if (cmd == .line) caret_y = cmd.line.p0.y;
+    }
+    try std.testing.expectApproxEqAbs(@as(f32, 4) + 2 * font.lineHeight(), caret_y.?, 0.001);
+    ctx.endFrame();
+}
+
+test "TextArea wrapped: undo e redo de offset compartilhado usam afinidade padrão" {
+    const allocator = std.testing.allocator;
+    var ctx = try context_mod.Context.init(allocator, .{});
+    defer ctx.deinit();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    const bounds = types.Rect.init(0, 0, 26, 60);
+    const id = id_mod.Id.fromString("ta:wrap-affinity-history");
+    var buf: [32]u8 = undefined;
+    @memcpy(buf[0..9], "abcdefghi");
+    var len: usize = 9;
+    var cursor: usize = 1;
+    var anchor: usize = 1;
+    var scroll: f32 = 0;
+    var hist = TextHistory(4, 32){};
+    ctx.focus_owner = id;
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .end, .pressed = true, .modifiers = .{} } });
+    _ = try textAreaWrappedHistory(4, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, font, style);
+    try std.testing.expectEqual(@as(usize, 3), cursor);
+    ctx.endFrame();
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .text = .{ .codepoint = 'X' } });
+    _ = try textAreaWrappedHistory(4, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, font, style);
+    try std.testing.expectEqualStrings("abcXdefghi", buf[0..len]);
+    ctx.endFrame();
+
+    for ([_]struct { key: @import("../event/event.zig").Key, text: []const u8, cursor: usize, y: f32 }{
+        .{ .key = .z, .text = "abcdefghi", .cursor = 3, .y = 4 },
+        .{ .key = .y, .text = "abcXdefghi", .cursor = 4, .y = 4 + font.lineHeight() },
+        .{ .key = .z, .text = "abcdefghi", .cursor = 3, .y = 4 },
+    }) |case| {
+        ctx.beginFrame();
+        try ctx.pushEvent(.{ .key = .{ .key = case.key, .pressed = true, .modifiers = .{ .ctrl = true } } });
+        const result = try textAreaWrappedHistory(4, 32, &ctx, id, bounds, &buf, &len, &cursor, &anchor, &scroll, &hist, font, style);
+        try std.testing.expect(result.undone or result.redone);
+        try std.testing.expectEqualStrings(case.text, buf[0..len]);
+        try std.testing.expectEqual(case.cursor, cursor);
+        var caret_y: ?f32 = null;
+        for (ctx.drawCommands()) |cmd| {
+            if (cmd == .line) caret_y = cmd.line.p0.y;
+        }
+        try std.testing.expectApproxEqAbs(case.y, caret_y.?, 0.001);
+        ctx.endFrame();
+    }
 }
