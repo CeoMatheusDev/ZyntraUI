@@ -20,6 +20,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   por `isValid` e causar falha em `constrain`; infinito positivo continua
   aceito. O teste de fuzz de layout agora descarta entradas não finitas
   antes de chamar APIs que exigem restrições válidas (impacto PATCH).
+- `software.raster`: retângulos, imagens e primitivas limitam suas caixas
+  ao framebuffer antes de converter coordenadas extremas para inteiro.
+  `fillRect` ignora clips não finitos; blur ignora raios negativos antes
+  de convertê-los, e sombras com deslocamento que transborda são ignoradas.
+  Regressões cobrem pixels, primitivas, entradas extremas e integração C
+  (impacto PATCH, sem alteração de assinatura ou ABI).
 
 ## [1.44.1] - 2026-10-29
 

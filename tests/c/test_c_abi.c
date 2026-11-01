@@ -261,6 +261,20 @@ int main(void) {
         assert(px.r == fred.r);
         kept_px = (int)px.r;
         CHECK(zyntra_context_end_frame(ctx));
+
+        /* Linha finita extrema atravessando o viewport não pode causar
+         * trap na conversão de coordenadas pelo rasterizador. */
+        CHECK(zyntra_context_begin_frame(ctx));
+        CHECK(zyntra_draw_clear(ctx, bg));
+        CHECK(zyntra_draw_line(ctx, (ZyntraVec2){-1e30f, 2},
+            (ZyntraVec2){1e30f, 2}, fwhite, 1));
+        CHECK(zyntra_draw_rect_filled(ctx, (ZyntraRect){0, 0, 2, 2}, fred));
+        ZyntraRenderStats extreme = {0, 0, 0, 0};
+        CHECK(zyntra_framebuffer_render(fb, ctx, &extreme));
+        assert(extreme.submitted == 3 && extreme.drawn == 3);
+        CHECK(zyntra_framebuffer_pixel(fb, 0, 0, &px));
+        assert(px.r == fred.r && px.g == fred.g);
+        CHECK(zyntra_context_end_frame(ctx));
     }
 
     /* Frames 5-8: widgets (M107) — estilos do tema escuro, primeiro lote
