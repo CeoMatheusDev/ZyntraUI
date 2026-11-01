@@ -247,7 +247,7 @@ typedef struct ZyntraFrameMetrics {
     uint32_t image_regions;
     uint32_t glyph_runs;
     uint32_t glyphs_total;
-    uint32_t dirty_rects;
+    uint32_t dirty_rects; /* marcações no frame, inclusive automáticas */
     uint32_t buffer_growths;
 } ZyntraFrameMetrics;
 

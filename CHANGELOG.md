@@ -35,6 +35,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   widgets IME informam argumento inválido e mantêm o commit pendente.
   Regressões cobrem sobreposição nas duas direções e integração C
   (impacto PATCH, sem alteração de assinatura ou ABI).
+- `Context`: áreas de widgets quentes do frame anterior são marcadas no
+  início do próximo frame, permitindo repintar posições antigas de widgets
+  movidos ou removidos antes de `endFrame`. A transição para frio também
+  cobre a posição atual; a métrica `dirty_rects` volta a contar por frame,
+  incluindo marcações automáticas. Testes verificam pixels e integração C
+  (impacto PATCH, sem alteração de assinatura ou ABI).
 
 ## [1.44.1] - 2026-10-29
 

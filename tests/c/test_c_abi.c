@@ -4055,6 +4055,70 @@ int main(void) {
         c164_a11y = (count >= 1 && node.role == ZYNTRA_A11Y_BUTTON);
     }
 
+    /* Repintura parcial: botão quente em movimento e depois ausente. */
+    {
+        ZyntraContext *dc = NULL;
+        ZyntraFramebuffer *dfb = NULL;
+        ZyntraRect view = {0, 0, 20, 10};
+        ZyntraRect old = {2, 2, 5, 5}, moved = {12, 2, 5, 5}, dirty;
+        ZyntraColor bg = {10, 20, 30, 255}, red = {200, 0, 0, 255}, px;
+        ZyntraButtonStyle style;
+        ZyntraButtonResult result;
+        ZyntraFrameMetrics fm;
+        ZyntraId id = zyntra_id_from_string("dirty:move", 10);
+        CHECK(zyntra_context_create(view, &dc));
+        CHECK(zyntra_framebuffer_create(20, 10, &dfb));
+        CHECK(zyntra_framebuffer_fill(dfb, bg));
+        CHECK(zyntra_style_button(ZYNTRA_THEME_DARK, &style));
+        style.bg = style.bg_hover = style.bg_pressed = style.border = red;
+
+        CHECK(zyntra_context_begin_frame(dc));
+        CHECK(zyntra_context_push_mouse_move(dc, (ZyntraVec2){4, 4}));
+        CHECK(zyntra_draw_clear(dc, bg));
+        CHECK(zyntra_widget_button(dc, id, old, &style, &result));
+        assert(result.hovered);
+        CHECK(zyntra_context_mark_dirty(dc, view));
+        CHECK(zyntra_context_frame_metrics(dc, &fm));
+        assert(fm.dirty_rects == 2);
+        CHECK(zyntra_framebuffer_render_region(dfb, dc, view, NULL));
+        CHECK(zyntra_context_end_frame(dc));
+
+        CHECK(zyntra_context_begin_frame(dc));
+        CHECK(zyntra_context_dirty_rect(dc, &dirty));
+        assert(dirty.x == old.x && dirty.y == old.y && dirty.w == old.w && dirty.h == old.h);
+        CHECK(zyntra_context_push_mouse_move(dc, (ZyntraVec2){14, 4}));
+        CHECK(zyntra_draw_clear(dc, bg));
+        CHECK(zyntra_widget_button(dc, id, moved, &style, &result));
+        assert(result.hovered);
+        CHECK(zyntra_context_dirty_rect(dc, &dirty));
+        assert(dirty.x == 2 && dirty.y == 2 && dirty.w == 15 && dirty.h == 5);
+        CHECK(zyntra_context_frame_metrics(dc, &fm));
+        assert(fm.dirty_rects == 2); /* área anterior + atual */
+        CHECK(zyntra_framebuffer_render_region(dfb, dc, dirty, NULL));
+        CHECK(zyntra_framebuffer_pixel(dfb, 4, 4, &px));
+        assert(px.r == bg.r && px.g == bg.g && px.b == bg.b);
+        CHECK(zyntra_framebuffer_pixel(dfb, 14, 4, &px));
+        assert(px.r == red.r && px.g == red.g && px.b == red.b);
+        CHECK(zyntra_context_end_frame(dc));
+
+        CHECK(zyntra_context_begin_frame(dc));
+        CHECK(zyntra_draw_clear(dc, bg));
+        CHECK(zyntra_context_dirty_rect(dc, &dirty));
+        assert(dirty.x == moved.x && dirty.y == moved.y && dirty.w == moved.w && dirty.h == moved.h);
+        CHECK(zyntra_framebuffer_render_region(dfb, dc, dirty, NULL));
+        CHECK(zyntra_framebuffer_pixel(dfb, 14, 4, &px));
+        assert(px.r == bg.r && px.g == bg.g && px.b == bg.b);
+        CHECK(zyntra_context_end_frame(dc));
+
+        CHECK(zyntra_context_begin_frame(dc));
+        CHECK(zyntra_context_dirty_rect(dc, &dirty));
+        CHECK(zyntra_context_frame_metrics(dc, &fm));
+        assert(dirty.w == 0 && dirty.h == 0 && fm.dirty_rects == 0);
+        CHECK(zyntra_context_end_frame(dc));
+        zyntra_framebuffer_destroy(dfb);
+        zyntra_context_destroy(dc);
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);

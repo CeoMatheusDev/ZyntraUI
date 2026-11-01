@@ -39,7 +39,8 @@ pub const FrameMetrics = extern struct {
     glyph_runs: u32 = 0,
     /// Glifos somados de todos os runs.
     glyphs_total: u32 = 0,
-    /// Chamadas de `mark_dirty` no frame (regiões sujas acumuladas).
+    /// Chamadas de `mark_dirty` no frame, incluindo as marcações
+    /// automáticas das áreas quentes anteriores em `beginFrame`.
     dirty_rects: u32 = 0,
     /// Crescimentos (realocações) dos buffers da lista no frame.
     buffer_growths: u32 = 0,

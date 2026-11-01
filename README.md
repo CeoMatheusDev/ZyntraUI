@@ -141,8 +141,9 @@ For a runnable integration example, start with [`examples/minimal.zig`](examples
 
 The context accumulates the region that changed during a frame. Call
 `mark_dirty(rect)` for each area whose pixels changed (successive calls unite
-the region; an empty rect is a no-op). `beginFrame()` resets it, so
-`dirty_rect` always describes the current frame.
+the region; an empty rect is a no-op). `beginFrame()` resets the previous
+region, then conservatively marks the prior frame's hot widget bounds; thus
+`dirty_rect` describes the current frame and is ready before `endFrame()`.
 
 ```zig
 ctx.beginFrame();
@@ -169,9 +170,11 @@ capacity and its text arena between frames.
 
 Interactive widgets take part automatically: each control calls
 `mark_hot(id, bounds, hot)` every frame, and the context repaints its bounds
-both when the state starts (hover, press/drag, value change) and when it stops
-— the previous frame's hot entries keep the **area** the widget occupied, so
-a widget that moves or disappears has its old pixels erased. Currently
+both when the state starts (hover, press/drag, value change) and when it stops.
+Previous hot bounds are marked at the start of the next frame, so a widget
+that moves or disappears has its old pixels erased even if it is not called
+again. If it moves and becomes cold, both its old and new bounds are marked.
+These automatic marks count toward the per-frame `dirty_rects` metric. Currently
 wired: `button`, `checkbox`, `radio`,
 `switch`, `slider` (both orientations), `list_view`, `table`, `tree_view`,
 `tab_bar`, `splitter`, `scroll`, `menu`, `text_input` and `textarea`; plus

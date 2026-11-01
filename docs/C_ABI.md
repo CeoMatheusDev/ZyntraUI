@@ -118,9 +118,12 @@ fronteira: um `ZyntraFramebuffer*` opaco (RGBA, alocado no
 
 Repintura parcial vista do C: `zyntra_context_mark_dirty` une a região que
 mudou no frame, `zyntra_context_dirty_rect` lê o acumulado e
-`zyntra_context_clear_dirty` zera (`begin_frame` também limpa). É o mesmo
-caminho de `software.raster.renderRegion`: o `clear` parcial limpa só a
-região e comandos fora dela são cullados.
+`zyntra_context_clear_dirty` zera. `begin_frame` limpa a região anterior e
+marca preventivamente as áreas dos widgets quentes do frame anterior, para
+apagar pixels de widgets movidos ou removidos antes da renderização parcial.
+Essas marcações também entram na métrica `dirty_rects` do frame corrente.
+É o mesmo caminho de `software.raster.renderRegion`: o `clear` parcial limpa
+só a região e comandos fora dela são cullados.
 
 ```c
 ZyntraFramebuffer *fb = NULL;

@@ -113,8 +113,9 @@ pub const Context = struct {
     /// número de marcações feitas.
     dirty_marks: u32 = 0,
     /// Região suja acumulada no frame corrente: união das áreas
-    /// marcadas via `mark_dirty` (vazia = nada a repintar). Limpa em
-    /// `beginFrame`. Consumida por `software.raster.renderRegion` para
+    /// marcadas via `mark_dirty` (vazia = nada a repintar). `beginFrame`
+    /// limpa o acumulado e marca as áreas quentes do frame anterior.
+    /// Consumida por `software.raster.renderRegion` para
     /// repintar só o que mudou. Widgets marcam pelo helper `mark_hot`
     /// (estado de interação) e o chamador marca direto via `mark_dirty`
     /// quando dados externos mudam a aparência.
@@ -215,8 +216,9 @@ pub const Context = struct {
     /// Inicia um novo frame: aplica avanço de foco pendente (sobre o
     /// registro do frame anterior) e limpa eventos/draw/focáveis/região
     /// suja do frame anterior (retendo capacidade), promovendo o registro
-    /// "quente" corrente a anterior. Deve ser pareado com `endFrame`.
-    /// Precondição: nenhum frame ativo.
+    /// "quente" corrente a anterior. As áreas quentes anteriores são
+    /// marcadas antes de declarar os widgets, inclusive se desapareceram.
+    /// Deve ser pareado com `endFrame`. Precondição: nenhum frame ativo.
     pub fn beginFrame(self: *Self) void {
         std.debug.assert(self.state == .idle);
         self.state = .active;
@@ -240,6 +242,12 @@ pub const Context = struct {
         std.mem.swap(std.ArrayList(HotEntry), &self.hot_prev, &self.hot_now);
         self.hot_now.clearRetainingCapacity();
         self.clear_dirty();
+        self.dirty_marks = 0;
+        // A região suja é consultada ANTES de endFrame: não é possível
+        // esperar o fim do frame para descobrir que um widget sumiu.
+        // Repintar preventivamente as áreas quentes anteriores também
+        // apaga o lugar antigo quando um widget quente se move.
+        for (self.hot_prev.items) |prev| self.mark_dirty(prev.bounds);
     }
 
     /// Encerra o frame atual e avança `frame_index` com wrap seguro.
@@ -534,15 +542,13 @@ pub const Context = struct {
     /// ou valor alterado (inclua foco se o widget desenhar realce de foco).
     ///
     /// - `hot`: `bounds` entra na região suja (o widget pode ter mudado);
-    /// - `hot` falso com o id quente no frame ANTERIOR: `bounds` também
-    ///   entra, para apagar o realce que ficou no framebuffer (é a razão
-    ///   de o registro ser guardado entre frames).
+    /// - `hot` falso com o id quente no frame ANTERIOR: entram as áreas
+    ///   anterior e atual, para apagar o realce e desenhar a nova posição.
     ///
     /// O mecanismo é conservador de propósito: enquanto quente, o widget
     /// é tratado como em mudança e o próprio rect é repintado a cada frame
-    /// (os demais continuam pulados). Ao SAIR do estado quente, a área
-    /// que o widget ocupava no frame anterior é repintada (é lá que o
-    /// real ficou) — assim um widget que some não deixa pixels velhos.
+    /// (os demais continuam pulados). No início de cada frame, as áreas
+    /// quentes do anterior já são marcadas, mesmo se o widget desaparecer.
     /// Widget que nunca foi declarado quente e some do nada continua
     /// desconhecido: quem some deve marcar o próprio rect via
     /// `mark_dirty`.
@@ -557,10 +563,11 @@ pub const Context = struct {
             self.mark_dirty(bounds);
             return;
         }
-        // Saiu do estado quente: repinta a ÁREA que ele ocupava no
-        // frame ANTERIOR.
+        // Saiu do estado quente: repinta a área anterior e a posição
+        // atual, que também pode ter mudado. Isso ainda funciona depois
+        // de um clear_dirty explícito no meio do frame.
         if (hotEntry(self.hot_prev.items, id)) |prev| {
-            self.mark_dirty(prev.bounds);
+            self.mark_dirty(prev.bounds.unionWith(bounds));
         }
     }
 
@@ -1141,16 +1148,78 @@ test "Context M143: ao sair do estado quente, a área ANTERIOR é repintada" {
     try stdt.testing.expectEqual(types.Rect.init(0, 0, 10, 10), ctx.dirty_rect);
     ctx.endFrame();
 
-    // Frame 2: o widget mudou de lugar e saiu do estado quente ⇒ a
-    // área ANTIGA (onde o real ficou) é repintada.
+    // Frame 2: o widget mudou de lugar e saiu do estado quente ⇒ as
+    // áreas ANTIGA (onde o real ficou) e NOVA são repintadas.
     ctx.beginFrame();
     try ctx.mark_hot(id, types.Rect.init(50, 50, 10, 10), false);
-    try stdt.testing.expectEqual(types.Rect.init(0, 0, 10, 10), ctx.dirty_rect);
+    try stdt.testing.expectEqual(types.Rect.init(0, 0, 60, 60), ctx.dirty_rect);
     ctx.endFrame();
 
     // Frame 3: sem estado quente nem registro ⇒ nada é repintado.
     ctx.beginFrame();
     try ctx.mark_hot(id, types.Rect.init(50, 50, 10, 10), false);
     try stdt.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+}
+
+test "dirty rect inclui widgets quentes que se movem ou desaparecem" {
+    var ctx = try Context.init(std.testing.allocator, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("hot:disappears");
+    const old = types.Rect.init(2, 2, 4, 4);
+    const new = types.Rect.init(12, 2, 4, 4);
+
+    ctx.beginFrame();
+    try ctx.mark_hot(id, old, true);
+    ctx.endFrame();
+
+    // A região anterior deve estar disponível antes do endFrame, mesmo
+    // que o widget não seja declarado ou ainda esteja quente ao se mover.
+    ctx.beginFrame();
+    try std.testing.expectEqual(old, ctx.dirty_rect);
+    try ctx.mark_hot(id, new, true);
+    try std.testing.expectEqual(old.unionWith(new), ctx.dirty_rect);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try std.testing.expectEqual(new, ctx.dirty_rect); // widget ausente
+    ctx.endFrame();
+    ctx.beginFrame();
+    try std.testing.expect(ctx.dirty_rect.isEmpty()); // não repete para sempre
+    ctx.endFrame();
+}
+
+test "dirty rect cobre posição nova quando widget esfria e se move" {
+    var ctx = try Context.init(std.testing.allocator, .{});
+    defer ctx.deinit();
+    const id = id_mod.Id.fromString("hot:move-cold");
+    const old = types.Rect.init(2, 2, 4, 4);
+    const new = types.Rect.init(12, 2, 4, 4);
+    ctx.beginFrame();
+    try ctx.mark_hot(id, old, true);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    // clear_dirty explícito não impede mark_hot de declarar a transição.
+    ctx.clear_dirty();
+    try ctx.mark_hot(id, new, false);
+    try std.testing.expectEqual(old.unionWith(new), ctx.dirty_rect);
+    ctx.endFrame();
+}
+
+test "frameMetrics conta marcações apenas no frame corrente" {
+    var ctx = try Context.init(std.testing.allocator, .{});
+    defer ctx.deinit();
+    ctx.beginFrame();
+    ctx.mark_dirty(types.Rect.init(0, 0, 1, 1));
+    ctx.mark_dirty(types.Rect.init(2, 2, 1, 1));
+    try std.testing.expectEqual(@as(u32, 2), ctx.frameMetrics().dirty_rects);
+    ctx.clear_dirty();
+    try std.testing.expectEqual(@as(u32, 2), ctx.frameMetrics().dirty_rects); // histórico do frame
+    ctx.endFrame();
+    ctx.beginFrame();
+    try std.testing.expectEqual(@as(u32, 0), ctx.frameMetrics().dirty_rects);
+    ctx.mark_dirty(types.Rect.init(0, 0, 1, 1));
+    try std.testing.expectEqual(@as(u32, 1), ctx.frameMetrics().dirty_rects);
     ctx.endFrame();
 }

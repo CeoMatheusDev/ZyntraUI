@@ -2612,3 +2612,55 @@ test "raster: casos extremos reproduzíveis preservam o buffer" {
         for (storage[storage.len - 8 ..]) |byte| try std.testing.expectEqual(@as(u8, 0xA5), byte);
     }
 }
+
+test "repintura parcial remove pixels de widget quente que se move e desaparece" {
+    const Context = @import("../core/context.zig").Context;
+    const id_mod = @import("../core/id.zig");
+    const button_mod = @import("../widgets/button.zig");
+    const style_mod = @import("../style/style.zig");
+    const allocator = std.testing.allocator;
+    const viewport = types.Rect.init(0, 0, 20, 10);
+    const old = types.Rect.init(2, 2, 5, 5);
+    const new = types.Rect.init(12, 2, 5, 5);
+    const bg = types.Color.rgb(10, 20, 30);
+    const red = types.Color.rgb(200, 0, 0);
+    const style = style_mod.ButtonStyle{ .bg = red, .bg_hover = red, .bg_pressed = red, .border = red };
+    const id = id_mod.Id.fromString("raster:hot-move");
+    var ctx = try Context.init(allocator, .{ .viewport = viewport });
+    defer ctx.deinit();
+    var fb = try SoftwareFramebuffer.init(allocator, 20, 10);
+    defer fb.deinit(allocator);
+    fb.clear(bg);
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(4, 4) } });
+    try ctx.draw.clear(allocator, bg);
+    const b0 = try button_mod.button(&ctx, id, old, style);
+    try std.testing.expect(b0.hovered);
+    _ = try renderRegion(&fb, ctx.drawCommands(), viewport, ctx.dirty_rect);
+    try std.testing.expectEqual([4]u8{ 200, 0, 0, 255 }, fb.get(4, 4));
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(14, 4) } });
+    try ctx.draw.clear(allocator, bg);
+    const b1 = try button_mod.button(&ctx, id, new, style);
+    try std.testing.expect(b1.hovered);
+    try std.testing.expectEqual(old.unionWith(new), ctx.dirty_rect);
+    _ = try renderRegion(&fb, ctx.drawCommands(), viewport, ctx.dirty_rect);
+    try std.testing.expectEqual([4]u8{ 10, 20, 30, 255 }, fb.get(4, 4));
+    try std.testing.expectEqual([4]u8{ 200, 0, 0, 255 }, fb.get(14, 4));
+    ctx.endFrame();
+
+    // Sem chamada ao botão, o clear da cena remove a posição antiga.
+    ctx.beginFrame();
+    try ctx.draw.clear(allocator, bg);
+    try std.testing.expectEqual(new, ctx.dirty_rect);
+    _ = try renderRegion(&fb, ctx.drawCommands(), viewport, ctx.dirty_rect);
+    try std.testing.expectEqual([4]u8{ 10, 20, 30, 255 }, fb.get(14, 4));
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try std.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
+}
