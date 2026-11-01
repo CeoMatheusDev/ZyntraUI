@@ -261,7 +261,8 @@ pub fn textInputAtlas(
 /// `comp` é o estado de composição do app: o widget aplica o texto
 /// confirmado (após `Composition.commit`) no buffer, substituindo a
 /// seleção, e desenha o pré-edit na posição do caret enquanto a
-/// composição está ativa. `anchor` (seleção) é do chamador.
+/// composição está ativa. `anchor` (seleção) é do chamador. Ao aplicar
+/// o commit, os bytes do pré-edit não podem se sobrepor a `buffer`.
 pub fn textInputIme(
     ctx: *context_mod.Context,
     id: id_mod.Id,
@@ -644,7 +645,7 @@ fn textInputInner(
         if (c.committed) {
             c.applyCommit(buffer, len, cursor, anchor) catch |err| switch (err) {
                 error.OutOfSpace => res.overflowed = true,
-                error.InvalidState => {},
+                error.InvalidState => return error.InvalidArgument,
                 error.InvalidUtf8 => {},
                 error.BufferTooSmall => {},
             };

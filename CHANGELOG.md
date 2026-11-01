@@ -29,6 +29,12 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - O teste de fuzz de `text.wrap` usa capacidade suficiente ao verificar
   UTF-8 inválido, evitando falso positivo quando uma saída pequena fica
   cheia antes de alcançar o byte inválido (sem alteração da API).
+- `text.ime.Composition.update` aceita texto sobreposto ao buffer do
+  pré-edit e preserva a fronteira UTF-8 do cursor. A aplicação do commit
+  recusa pré-edit sobreposto ao buffer editado, sem corromper os bytes;
+  widgets IME informam argumento inválido e mantêm o commit pendente.
+  Regressões cobrem sobreposição nas duas direções e integração C
+  (impacto PATCH, sem alteração de assinatura ou ABI).
 
 ## [1.44.1] - 2026-10-29
 

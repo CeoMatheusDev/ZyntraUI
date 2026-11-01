@@ -464,7 +464,8 @@ pub fn textAreaWrappedClipboard(
 /// `comp` é o estado de composição do app: o widget aplica o texto
 /// confirmado (após `Composition.commit`) no buffer, substituindo a
 /// seleção, e desenha o pré-edit na posição do caret enquanto a
-/// composição está ativa.
+/// composição está ativa. Ao aplicar o commit, os bytes do pré-edit
+/// não podem se sobrepor a `buffer`.
 pub fn textAreaIme(
     ctx: *context_mod.Context,
     id: id_mod.Id,
@@ -890,7 +891,7 @@ fn textAreaInner(
         if (c.committed) {
             c.applyCommit(buffer, len, cursor, anchor) catch |err| switch (err) {
                 error.OutOfSpace => res.overflowed = true,
-                error.InvalidState => {},
+                error.InvalidState => return error.InvalidArgument,
                 error.InvalidUtf8 => {},
                 error.BufferTooSmall => {},
             };

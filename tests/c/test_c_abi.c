@@ -3549,6 +3549,20 @@ int main(void) {
         /* Pré-edit + commit. */
         CHECK(zyntra_ime_update(&comp, "ni", 2, 2));
         assert(comp.len == 2 && comp.cursor == 2 && comp.active);
+        /* A origem pode ser o próprio pré-edit ou uma fatia sobreposta. */
+        CHECK(zyntra_ime_update(&comp, (const char *)pre, 2, 1));
+        assert(comp.len == 2 && comp.cursor == 1 && memcmp(pre, "ni", 2) == 0);
+        memcpy(pre + 2, "a\xc3\xa9z", 4);
+        CHECK(zyntra_ime_update(&comp, (const char *)(pre + 2), 4, 2));
+        assert(comp.len == 4 && comp.cursor == 1 && memcmp(pre, "a\xc3\xa9z", 4) == 0);
+        {
+            uint8_t shared[16] = "a\xc3\xa9z";
+            ZyntraImeComposition shifted = {shared + 2, sizeof(shared) - 2,
+                0, 0, false, false};
+            CHECK(zyntra_ime_update(&shifted, (const char *)shared, 4, 2));
+            assert(shifted.cursor == 1 && memcmp(shared + 2, "a\xc3\xa9z", 4) == 0);
+        }
+        CHECK(zyntra_ime_update(&comp, "ni", 2, 2));
         CHECK(zyntra_ime_commit(&comp));
         assert(comp.committed && !comp.active);
         /* Update invalido (UTF-8) e buffer pequeno demais. */
@@ -3572,6 +3586,33 @@ int main(void) {
         ZyntraTextInputStyle tis;
         CHECK(zyntra_style_text_input(0, &tis));
         const ZyntraId ti_ime = zyntra_id_from_string("m130:ti", 7);
+
+        /* Aplicar pré-edit sobreposto ao buffer do campo é recusado sem
+         * descartar o commit; vale para ambos os widgets de texto. */
+        {
+            char shared[32] = "abcd";
+            ZyntraImeComposition overlap = {(uint8_t *)shared + 8,
+                sizeof(shared) - 8, 0, 0, false, false};
+            size_t n = 4, at = 2, mark = 2;
+            float scroll = 0;
+            ZyntraTextInputResult input_result;
+            ZyntraTextAreaResult area_result;
+            CHECK(zyntra_ime_update(&overlap, "xy", 2, 2));
+            CHECK(zyntra_ime_commit(&overlap));
+            CHECK(zyntra_context_begin_frame(ctx));
+            assert(zyntra_widget_text_input_ime(ctx, ti_ime,
+                (ZyntraRect){0, 0, 200, 30}, shared, sizeof(shared), &n, &at,
+                &mark, &overlap, 10.0f, &tis, &input_result) == ZYNTRA_INVALID_ARGUMENT);
+            assert(n == 4 && at == 2 && mark == 2 && overlap.committed);
+            assert(memcmp(shared, "abcd", 4) == 0);
+            assert(zyntra_widget_text_area_ime(ctx, ti_ime,
+                (ZyntraRect){0, 0, 200, 60}, shared, sizeof(shared), &n, &at,
+                &mark, &scroll, &overlap, 10.0f, &tis, &area_result)
+                == ZYNTRA_INVALID_ARGUMENT);
+            assert(n == 4 && at == 2 && mark == 2 && overlap.committed);
+            assert(memcmp(shared, "abcd", 4) == 0);
+            CHECK(zyntra_context_end_frame(ctx));
+        }
 
         CHECK(zyntra_context_begin_frame(ctx));
         CHECK(zyntra_context_focus(ctx, ti_ime));

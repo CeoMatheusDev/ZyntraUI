@@ -876,12 +876,16 @@ zyntra_widget_text_input_ime(ctx, id, bounds, buffer, sizeof(buffer), &len,
   texto confirmado à espera de aplicação.
 * `zyntra_ime_update` substitui o pré-edit e ajusta o cursor para uma
   fronteira de codepoint; `zyntra_ime_commit` confirma; `zyntra_ime_cancel`
-  descarta. O texto é **emprestado** só durante a chamada.
+  descarta. O texto é **emprestado** só durante a chamada e pode se
+  sobrepor ao buffer do pré-edit.
 * `zyntra_widget_text_input_ime` aplica o texto confirmado no buffer do
   campo (substituindo a seleção), desenha o pré-edit na posição do caret e
   mantém o caret dentro do pré-edit durante a composição. Sem foco, a
   composição é cancelada. `zyntra_widget_text_area_ime` faz o mesmo na
   área de texto multilinha (o pré-edit é desenhado na linha do caret).
+  Ao aplicar o commit, os bytes do pré-edit não podem se sobrepor à
+  capacidade do buffer do campo; se isso ocorrer, o widget retorna
+  `ZYNTRA_INVALID_ARGUMENT` e a composição continua pendente.
 * Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: composição nula, buffer/pré-edit
   nulos ou inconsistentes, pré-edit maior que o buffer, cursor fora do
   buffer; UTF-8 malformado ⇒ `ZYNTRA_INVALID_TEXT`.

@@ -917,6 +917,10 @@ typedef struct ZyntraImeComposition {
     bool committed;  /* texto confirmado aguardando aplicação */
 } ZyntraImeComposition;
 
+/* `utf8` pode apontar para bytes de `comp->buf`. Para aplicar um commit,
+ * os bytes do pré-edit não podem se sobrepor à capacidade do buffer do
+ * campo: os widgets IME retornam ZYNTRA_INVALID_ARGUMENT nesse caso e a
+ * composição continua pendente. */
 ZyntraResult zyntra_ime_update(ZyntraImeComposition *comp, const char *utf8,
     size_t utf8_len, size_t cursor);
 ZyntraResult zyntra_ime_commit(ZyntraImeComposition *comp);
