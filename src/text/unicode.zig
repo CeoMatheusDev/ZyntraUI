@@ -21,7 +21,8 @@
 //! a tabela completa do UCD. Para texto SEM diacríticos, SEM emoji e
 //! SEM ZWJ (o caso comum) o resultado é exato. Quem precisar do UCD
 //! completo pode substituir as tabelas por um gerador externo — o
-//! núcleo só depende desta API.
+//! núcleo só depende desta API. UTF-8 malformado não é validado nem
+//! rejeitado aqui: cada byte inválido é tratado como unidade isolada.
 
 const std = @import("std");
 
@@ -237,13 +238,12 @@ const extend_ranges = [_]Range{
     .{ .lo = 0x119D4, .hi = 0x119D7 },
     .{ .lo = 0x119DA, .hi = 0x119DF },
     .{ .lo = 0x119E4, .hi = 0x119E4 },
-    .{ .lo = 0x1A7F0, .hi = 0x1A7F8 },
-    .{ .lo = 0x1AB0, .hi = 0x1ACE },
     .{ .lo = 0x16AF0, .hi = 0x16AF4 },
     .{ .lo = 0x16B30, .hi = 0x16B36 },
     .{ .lo = 0x16F4F, .hi = 0x16F4F },
     .{ .lo = 0x16F8F, .hi = 0x16F9F },
     .{ .lo = 0x16FF0, .hi = 0x16FF0 },
+    .{ .lo = 0x1A7F0, .hi = 0x1A7F8 },
     .{ .lo = 0x1BC9D, .hi = 0x1BC9E },
     .{ .lo = 0x1CF00, .hi = 0x1CF2D },
     .{ .lo = 0x1CF30, .hi = 0x1CF46 },
@@ -520,23 +520,25 @@ fn decodeAt(text: []const u8, offset: usize) !struct { cp: u21, len: usize } {
     return .{ .cp = cp, .len = len };
 }
 
-/// A posição do próximo codepoint (ou o fim do texto).
+/// A posição do próximo codepoint (ou o fim do texto). Um byte inválido
+/// é tratado isoladamente, sem pular o texto válido que vem depois.
 fn nextCodepoint(text: []const u8, offset: usize) usize {
     if (offset >= text.len) return text.len;
-    const len = std.unicode.utf8ByteSequenceLength(text[offset]) catch return text.len;
-    return @min(offset + len, text.len);
+    const info = decodeAt(text, offset) catch return offset + 1;
+    return offset + info.len;
 }
 
 /// O início do codepoint anterior (ou 0).
 fn prevCodepoint(text: []const u8, offset: usize) usize {
-    if (offset == 0) return 0;
-    var o = @min(offset, text.len);
-    while (o > 0) {
-        o -= 1;
-        const b = text[o];
-        if ((b & 0xC0) != 0x80) return o;
-    }
-    return 0;
+    const end = @min(offset, text.len);
+    if (end == 0) return 0;
+    return codepointStart(text, end - 1);
+}
+
+/// Algumas subclasses têm enum próprio para a API, mas seguem as
+/// mesmas regras de Extend na segmentação (GB9 e GB11).
+fn isExtend(class: Class) bool {
+    return class == .extend or class == .emoji_modifier or class == .variation_selector;
 }
 
 /// O cluster começa em `offset`? (a próxima posição é uma quebra?)
@@ -571,22 +573,22 @@ fn breaksAt(text: []const u8, offset: usize, ri_run: usize) bool {
     // GB8: (LVT | T) × T
     if ((ca == .hangul_lvt or ca == .hangul_t) and cb == .hangul_t) return false;
     // GB9: × (Extend | ZWJ)
-    if (cb == .extend or cb == .zwj) return false;
+    if (isExtend(cb) or cb == .zwj) return false;
     // GB9a: × SpacingMark
     if (cb == .spacing_mark) return false;
     // GB9b: Prepend ×
     if (ca == .prepend) return false;
     // GB11: ExtPict Extend* ZWJ × ExtPict
     if (ca == .zwj and cb == .extpict) {
-        // O codepoint antes do ZWJ (pulando os Extend) é ExtPict?
-        var p = prevCodepoint(text, prev);
-        while (p < text.len) {
+        // Busca antes do ZWJ, pulando Extend. A posição sempre diminui,
+        // inclusive quando a primeira marca ocupa o byte zero.
+        var p = prev;
+        while (p > 0) {
+            p = prevCodepoint(text, p);
             const info = decodeAt(text, p) catch break;
-            if (classOf(info.cp) == .extend) {
-                p = prevCodepoint(text, p);
-                continue;
-            }
-            if (classOf(info.cp) == .extpict) return false;
+            const class = classOf(info.cp);
+            if (isExtend(class)) continue;
+            if (class == .extpict) return false;
             break;
         }
     }
@@ -621,12 +623,16 @@ pub fn graphemeLen(text: []const u8, offset: usize) usize {
     return @max(1, pos - start);
 }
 
-/// O início do codepoint que contém `offset`.
+/// O início do codepoint válido que contém `offset`. Uma continuação
+/// solta é um byte inválido independente, não parte do caractere anterior.
 fn codepointStart(text: []const u8, offset: usize) usize {
     if (offset >= text.len) return text.len;
-    var o = offset;
-    while (o > 0 and (text[o] & 0xC0) == 0x80) o -= 1;
-    return o;
+    var start = offset;
+    // UTF-8 tem no máximo quatro bytes: não atravessar uma sequência
+    // arbitrariamente longa de continuações inválidas.
+    while (start > 0 and offset - start < 3 and (text[start] & 0xC0) == 0x80) start -= 1;
+    const info = decodeAt(text, start) catch return offset;
+    return if (offset - start < info.len) start else offset;
 }
 
 /// O início do cluster ANTERIOR (a posição anterior a `offset`).
@@ -665,18 +671,17 @@ pub fn nextGrapheme(text: []const u8, offset: usize) usize {
     return text.len;
 }
 
-/// Quantos indicadores regionais vêm antes de `offset` (paridade).
+/// Quantos indicadores regionais consecutivos vêm antes de `offset`.
+/// Olhar apenas o trecho adjacente evita percorrer todo o prefixo do
+/// documento a cada movimento de cursor (especialmente em ASCII).
 fn riRunBefore(text: []const u8, offset: usize) usize {
     var count: usize = 0;
-    var pos: usize = 0;
-    while (pos < offset and pos < text.len) {
+    var pos = @min(offset, text.len);
+    while (pos > 0) {
+        pos = prevCodepoint(text, pos);
         const info = decodeAt(text, pos) catch break;
-        if (classOf(info.cp) != .regional_indicator) {
-            count = 0;
-        } else {
-            count += 1;
-        }
-        pos = nextCodepoint(text, pos);
+        if (classOf(info.cp) != .regional_indicator) break;
+        count += 1;
     }
     return count;
 }
@@ -813,20 +818,27 @@ fn fuzzGrapheme(_: void, smith: *std.testing.Smith) !void {
     var buf: [64]u8 = undefined;
     smith.bytes(&buf);
     const n: usize = smith.valueRangeAtMost(u8, 0, 64);
-    const text = buf[0..n];
+    try checkGraphemeInvariants(buf[0..n]);
+}
 
+fn checkGraphemeInvariants(text: []const u8) !void {
     // A contagem de clusters é estável (a soma dos tamanhos).
     var pos: usize = 0;
     var count: usize = 0;
     while (pos < text.len) {
         const len = graphemeLen(text, pos);
         try std.testing.expect(len > 0);
-        try std.testing.expect(pos + len <= text.len);
-        // O cluster começa num codepoint.
-        try std.testing.expect((text[pos] & 0xC0) != 0x80);
+        try std.testing.expect(len <= text.len - pos);
+        // Em UTF-8 malformado, cada byte inválido pode ser um cluster.
+        // Os três caminhos devem concordar mesmo nessas entradas.
+        try std.testing.expectEqual(pos + len, nextGrapheme(text, pos));
+        try std.testing.expectEqual(pos, prevGrapheme(text, pos + len));
+        for (pos..pos + len) |offset| {
+            try std.testing.expectEqual(pos, snapToGrapheme(text, offset));
+            try std.testing.expectEqual(pos + len, nextGrapheme(text, offset));
+        }
         pos += len;
         count += 1;
-        if (count > 1000) return error.TestUnexpectedResult; // laço infinito
     }
     try std.testing.expectEqual(count, graphemeCount(text));
 
@@ -838,4 +850,116 @@ fn fuzzGrapheme(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(nextGrapheme(text, i) <= text.len);
         try std.testing.expect(snapToGrapheme(text, i) <= i);
     }
+}
+
+test "unicode: invariantes em entradas aleatórias reproduzíveis" {
+    var prng = std.Random.DefaultPrng.init(0x5A79_6E74_7261);
+    const random = prng.random();
+    var buf: [64]u8 = undefined;
+    for (0..2000) |_| {
+        random.bytes(&buf);
+        const len = random.uintLessThan(usize, buf.len + 1);
+        try checkGraphemeInvariants(buf[0..len]);
+    }
+
+    // UTF-8 válido aleatório também exercita sequências que bytes
+    // uniformes raramente formam: ZWJ, modificadores, flags e Hangul.
+    const codepoints = [_][]const u8{
+        "a", "x", "\r", "\n", "\u{0301}", "\u{0600}", "\u{0903}",
+        "ᄀ",
+        "ᅡ",
+        "ᆨ",
+        "🇧",
+        "🇷",
+        "🇨",
+        "🇳",
+        "👩",
+        "💻",
+        "🏽",
+        "‍",
+        "️",
+    };
+    for (0..2000) |_| {
+        var len: usize = 0;
+        const n = random.uintLessThan(usize, 12);
+        for (0..n) |_| {
+            const cp = codepoints[random.uintLessThan(usize, codepoints.len)];
+            @memcpy(buf[len..][0..cp.len], cp);
+            len += cp.len;
+        }
+        try checkGraphemeInvariants(buf[0..len]);
+    }
+}
+
+test "unicode: tons de pele, seletores e ZWJ permanecem no mesmo cluster" {
+    // Os comprimentos abaixo incluem apenas o emoji entre os marcadores.
+    const cases = [_]struct { text: []const u8, emoji_len: usize }{
+        .{ .text = "x👍🏽y", .emoji_len = 8 },
+        .{ .text = "x❤️y", .emoji_len = 6 },
+        .{ .text = "x👩🏽‍💻y", .emoji_len = 15 },
+        .{ .text = "x🏳️‍🌈y", .emoji_len = 14 },
+        .{ .text = "xa\u{E0100}y", .emoji_len = 5 },
+    };
+    for (cases) |case| {
+        const end = 1 + case.emoji_len;
+        try std.testing.expectEqual(@as(usize, 3), graphemeCount(case.text));
+        try std.testing.expectEqual(case.emoji_len, graphemeLen(case.text, 1));
+        try std.testing.expectEqual(end, nextGrapheme(case.text, 1));
+        try std.testing.expectEqual(@as(usize, 1), prevGrapheme(case.text, end));
+        for (1..end) |offset| {
+            try std.testing.expectEqual(@as(usize, 1), snapToGrapheme(case.text, offset));
+            try std.testing.expectEqual(end, nextGrapheme(case.text, offset));
+        }
+        for (2..end + 1) |offset| {
+            try std.testing.expectEqual(@as(usize, 1), prevGrapheme(case.text, offset));
+        }
+    }
+}
+
+test "unicode: ZWJ sem pictograma anterior termina a busca" {
+    // Não existe pictograma antes do ZWJ, logo há uma quebra antes do
+    // emoji. A busca para trás deve parar ao alcançar a primeira marca.
+    const text = "\u{0301}\u{0300}\u{200D}😀";
+    try std.testing.expectEqual(@as(usize, 2), graphemeCount(text));
+    try std.testing.expectEqual(@as(usize, 7), graphemeLen(text, 0));
+    try std.testing.expectEqual(@as(usize, 7), nextGrapheme(text, 0));
+    try std.testing.expectEqual(@as(usize, 0), prevGrapheme(text, 7));
+    try std.testing.expectEqual(@as(usize, 7), snapToGrapheme(text, 7));
+}
+
+test "unicode: faixas para busca binária são ordenadas e encontráveis" {
+    const tables = [_][]const Range{ &extend_ranges, &spacing_mark_ranges, &prepend_ranges, &extpict_ranges };
+    for (tables) |table| {
+        for (table, 0..) |range, i| {
+            try std.testing.expect(range.lo <= range.hi);
+            if (i > 0) try std.testing.expect(table[i - 1].hi < range.lo);
+            try std.testing.expect(inRanges(table, range.lo));
+            try std.testing.expect(inRanges(table, range.hi));
+        }
+    }
+}
+
+test "unicode: navegação mantém pares de indicadores regionais" {
+    const text = "x🇧🇷🇨🇳z";
+    const boundaries = [_]usize{ 0, 1, 9, 17, text.len };
+    for (boundaries[0 .. boundaries.len - 1], 0..) |start, i| {
+        const end = boundaries[i + 1];
+        try std.testing.expectEqual(end - start, graphemeLen(text, start));
+        try std.testing.expectEqual(end, nextGrapheme(text, start));
+        try std.testing.expectEqual(start, prevGrapheme(text, end));
+        for (start..end) |offset| {
+            try std.testing.expectEqual(start, snapToGrapheme(text, offset));
+        }
+    }
+    try std.testing.expectEqual(boundaries.len - 1, graphemeCount(text));
+}
+
+test "unicode: bytes UTF-8 inválidos isolados não recuam ao codepoint anterior" {
+    // O 0x80 é uma continuação solta após um codepoint UTF-8 completo.
+    const text = [_]u8{ 0xC3, 0xA9, 0x80, 'x' };
+    try std.testing.expectEqual(@as(usize, 1), graphemeLen(&text, 2));
+    try std.testing.expectEqual(@as(usize, 3), graphemeCount(&text));
+    try std.testing.expectEqual(@as(usize, 3), nextGrapheme(&text, 2));
+    try std.testing.expectEqual(@as(usize, 2), prevGrapheme(&text, 3));
+    try std.testing.expectEqual(@as(usize, 2), snapToGrapheme(&text, 2));
 }

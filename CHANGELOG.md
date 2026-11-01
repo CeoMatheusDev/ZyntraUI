@@ -5,6 +5,18 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Corrigido
+
+- `text.unicode`: tons de pele e seletores de variação agora permanecem
+  no cluster, inclusive em sequências de emoji com ZWJ. A busca por
+  pictograma anterior termina mesmo quando o texto começa por marcas
+  combinantes; a tabela usada na busca binária também foi reordenada.
+- Navegação por grafemas trata bytes UTF-8 inválidos como unidades
+  isoladas sem ultrapassar o buffer e evita percorrer todo o prefixo do
+  documento a cada movimento. Testes cobrem edição, API C, casos-limite
+  e 4.000 entradas pseudoaleatórias reproduzíveis. Correção compatível
+  (impacto PATCH), sem alteração de assinatura ou ABI.
+
 ## [1.44.1] - 2026-10-29
 
 PATCH estável: corrige a publicação de mudanças de acessibilidade em

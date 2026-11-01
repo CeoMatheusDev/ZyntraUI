@@ -1136,8 +1136,9 @@ zyntra_text_rich_runs_atlas(atlas, (const uint8_t *)text, (uint32_t)strlen(text)
 ### Vinte e terceiro lote (M166): graphemes
 
 ```c
+/* utf8 contém 'a', 'e', U+0301 (acento combinante), 'b'. */
 uint32_t count = 0;
-zyntra_text_grapheme_count(utf8, utf8_len, &count);   /* 3 para "aé\xCC\x81b" */
+zyntra_text_grapheme_count(utf8, utf8_len, &count);   /* 3 clusters */
 
 uint32_t len = 0;
 zyntra_text_grapheme_len(utf8, utf8_len, /*offset*/ 1, &len);  /* 3 bytes */
@@ -1156,7 +1157,11 @@ zyntra_text_grapheme_next(utf8, utf8_len, 1, &off);  /* 4: o "b" */
   Prepend, emoji com ZWJ, bandeiras). **Não é a tabela completa do
   UCD**: para texto sem diacríticos, sem emoji e sem ZWJ o resultado é
   exato.
-* Offsets em BYTES (a convenção do resto da API de texto).
+* Offsets em BYTES (a convenção do resto da API de texto). Se o offset
+  de `grapheme_len` cair no meio de um codepoint válido, o comprimento
+  é medido a partir do início desse codepoint.
+* Estas funções não validam UTF-8: um byte inválido é tratado como uma
+  unidade isolada. O chamador deve validar o texto se precisar rejeitá-lo.
 * Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: ponteiros nulos e offset maior
   que o tamanho do texto.
 

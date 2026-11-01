@@ -312,7 +312,9 @@ ZyntraResult zyntra_image_fit_rect(ZyntraRect bounds, uint32_t img_w,
 
 /* O tamanho (em bytes) do GRAPHEME que começa em `offset` (a letra com
  * o acento, o emoji com ZWJ, a bandeira: UM caractere para o usuário).
- * `offset` em bytes; o resultado também em bytes. */
+ * `offset` em bytes; o resultado também em bytes. Se `offset` estiver no
+ * meio de um codepoint válido, o tamanho é medido desde o seu início.
+ * UTF-8 malformado não é rejeitado: bytes inválidos são unidades isoladas. */
 ZyntraResult zyntra_text_grapheme_len(const uint8_t *utf8, uint32_t utf8_len,
     uint32_t offset, uint32_t *out_len);
 /* O início do GRAPHEME anterior / do próximo (em bytes). */

@@ -3942,6 +3942,32 @@ int main(void) {
             (uint32_t)strlen(text), 1, &off));
         assert(off == 4); /* o "b" */
         c166_grapheme = (count == 3 && len == 3);
+
+        /* Tom de pele + ZWJ: um único cluster entre 'a' e 'b'. */
+        const uint8_t emoji[] = "a👩🏽‍💻b";
+        const uint32_t emoji_len = (uint32_t)strlen((const char *)emoji);
+        CHECK(zyntra_text_grapheme_count(emoji, emoji_len, &count));
+        assert(count == 3);
+        CHECK(zyntra_text_grapheme_len(emoji, emoji_len, 1, &len));
+        assert(len == 15);
+        CHECK(zyntra_text_grapheme_next(emoji, emoji_len, 1, &off));
+        assert(off == 16);
+        CHECK(zyntra_text_grapheme_prev(emoji, emoji_len, 16, &off));
+        assert(off == 1);
+
+        /* Marcas no início + ZWJ sem pictograma anterior não travam. */
+        const uint8_t leading_marks[] = "\xCC\x81\xCC\x80\xE2\x80\x8D"
+            "\xF0\x9F\x98\x80";
+        CHECK(zyntra_text_grapheme_count(leading_marks,
+            (uint32_t)sizeof(leading_marks) - 1, &count));
+        assert(count == 2);
+
+        /* Continuação isolada depois de 'é' é um byte independente. */
+        const uint8_t invalid[] = { 0xC3, 0xA9, 0x80, 'x' };
+        CHECK(zyntra_text_grapheme_len(invalid, sizeof(invalid), 2, &len));
+        assert(len == 1);
+        CHECK(zyntra_text_grapheme_next(invalid, sizeof(invalid), 2, &off));
+        assert(off == 3);
     }
 
     /* Árvore de acessibilidade em C (M164). */

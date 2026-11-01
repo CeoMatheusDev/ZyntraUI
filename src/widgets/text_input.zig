@@ -1978,3 +1978,49 @@ test "text_input M166: o cursor anda por GRAPHEME (emoji e acento)" {
     try stdt.testing.expectEqual(@as(usize, 1), cursor);
     ctx.endFrame();
 }
+
+test "text_input: navegação e edição preservam emoji com tom de pele e ZWJ" {
+    const gpa = std.testing.allocator;
+    const style = style_mod.Theme.darkDefault().textInputStyle();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    const bounds = types.Rect.init(0, 0, 400, 30);
+    const id = id_mod.Id.fromString("test:emoji-grapheme");
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    ctx.focus_owner = id;
+
+    const text = "a👩🏽‍💻b";
+    var buf: [32]u8 = undefined;
+    @memcpy(buf[0..text.len], text);
+    var len = text.len;
+    var cursor = len;
+    var anchor = len;
+
+    // ← passa pelo 'b', depois pelo emoji INTEIRO; → volta ao seu fim.
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try std.testing.expectEqual(@as(usize, 16), cursor);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .left, .pressed = true, .modifiers = .{} } });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try std.testing.expectEqual(@as(usize, 1), cursor);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .right, .pressed = true, .modifiers = .{} } });
+    _ = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try std.testing.expectEqual(@as(usize, 16), cursor);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .key = .{ .key = .backspace, .pressed = true, .modifiers = .{} } });
+    const result = try textInputSelected(&ctx, id, bounds, &buf, &len, &cursor, &anchor, font, style);
+    try std.testing.expect(result.changed);
+    try std.testing.expectEqualStrings("ab", buf[0..len]);
+    try std.testing.expectEqual(@as(usize, 1), cursor);
+    try std.testing.expectEqual(cursor, anchor);
+    ctx.endFrame();
+}
