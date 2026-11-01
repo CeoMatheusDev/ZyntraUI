@@ -41,6 +41,13 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   cobre a posição atual; a métrica `dirty_rects` volta a contar por frame,
   incluindo marcações automáticas. Testes verificam pixels e integração C
   (impacto PATCH, sem alteração de assinatura ou ABI).
+- `widgets.textarea`: clique e arrasto consideram a rolagem vertical;
+  junto à navegação vertical, mantêm cursor e seleção nas fronteiras de
+  grafemas. Offsets externos são ajustados, e edições que unem clusters
+  atualizam o caret; CRLF é tratado como uma quebra indivisível. A quebra
+  suave não divide grafemas e pode recortar um cluster maior que a largura
+  útil. Regressões incluem IME, seleção, casos
+  reproduzíveis e API C (impacto PATCH, sem alteração de assinatura ou ABI).
 
 ## [1.44.1] - 2026-10-29
 

@@ -4119,6 +4119,78 @@ int main(void) {
         zyntra_context_destroy(dc);
     }
 
+    /* Área de texto: clique, navegação e edição respeitam grafemas. */
+    {
+        ZyntraContext *tc = NULL;
+        ZyntraRect bounds = {0, 0, 200, 40};
+        ZyntraTextInputStyle style;
+        ZyntraTextAreaResult result;
+        ZyntraId id = zyntra_id_from_string("ta:graphemes", 12);
+        char text[64] = "ab\nA👩🏽‍💻B\nab";
+        size_t n = strlen(text), at = 2, anchor = 2;
+        float scroll = 0;
+        CHECK(zyntra_context_create(bounds, &tc));
+        CHECK(zyntra_style_text_input(ZYNTRA_THEME_DARK, &style));
+        CHECK(zyntra_context_begin_frame(tc));
+        CHECK(zyntra_context_focus(tc, id));
+        CHECK(zyntra_context_push_key(tc, ZYNTRA_KEY_DOWN, true, 0));
+        CHECK(zyntra_widget_text_area(tc, id, bounds, text, sizeof(text), &n,
+            &at, &anchor, &scroll, 10, &style, &result));
+        assert(at == 4 && anchor == 4); /* início do emoji, não entre codepoints */
+        CHECK(zyntra_context_end_frame(tc));
+        CHECK(zyntra_context_begin_frame(tc));
+        CHECK(zyntra_context_push_key(tc, ZYNTRA_KEY_DELETE, true, 0));
+        CHECK(zyntra_widget_text_area(tc, id, bounds, text, sizeof(text), &n,
+            &at, &anchor, &scroll, 10, &style, &result));
+        assert(result.changed && n == 8 && memcmp(text, "ab\nAB\nab", 8) == 0);
+        CHECK(zyntra_context_end_frame(tc));
+
+        memcpy(text, "a\r\nb", 4);
+        n = 4; at = anchor = 0; scroll = 0;
+        CHECK(zyntra_context_begin_frame(tc));
+        CHECK(zyntra_context_push_key(tc, ZYNTRA_KEY_END, true, 0));
+        CHECK(zyntra_widget_text_area(tc, id, bounds, text, sizeof(text), &n,
+            &at, &anchor, &scroll, 10, &style, &result));
+        assert(at == 1); /* CRLF é indivisível */
+        CHECK(zyntra_context_end_frame(tc));
+        CHECK(zyntra_context_begin_frame(tc));
+        CHECK(zyntra_context_push_key(tc, ZYNTRA_KEY_RIGHT, true, 0));
+        CHECK(zyntra_widget_text_area(tc, id, bounds, text, sizeof(text), &n,
+            &at, &anchor, &scroll, 10, &style, &result));
+        assert(at == 3);
+        CHECK(zyntra_context_end_frame(tc));
+
+        /* Clique após rolagem: a primeira linha visível é "three". */
+        const char lines[] = "one\ntwo\nthree\nfour\nfive";
+        n = sizeof(lines) - 1;
+        memcpy(text, lines, n);
+        at = anchor = 0; scroll = 21.25f; /* 2 * lineHeight(10) */
+        ZyntraRect short_bounds = {0, 0, 100, 32};
+        CHECK(zyntra_context_begin_frame(tc));
+        CHECK(zyntra_context_push_mouse_button(tc, 0, true, (ZyntraVec2){4, 5}));
+        CHECK(zyntra_widget_text_area(tc, id, short_bounds, text, sizeof(text), &n,
+            &at, &anchor, &scroll, 10, &style, &result));
+        assert(at == 8 && anchor == 8);
+        CHECK(zyntra_context_end_frame(tc));
+        CHECK(zyntra_context_begin_frame(tc));
+        CHECK(zyntra_context_push_mouse_button(tc, 0, false, (ZyntraVec2){4, 5}));
+        CHECK(zyntra_widget_text_area(tc, id, short_bounds, text, sizeof(text), &n,
+            &at, &anchor, &scroll, 10, &style, &result));
+        CHECK(zyntra_context_end_frame(tc));
+
+        const char emoji[] = "A👩🏽‍💻B";
+        n = sizeof(emoji) - 1;
+        memcpy(text, emoji, n);
+        at = anchor = 0; scroll = 0;
+        CHECK(zyntra_context_begin_frame(tc));
+        CHECK(zyntra_context_push_mouse_button(tc, 0, true, (ZyntraVec2){17, 5}));
+        CHECK(zyntra_widget_text_area(tc, id, bounds, text, sizeof(text), &n,
+            &at, &anchor, &scroll, 10, &style, &result));
+        assert(at == 1 && anchor == 1);
+        CHECK(zyntra_context_end_frame(tc));
+        zyntra_context_destroy(tc);
+    }
+
     /* Nulos nunca crasham. */
     assert(zyntra_context_begin_frame(NULL) == ZYNTRA_INVALID_ARGUMENT);
     assert(zyntra_context_pending_events(ctx, NULL) == ZYNTRA_INVALID_ARGUMENT);

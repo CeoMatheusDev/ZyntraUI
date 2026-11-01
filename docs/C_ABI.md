@@ -339,6 +339,12 @@ zyntra_widget_text_area(ctx, area_id, (ZyntraRect){8, 44, 320, 200},
   campo e área, como na API Zig.
 * Nada aloca na lib: `buffer`/`len`/`cursor`/`anchor`/`scroll_y` pertencem ao
   chamador e persistem entre frames; o widget escreve direto no buffer.
+* Na área de texto, offsets dentro de um grafema são ajustados ao início do
+  cluster; clique, arrasto e navegação vertical também respeitam esses
+  limites, e clique/arrasto consideram `scroll_y`. Se uma edição unir
+  grafemas, o caret colapsado avança ao fim do novo cluster. CRLF é tratado
+  como uma única quebra de linha. A segmentação usa o subconjunto prático de
+  Unicode descrito na seção M166.
 * `buffer_len == 0` aceita `buffer == NULL`; temas de capacidade, `len` acima
   da capacidade declarada e `cursor`/`anchor` acima de `len` são
   `ZYNTRA_INVALID_ARGUMENT` (mesmas invariantes da API Zig), e digitar além
