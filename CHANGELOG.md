@@ -26,6 +26,9 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   de convertê-los, e sombras com deslocamento que transborda são ignoradas.
   Regressões cobrem pixels, primitivas, entradas extremas e integração C
   (impacto PATCH, sem alteração de assinatura ou ABI).
+- O teste de fuzz de `text.wrap` usa capacidade suficiente ao verificar
+  UTF-8 inválido, evitando falso positivo quando uma saída pequena fica
+  cheia antes de alcançar o byte inválido (sem alteração da API).
 
 ## [1.44.1] - 2026-10-29
 
