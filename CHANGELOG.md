@@ -16,6 +16,10 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
   documento a cada movimento. Testes cobrem edição, API C, casos-limite
   e 4.000 entradas pseudoaleatórias reproduzíveis. Correção compatível
   (impacto PATCH), sem alteração de assinatura ou ABI.
+- `layout.Constraints`: máximos negativos infinitos deixam de passar
+  por `isValid` e causar falha em `constrain`; infinito positivo continua
+  aceito. O teste de fuzz de layout agora descarta entradas não finitas
+  antes de chamar APIs que exigem restrições válidas (impacto PATCH).
 
 ## [1.44.1] - 2026-10-29
 

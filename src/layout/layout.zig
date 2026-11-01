@@ -21,12 +21,14 @@ pub const Constraints = struct {
     }
 
     pub fn isValid(self: Constraints) bool {
+        // A comparação aceita +Inf, mas rejeita -Inf e NaN, preservando
+        // a precondição min <= max exigida por std.math.clamp.
         return std.math.isFinite(self.min.w) and std.math.isFinite(self.min.h) and
             self.min.w >= 0 and self.min.h >= 0 and
-            (std.math.isInf(self.max.w) or (std.math.isFinite(self.max.w) and self.max.w >= self.min.w)) and
-            (std.math.isInf(self.max.h) or (std.math.isFinite(self.max.h) and self.max.h >= self.min.h));
+            self.max.w >= self.min.w and self.max.h >= self.min.h;
     }
 
+    /// Precondição: `self.isValid()`.
     pub fn constrain(self: Constraints, s: types.Size) types.Size {
         return .{
             .w = std.math.clamp(s.w, self.min.w, self.max.w),
@@ -177,6 +179,11 @@ fn fuzzLayout(_: void, smith: *std.testing.Smith) !void {
     var fb: [32]u8 = undefined;
     smith.bytes(&fb);
     const bits: [8]f32 = @bitCast(fb);
+    // init/constrain exigem spacing e restrições válidos. Descartar
+    // NaN/Inf antes de chamá-los (este target cobre entradas finitas).
+    for (bits) |value| {
+        if (!std.math.isFinite(value)) return;
+    }
     // bits[0..2] = área, bits[2..4] = filho, bits[4..6] = constraints, bits[6..8] = insets
     const area = types.Rect.init(bits[0], bits[1], @abs(bits[2]), @abs(bits[3]));
     const child = types.Size{ .w = @abs(bits[2]), .h = @abs(bits[3]) };
@@ -187,7 +194,7 @@ fn fuzzLayout(_: void, smith: *std.testing.Smith) !void {
         .bottom = @abs(bits[7]),
     };
 
-    // Sem crash nunca (só matemática f32, sem conversão p/ int).
+    // Operações com precondições satisfeitas (sem conversão f32 → int).
     const applied = insets.apply(area);
     var placer = StackPlacer.init(area, .vertical, @abs(bits[4]));
     const r0 = placer.next(child);
@@ -199,12 +206,7 @@ fn fuzzLayout(_: void, smith: *std.testing.Smith) !void {
     };
     const cs = cons.constrain(child);
 
-    // Invariantes quando tudo é finito.
-    const all_finite = std.math.isFinite(bits[0]) and std.math.isFinite(bits[1]) and
-        std.math.isFinite(bits[2]) and std.math.isFinite(bits[3]) and
-        std.math.isFinite(bits[4]) and std.math.isFinite(bits[5]) and
-        std.math.isFinite(bits[6]) and std.math.isFinite(bits[7]);
-    if (!all_finite) return;
+    // Invariantes para as entradas finitas aceitas acima.
     try std.testing.expect(applied.w >= 0 and applied.h >= 0);
     try std.testing.expect(r0.x == area.x and r1.x == area.x);
     try std.testing.expect(r1.y >= r0.y); // cursor avança
@@ -226,4 +228,35 @@ test "StackPlacer horizontal avança pela largura" {
     const c = p.next(.{ .w = 300, .h = 10 });
     try stdt.testing.expectEqual(@as(f32, 94), c.w);
     try stdt.testing.expectEqual(@as(f32, 106), c.x);
+}
+
+test "Constraints: limite infinito só é válido quando positivo" {
+    const inf = std.math.inf(f32);
+    const valid = Constraints{
+        .min = .{ .w = 1, .h = 2 },
+        .max = .{ .w = inf, .h = inf },
+    };
+    try std.testing.expect(valid.isValid());
+    try std.testing.expectEqual(types.Size{ .w = 10, .h = 20 }, valid.constrain(.{ .w = 10, .h = 20 }));
+    try std.testing.expect(!(Constraints{ .max = .{ .w = -inf, .h = inf } }).isValid());
+    try std.testing.expect(!(Constraints{ .max = .{ .w = inf, .h = -inf } }).isValid());
+    try std.testing.expect(!(Constraints{ .max = .{ .w = std.math.nan(f32), .h = inf } }).isValid());
+    try std.testing.expect(!(Constraints{ .min = .{ .w = inf, .h = 0 } }).isValid());
+}
+
+test "fuzz layout: entradas não finitas são descartadas antes das precondições" {
+    var bits = [8]f32{ 0, 0, 10, 5, 1, 2, 1, 1 };
+    var smith = std.testing.Smith{ .in = std.mem.asBytes(&bits) };
+    try fuzzLayout({}, &smith); // caminho normal
+
+    // NaN em spacing fazia StackPlacer.init falhar; em max, clamp falhava.
+    for ([_]usize{ 0, 4, 5 }) |index| {
+        bits[index] = std.math.nan(f32);
+        smith.in = std.mem.asBytes(&bits);
+        try fuzzLayout({}, &smith);
+        bits[index] = 1;
+    }
+    bits[6] = std.math.inf(f32);
+    smith.in = std.mem.asBytes(&bits);
+    try fuzzLayout({}, &smith);
 }
