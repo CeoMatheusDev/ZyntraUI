@@ -5,6 +5,17 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ## [Não lançado]
 
+### Corrigido
+
+- `widgets.rich_label` (continuidade M165): trechos com estilos diferentes
+  na mesma linha compartilham a posição vertical calculada pelo layout,
+  em vez de descer uma linha a cada trecho. O `line_spacing` é aplicado
+  por linha real, inclusive quando há linhas vazias ou quebra por largura.
+  O caminho com atlas preserva a baseline e a ascendente da fonte.
+- Três testes de regressão cobrem múltiplas spans, origem não nula,
+  espaçamento extra, linhas vazias, word wrap e atlas de glifos.
+  Impacto PATCH, sem mudança de API/ABI nem novas dependências.
+
 ## [1.44.1] - 2026-10-29
 
 PATCH estável: corrige a publicação de mudanças de acessibilidade em

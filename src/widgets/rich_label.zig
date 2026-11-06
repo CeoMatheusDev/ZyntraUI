@@ -97,7 +97,7 @@ fn draw(
         text,
         spans,
         bounds.w,
-        types.Vec2.init(bounds.x, bounds.y),
+        types.Vec2.init(bounds.x, 0),
         opts.alignment,
         run_buf[0..],
     ) catch |err| return switch (err) {
@@ -113,12 +113,15 @@ fn draw(
     try ctx.pushA11yWidget(id, .label, bounds, .{});
     ctx.setA11yLabel(id, text);
 
-    // A linha de base: a altura da linha + o espaçamento extra.
-    const line_h = layout.lineHeight() + opts.line_spacing;
+    // O layout usa y relativo para recuperar a linha sem perder precisão
+    // ao subtrair uma origem grande. Vários trechos podem estar na MESMA
+    // linha; linhas vazias também contam para o espaçamento.
+    const line_h = layout.lineHeight();
     var i: usize = 0;
     while (i < n) : (i += 1) {
         const r = run_buf[i];
-        const y = bounds.y + @as(f32, @floatFromInt(i)) * line_h;
+        const line = @round(r.y / line_h);
+        const y = bounds.y + r.y + line * opts.line_spacing;
         const color = if (r.style.color.a == 0 and r.style.color.r == 0 and
             r.style.color.g == 0 and r.style.color.b == 0)
             default_color
@@ -245,5 +248,67 @@ test "richLabel: argumentos inválidos" {
         font,
         .{ .line_spacing = -1 },
     ));
+    ctx.endFrame();
+}
+
+test "richLabel: spans na mesma linha não deslocam a posição vertical" {
+    const gpa = std.testing.allocator;
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    ctx.beginFrame();
+    try richLabel(&ctx, id_mod.Id.fromString("rich:baseline"), types.Rect.init(13, 27, 200, 100), "abcdef", &.{.{ .start = 2, .len = 2 }}, types.Color.rgb(255, 255, 255), font, .{ .line_spacing = 5 });
+    const cmds = ctx.drawCommands();
+    try std.testing.expectEqual(@as(usize, 3), cmds.len);
+    for (cmds) |cmd| try std.testing.expectApproxEqAbs(@as(f32, 27), cmd.text.pos.y, 0.001);
+    ctx.endFrame();
+}
+
+test "richLabel: espaçamento preserva linhas vazias e trechos quebrados" {
+    const gpa = std.testing.allocator;
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    const font = metrics_mod.FontMetrics.withSize(10);
+    // Duas spans na primeira linha; uma linha vazia antes da terceira.
+    ctx.beginFrame();
+    try richLabel(&ctx, id_mod.Id.fromString("rich:empty"), types.Rect.init(13, 27, 200, 200), "abcd\n\nef", &.{.{ .start = 2, .len = 2 }}, types.Color.rgb(255, 255, 255), font, .{ .line_spacing = 5 });
+    const cmds = ctx.drawCommands();
+    try std.testing.expectEqual(@as(usize, 3), cmds.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 27), cmds[1].text.pos.y, 0.001);
+    try std.testing.expectApproxEqAbs(27 + 2 * (font.lineHeight() + 5), cmds[2].text.pos.y, 0.001);
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try richLabel(&ctx, id_mod.Id.fromString("rich:wrap"), types.Rect.init(13, 27, 18, 200), "aaa bbb", &.{.{ .start = 1, .len = 1 }}, types.Color.rgb(255, 255, 255), font, .{ .line_spacing = 5 });
+    const wrapped = ctx.drawCommands();
+    try std.testing.expectEqual(@as(usize, 4), wrapped.len);
+    for (wrapped[0..3]) |cmd| try std.testing.expectApproxEqAbs(@as(f32, 27), cmd.text.pos.y, 0.001);
+    try std.testing.expectApproxEqAbs(27 + font.lineHeight() + 5, wrapped[3].text.pos.y, 0.001);
+    ctx.endFrame();
+}
+
+test "richLabelAtlas: spans compartilham baseline e espaçamento por linha" {
+    const gpa = std.testing.allocator;
+    var ctx = try context_mod.Context.init(gpa, .{});
+    defer ctx.deinit();
+    var builder = atlas_mod.Builder.init(32, 32, 1);
+    defer builder.deinit(gpa);
+    _ = try builder.addGlyph(gpa, 'A', 4, 8, .{ .advance = 5, .bearing_y = -8, .height = 8 });
+    _ = try builder.addGlyph(gpa, 'B', 4, 8, .{ .advance = 3, .bearing_y = -8, .height = 8 });
+    var pixels: [32 * 32 * 4]u8 = undefined;
+    @memset(&pixels, 255);
+    const img = try @import("../draw/image.zig").Image.init(32, 32, &pixels);
+    var atlas = try builder.finish(gpa, img);
+    defer atlas.deinit(gpa);
+
+    ctx.beginFrame();
+    try richLabelAtlas(&ctx, id_mod.Id.fromString("rich:atlas"), types.Rect.init(13, 27, 200, 200), "AB\n\nAB", &.{.{ .start = 1, .len = 1 }}, &atlas, .{ .line_spacing = 5 });
+    const cmds = ctx.drawCommands();
+    try std.testing.expectEqual(@as(usize, 3), cmds.len);
+    const y0 = cmds[0].glyph_run.bounds.y;
+    try std.testing.expectApproxEqAbs(27 + atlas.ascent(), y0, 0.001);
+    try std.testing.expectApproxEqAbs(y0, cmds[1].glyph_run.bounds.y, 0.001);
+    const layout = try layout_mod.Layout.fromAtlas(&atlas);
+    try std.testing.expectApproxEqAbs(y0 + 2 * (layout.lineHeight() + 5), cmds[2].glyph_run.bounds.y, 0.001);
     ctx.endFrame();
 }
