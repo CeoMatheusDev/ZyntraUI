@@ -26,7 +26,11 @@ jobs:
       - run: zig fmt --check src/ examples/ build.zig
       - run: zig build test --summary all -Doptimize=${{ matrix.optimize }}
       - run: zig build -Doptimize=${{ matrix.optimize }}
-      - run: zig build run-example -Doptimize=${{ matrix.optimize }}
+      - name: Minimal example and deterministic framebuffer checksum
+        run: |
+          set -o pipefail
+          zig build run-example -Doptimize=${{ matrix.optimize }} 2>&1 | tee /tmp/zyntra-minimal.log
+          grep -q '^m14 software drawn=2 culled=0 skipped_text=0 pxsum=5112780$' /tmp/zyntra-minimal.log
       - name: C ABI integration test
         run: |
           zig cc tests/c/test_c_abi.c zig-out/lib/libzyntra_ui.a -Isrc/c-abi -o /tmp/zyntra-c-test

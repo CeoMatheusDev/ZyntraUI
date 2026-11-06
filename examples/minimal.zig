@@ -106,6 +106,9 @@ pub fn main() !void {
     // determinísticos para os mesmos eventos.)
     var swfb = try zyntra_ui.SoftwareFramebuffer.init(allocator, 800, 600);
     defer swfb.deinit(allocator);
+    // O render cobre só o botão; o checksum abaixo lê TODO o framebuffer.
+    // Inicialize também os pixels que nenhum comando vai escrever.
+    swfb.clear(zyntra_ui.Color.init(0, 0, 0, 0));
     ctx.beginFrame();
     try ctx.pushEvent(.{
         .mouse_button = .{ .button = .left, .pressed = false, .pos = zyntra_ui.Vec2.init(30, 25) },

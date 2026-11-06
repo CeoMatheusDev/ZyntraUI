@@ -118,9 +118,12 @@ fronteira: um `ZyntraFramebuffer*` opaco (RGBA, alocado no
 
 Repintura parcial vista do C: `zyntra_context_mark_dirty` une a região que
 mudou no frame, `zyntra_context_dirty_rect` lê o acumulado e
-`zyntra_context_clear_dirty` zera (`begin_frame` também limpa). É o mesmo
-caminho de `software.raster.renderRegion`: o `clear` parcial limpa só a
-região e comandos fora dela são cullados.
+`zyntra_context_clear_dirty` zera. `begin_frame` limpa a região anterior e
+marca preventivamente as áreas dos widgets quentes do frame anterior, para
+apagar pixels de widgets movidos ou removidos antes da renderização parcial.
+Essas marcações também entram na métrica `dirty_rects` do frame corrente.
+É o mesmo caminho de `software.raster.renderRegion`: o `clear` parcial limpa
+só a região e comandos fora dela são cullados.
 
 ```c
 ZyntraFramebuffer *fb = NULL;
@@ -336,6 +339,12 @@ zyntra_widget_text_area(ctx, area_id, (ZyntraRect){8, 44, 320, 200},
   campo e área, como na API Zig.
 * Nada aloca na lib: `buffer`/`len`/`cursor`/`anchor`/`scroll_y` pertencem ao
   chamador e persistem entre frames; o widget escreve direto no buffer.
+* Na área de texto, offsets dentro de um grafema são ajustados ao início do
+  cluster; clique, arrasto e navegação vertical também respeitam esses
+  limites, e clique/arrasto consideram `scroll_y`. Se uma edição unir
+  grafemas, o caret colapsado avança ao fim do novo cluster. CRLF é tratado
+  como uma única quebra de linha. A segmentação usa o subconjunto prático de
+  Unicode descrito na seção M166.
 * `buffer_len == 0` aceita `buffer == NULL`; temas de capacidade, `len` acima
   da capacidade declarada e `cursor`/`anchor` acima de `len` são
   `ZYNTRA_INVALID_ARGUMENT` (mesmas invariantes da API Zig), e digitar além
@@ -876,12 +885,16 @@ zyntra_widget_text_input_ime(ctx, id, bounds, buffer, sizeof(buffer), &len,
   texto confirmado à espera de aplicação.
 * `zyntra_ime_update` substitui o pré-edit e ajusta o cursor para uma
   fronteira de codepoint; `zyntra_ime_commit` confirma; `zyntra_ime_cancel`
-  descarta. O texto é **emprestado** só durante a chamada.
+  descarta. O texto é **emprestado** só durante a chamada e pode se
+  sobrepor ao buffer do pré-edit.
 * `zyntra_widget_text_input_ime` aplica o texto confirmado no buffer do
   campo (substituindo a seleção), desenha o pré-edit na posição do caret e
   mantém o caret dentro do pré-edit durante a composição. Sem foco, a
   composição é cancelada. `zyntra_widget_text_area_ime` faz o mesmo na
   área de texto multilinha (o pré-edit é desenhado na linha do caret).
+  Ao aplicar o commit, os bytes do pré-edit não podem se sobrepor à
+  capacidade do buffer do campo; se isso ocorrer, o widget retorna
+  `ZYNTRA_INVALID_ARGUMENT` e a composição continua pendente.
 * Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: composição nula, buffer/pré-edit
   nulos ou inconsistentes, pré-edit maior que o buffer, cursor fora do
   buffer; UTF-8 malformado ⇒ `ZYNTRA_INVALID_TEXT`.
@@ -1136,8 +1149,9 @@ zyntra_text_rich_runs_atlas(atlas, (const uint8_t *)text, (uint32_t)strlen(text)
 ### Vinte e terceiro lote (M166): graphemes
 
 ```c
+/* utf8 contém 'a', 'e', U+0301 (acento combinante), 'b'. */
 uint32_t count = 0;
-zyntra_text_grapheme_count(utf8, utf8_len, &count);   /* 3 para "aé\xCC\x81b" */
+zyntra_text_grapheme_count(utf8, utf8_len, &count);   /* 3 clusters */
 
 uint32_t len = 0;
 zyntra_text_grapheme_len(utf8, utf8_len, /*offset*/ 1, &len);  /* 3 bytes */
@@ -1156,7 +1170,11 @@ zyntra_text_grapheme_next(utf8, utf8_len, 1, &off);  /* 4: o "b" */
   Prepend, emoji com ZWJ, bandeiras). **Não é a tabela completa do
   UCD**: para texto sem diacríticos, sem emoji e sem ZWJ o resultado é
   exato.
-* Offsets em BYTES (a convenção do resto da API de texto).
+* Offsets em BYTES (a convenção do resto da API de texto). Se o offset
+  de `grapheme_len` cair no meio de um codepoint válido, o comprimento
+  é medido a partir do início desse codepoint.
+* Estas funções não validam UTF-8: um byte inválido é tratado como uma
+  unidade isolada. O chamador deve validar o texto se precisar rejeitá-lo.
 * Erros ⇒ `ZYNTRA_INVALID_ARGUMENT`: ponteiros nulos e offset maior
   que o tamanho do texto.
 

@@ -25,7 +25,8 @@ pub const Error = error{
     BufferTooSmall,
     /// Texto confirmado não cabe no buffer editado.
     OutOfSpace,
-    /// Estado inconsistente (cursor/âncora fora do buffer editado).
+    /// Estado inconsistente (cursor/âncora fora do buffer editado ou
+    /// pré-edit sobreposto ao buffer editado).
     InvalidState,
 };
 
@@ -62,12 +63,14 @@ pub const Composition = struct {
 
     /// Substitui o pré-edit por `text` e posiciona o cursor em
     /// `cursor` (offset de byte; clampado numa fronteira UTF-8).
+    /// O texto pode se sobrepor ao buffer da composição.
     pub fn update(self: *Self, text: []const u8, cursor: usize) Error!void {
         if (!isValidUtf8(text)) return error.InvalidUtf8;
         if (text.len > self.buf.len) return error.BufferTooSmall;
-        @memcpy(self.buf[0..text.len], text);
+        @memmove(self.buf[0..text.len], text);
         self.len = text.len;
-        self.cursor = clampToBoundary(text, cursor);
+        // A origem pode ter sido alterada pela cópia sobreposta.
+        self.cursor = clampToBoundary(self.buf[0..self.len], cursor);
         self.active = true;
         self.committed = false;
     }
@@ -95,6 +98,8 @@ pub const Composition = struct {
     /// Aplica o texto confirmado no buffer editado, substituindo a faixa
     /// [min(anchor,cursor), max(anchor,cursor)) e movendo o cursor para
     /// o fim do texto inserido. Limpa a composição em caso de sucesso.
+    /// Os bytes do pré-edit não podem se sobrepor a `buf`: nesse caso
+    /// retorna `InvalidState` sem alterar o texto ou a composição.
     pub fn applyCommit(
         self: *Self,
         buf: []u8,
@@ -112,6 +117,9 @@ pub const Composition = struct {
             hi = @max(a.*, cursor.*);
         }
         const text = self.preedit();
+        // O deslocamento da cauda poderia sobrescrever o pré-edit antes
+        // de inseri-lo. Recusa a sobreposição antes de tocar nos buffers.
+        if (slicesOverlap(text, buf)) return error.InvalidState;
         const remove = hi - lo;
         const need = len.* - remove + text.len;
         if (need > buf.len) return error.OutOfSpace;
@@ -127,6 +135,14 @@ pub const Composition = struct {
         self.cancel();
     }
 };
+
+fn slicesOverlap(a: []const u8, b: []const u8) bool {
+    if (a.len == 0 or b.len == 0) return false;
+    const a_start = @intFromPtr(a.ptr);
+    const b_start = @intFromPtr(b.ptr);
+    // Subtração em vez de endereços finais evita overflow aritmético.
+    return if (a_start <= b_start) b_start - a_start < a.len else a_start - b_start < b.len;
+}
 
 fn isValidUtf8(text: []const u8) bool {
     var i: usize = 0;
@@ -290,4 +306,94 @@ fn fuzzIme(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(c.len <= buf.len);
         if (!c.committed) try std.testing.expect(c.len == 0 or c.active);
     }
+}
+
+test "Composition.update aceita texto sobreposto ao buffer" {
+    var storage: [16]u8 = undefined;
+    var c = Composition.init(&storage);
+    try c.update("a\xc3\xa9z", 4);
+    const same = c.preedit();
+    try c.update(same, 2);
+    try std.testing.expectEqualStrings("a\xc3\xa9z", c.preedit());
+    try std.testing.expectEqual(@as(usize, 1), c.cursor);
+
+    // Origem antes do destino: move bytes para a direita.
+    @memcpy(storage[0..4], "a\xc3\xa9z");
+    c = Composition.init(storage[2..]);
+    try c.update(storage[0..4], 2);
+    try std.testing.expectEqualStrings("a\xc3\xa9z", c.preedit());
+    try std.testing.expectEqual(@as(usize, 1), c.cursor);
+
+    // Origem depois do destino: move bytes para a esquerda.
+    @memcpy(storage[2..6], "a\xc3\xa9z");
+    c = Composition.init(&storage);
+    try c.update(storage[2..6], 2);
+    try std.testing.expectEqualStrings("a\xc3\xa9z", c.preedit());
+    try std.testing.expectEqual(@as(usize, 1), c.cursor);
+}
+
+test "applyCommit recusa sobreposição sem alterar texto ou composição" {
+    var storage: [16]u8 = "abcdefgh........".*;
+    var c = Composition.init(storage[4..12]);
+    try c.update("XY", 2);
+    c.commit();
+    var len: usize = 8;
+    var cursor: usize = 2;
+    var anchor: usize = 2;
+    const before = storage;
+    try std.testing.expectError(error.InvalidState, c.applyCommit(storage[0..10], &len, &cursor, &anchor));
+    try std.testing.expectEqual(before, storage);
+    try std.testing.expectEqual(@as(usize, 8), len);
+    try std.testing.expectEqual(@as(usize, 2), cursor);
+    try std.testing.expectEqual(@as(usize, 2), anchor);
+    try std.testing.expect(c.committed);
+    try std.testing.expectEqualStrings("XY", c.preedit());
+
+    // A outra direção de sobreposição também deve ser recusada.
+    c = Composition.init(storage[0..4]);
+    try c.update("XY", 2);
+    c.commit();
+    len = 6;
+    cursor = 0;
+    anchor = 0;
+    const before_other = storage;
+    try std.testing.expectError(error.InvalidState, c.applyCommit(storage[1..12], &len, &cursor, &anchor));
+    try std.testing.expectEqual(before_other, storage);
+    try std.testing.expect(c.committed);
+}
+
+test "applyCommit aceita partes disjuntas do mesmo array e pré-edit vazio" {
+    var storage: [16]u8 = "................".*;
+    var c = Composition.init(storage[0..4]);
+    try c.update("XY", 2);
+    @memcpy(storage[8..10], "ok");
+    c.commit();
+    var len: usize = 2;
+    var cursor: usize = 2;
+    var anchor: usize = 2;
+    try c.applyCommit(storage[8..16], &len, &cursor, &anchor);
+    try std.testing.expectEqualStrings("okXY", storage[8..][0..len]);
+
+    // Pré-edit vazio pode remover uma seleção, pois não há bytes de
+    // origem para se sobrepor ao texto editado.
+    c = Composition.init(storage[0..4]);
+    try c.update("", 0);
+    c.commit();
+    len = 4;
+    cursor = 3;
+    anchor = 1;
+    try c.applyCommit(&storage, &len, &cursor, &anchor);
+    try std.testing.expectEqual(@as(usize, 2), len);
+    try std.testing.expectEqualStrings("X.", storage[0..len]);
+    try std.testing.expectEqual(@as(usize, 1), cursor);
+    try std.testing.expectEqual(@as(usize, 1), anchor);
+    try std.testing.expect(!c.committed);
+}
+
+test "fuzz IME: atualização com origem no próprio buffer é reproduzível" {
+    var input: [64]u8 = @splat(0);
+    input[0] = 1; // update com buf[0..n]
+    input[1] = 2; // n = 2, ambos os bytes são UTF-8 válido
+    var smith = std.testing.Smith{ .in = &input };
+    try fuzzIme({}, &smith);
 }

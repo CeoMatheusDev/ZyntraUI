@@ -7,6 +7,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Corrigido
 
+- `examples/minimal`: limpa o framebuffer antes da renderização parcial e
+  do checksum, evitando ler pixels não inicializados. O CI verifica o mesmo
+  checksum em Debug e ReleaseFast; a documentação deixa explícito que
+  nenhum modo de otimização garante pixels inicialmente zerados.
+  Impacto PATCH, sem alteração de API/ABI ou versão publicada.
 - `widgets.rich_label` (continuidade M165): trechos com estilos diferentes
   na mesma linha compartilham a posição vertical calculada pelo layout,
   em vez de descer uma linha a cada trecho. O `line_spacing` é aplicado
@@ -15,6 +20,54 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 - Três testes de regressão cobrem múltiplas spans, origem não nula,
   espaçamento extra, linhas vazias, word wrap e atlas de glifos.
   Impacto PATCH, sem mudança de API/ABI nem novas dependências.
+- `text.unicode`: tons de pele e seletores de variação agora permanecem
+  no cluster, inclusive em sequências de emoji com ZWJ. A busca por
+  pictograma anterior termina mesmo quando o texto começa por marcas
+  combinantes; a tabela usada na busca binária também foi reordenada.
+- Navegação por grafemas trata bytes UTF-8 inválidos como unidades
+  isoladas sem ultrapassar o buffer e evita percorrer todo o prefixo do
+  documento a cada movimento. Testes cobrem edição, API C, casos-limite
+  e 4.000 entradas pseudoaleatórias reproduzíveis. Correção compatível
+  (impacto PATCH), sem alteração de assinatura ou ABI.
+- `layout.Constraints`: máximos negativos infinitos deixam de passar
+  por `isValid` e causar falha em `constrain`; infinito positivo continua
+  aceito. O teste de fuzz de layout agora descarta entradas não finitas
+  antes de chamar APIs que exigem restrições válidas (impacto PATCH).
+- `software.raster`: retângulos, imagens e primitivas limitam suas caixas
+  ao framebuffer antes de converter coordenadas extremas para inteiro.
+  `fillRect` ignora clips não finitos; blur ignora raios negativos antes
+  de convertê-los, e sombras com deslocamento que transborda são ignoradas.
+  Regressões cobrem pixels, primitivas, entradas extremas e integração C
+  (impacto PATCH, sem alteração de assinatura ou ABI).
+- O teste de fuzz de `text.wrap` usa capacidade suficiente ao verificar
+  UTF-8 inválido, evitando falso positivo quando uma saída pequena fica
+  cheia antes de alcançar o byte inválido (sem alteração da API).
+- `text.ime.Composition.update` aceita texto sobreposto ao buffer do
+  pré-edit e preserva a fronteira UTF-8 do cursor. A aplicação do commit
+  recusa pré-edit sobreposto ao buffer editado, sem corromper os bytes;
+  widgets IME informam argumento inválido e mantêm o commit pendente.
+  Regressões cobrem sobreposição nas duas direções e integração C
+  (impacto PATCH, sem alteração de assinatura ou ABI).
+- `Context`: áreas de widgets quentes do frame anterior são marcadas no
+  início do próximo frame, permitindo repintar posições antigas de widgets
+  movidos ou removidos antes de `endFrame`. A transição para frio também
+  cobre a posição atual; a métrica `dirty_rects` volta a contar por frame,
+  incluindo marcações automáticas. Testes verificam pixels e integração C
+  (impacto PATCH, sem alteração de assinatura ou ABI).
+- `widgets.textarea`: clique e arrasto consideram a rolagem vertical;
+  junto à navegação vertical, mantêm cursor e seleção nas fronteiras de
+  grafemas. Offsets externos são ajustados, e edições que unem clusters
+  atualizam o caret; CRLF é tratado como uma quebra indivisível. A quebra
+  suave não divide grafemas e pode recortar um cluster maior que a largura
+  útil. Regressões incluem IME, seleção, casos
+  reproduzíveis e API C (impacto PATCH, sem alteração de assinatura ou ABI).
+- `widgets.textarea` com quebra suave: o caret distingue o fim de uma linha
+  do início da seguinte, mesmo quando compartilham o mesmo offset de byte.
+  Clique, arrasto, `Home`/`End` e navegação vertical preservam essa afinidade
+  entre frames; o contexto guarda apenas um pequeno estado sem alocação.
+  Undo/redo restaura o offset, mas usa o lado anterior padrão da quebra,
+  pois o histórico ainda não armazena a afinidade (impacto PATCH, sem
+  alteração de assinatura ou ABI C).
 
 ## [1.44.1] - 2026-10-29
 
