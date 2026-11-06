@@ -360,8 +360,10 @@ fn fuzzWrap(_: void, smith: *std.testing.Smith) !void {
     const counted = countLines(text, m, max_width) catch |err| {
         // Únicos erros possíveis aqui (métricas válidas, largura válida).
         try std.testing.expectEqual(error.InvalidUtf8, err);
-        // wrapLines deve concordar no erro.
-        var out2: [1]LineRange = undefined;
+        // Há no máximo uma linha por byte, mais uma linha final vazia.
+        // Buffer curto poderia retornar NoSpaceLeft antes de atingir o
+        // UTF-8 inválido, sem contrariar o contrato de wrapLines.
+        var out2: [buf.len + 1]LineRange = undefined;
         try std.testing.expectError(error.InvalidUtf8, wrapLines(text, m, max_width, &out2));
         return;
     };
@@ -432,4 +434,15 @@ test "wrap com fonte real (atlas) respeita os avanços dos glifos" {
     // Contratos.
     try stdt.testing.expectError(error.InvalidArgument, wrapLinesLayout("A", &l, 0, &out));
     try stdt.testing.expectError(error.InvalidUtf8, wrapLinesLayout("\xff", &l, 10, &out));
+}
+
+test "fuzz wrap: texto inválido depois de várias linhas usa buffer suficiente" {
+    var seed: [64]u8 = @splat(0);
+    @memcpy(seed[0..4], "@I \x80");
+    std.mem.writeInt(u64, seed[48..56], 4, .little); // quatro bytes de texto
+    std.mem.writeInt(u64, seed[56..64], 0, .little); // largura 1
+    var short: [1]LineRange = undefined;
+    try std.testing.expectError(error.NoSpaceLeft, wrapLines(seed[0..4], metrics.FontMetrics.withSize(12), 1, &short));
+    var smith = std.testing.Smith{ .in = &seed };
+    try fuzzWrap({}, &smith);
 }

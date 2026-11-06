@@ -247,7 +247,7 @@ typedef struct ZyntraFrameMetrics {
     uint32_t image_regions;
     uint32_t glyph_runs;
     uint32_t glyphs_total;
-    uint32_t dirty_rects;
+    uint32_t dirty_rects; /* marcações no frame, inclusive automáticas */
     uint32_t buffer_growths;
 } ZyntraFrameMetrics;
 
@@ -312,7 +312,9 @@ ZyntraResult zyntra_image_fit_rect(ZyntraRect bounds, uint32_t img_w,
 
 /* O tamanho (em bytes) do GRAPHEME que começa em `offset` (a letra com
  * o acento, o emoji com ZWJ, a bandeira: UM caractere para o usuário).
- * `offset` em bytes; o resultado também em bytes. */
+ * `offset` em bytes; o resultado também em bytes. Se `offset` estiver no
+ * meio de um codepoint válido, o tamanho é medido desde o seu início.
+ * UTF-8 malformado não é rejeitado: bytes inválidos são unidades isoladas. */
 ZyntraResult zyntra_text_grapheme_len(const uint8_t *utf8, uint32_t utf8_len,
     uint32_t offset, uint32_t *out_len);
 /* O início do GRAPHEME anterior / do próximo (em bytes). */
@@ -915,6 +917,10 @@ typedef struct ZyntraImeComposition {
     bool committed;  /* texto confirmado aguardando aplicação */
 } ZyntraImeComposition;
 
+/* `utf8` pode apontar para bytes de `comp->buf`. Para aplicar um commit,
+ * os bytes do pré-edit não podem se sobrepor à capacidade do buffer do
+ * campo: os widgets IME retornam ZYNTRA_INVALID_ARGUMENT nesse caso e a
+ * composição continua pendente. */
 ZyntraResult zyntra_ime_update(ZyntraImeComposition *comp, const char *utf8,
     size_t utf8_len, size_t cursor);
 ZyntraResult zyntra_ime_commit(ZyntraImeComposition *comp);
@@ -929,6 +935,9 @@ ZyntraResult zyntra_widget_text_area_ime(ZyntraContext *handle, ZyntraId id,
     size_t *cursor, size_t *anchor, float *scroll_y,
     ZyntraImeComposition *comp, float size,
     const ZyntraTextInputStyle *style, ZyntraTextAreaResult *out_result);
+/* Na área de texto, offsets dentro de um grafema são ajustados ao início;
+ * clique, arrasto e navegação vertical respeitam esses limites. CRLF é uma
+ * única quebra. Após edição que une grafemas, o caret avança ao fim deles. */
 ZyntraResult zyntra_widget_text_area(ZyntraContext *handle, ZyntraId id, ZyntraRect bounds,
     char *buffer, size_t buffer_len, size_t *len, size_t *cursor, size_t *anchor,
     float *scroll_y, float size, const ZyntraTextInputStyle *style,

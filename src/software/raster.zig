@@ -22,6 +22,18 @@ const path_mod = @import("../draw/path.zig");
 
 pub const max_dimension: u32 = 8192;
 
+/// Limita coordenadas ao framebuffer ANTES de convertê-las para inteiro.
+/// `value` pode ser infinito por overflow aritmético, mas não NaN.
+fn floorBounded(value: f32, limit: u32) i64 {
+    const upper: f32 = @floatFromInt(limit);
+    return @intFromFloat(@floor(std.math.clamp(value, 0, upper)));
+}
+
+fn ceilBounded(value: f32, limit: u32) i64 {
+    const upper: f32 = @floatFromInt(limit);
+    return @intFromFloat(@ceil(std.math.clamp(value, 0, upper)));
+}
+
 /// Cruzamentos por scanline no buffer de caminhos do framebuffer.
 pub const path_crossings: usize = 1024;
 
@@ -153,24 +165,22 @@ pub const SoftwareFramebuffer = struct {
 
     /// Preenche a interseção de `r` com `clip` (quando presente).
     /// Coordenadas: pixel (i,j) cobre [i,i+1)×[j,j+1).
-    /// Entradas não-finitas saturam em no-op (conversão float→int
-    /// travaria; `render` já rejeita, isto protege chamadas diretas).
+    /// Coordenadas/clip não finitos são no-op. Coordenadas finitas
+    /// extremas são recortadas ao framebuffer antes da conversão.
     pub fn fillRect(self: *Self, r: types.Rect, clip: ?types.Rect, c: types.Color) void {
         if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
             !std.math.isFinite(r.w) or !std.math.isFinite(r.h)) return;
-        var x0 = @as(i64, @intFromFloat(@floor(r.x)));
-        var y0 = @as(i64, @intFromFloat(@floor(r.y)));
-        var x1 = @as(i64, @intFromFloat(@ceil(r.x + r.w)));
-        var y1 = @as(i64, @intFromFloat(@ceil(r.y + r.h)));
-        x0 = @max(x0, 0);
-        y0 = @max(y0, 0);
-        x1 = @min(x1, self.w);
-        y1 = @min(y1, self.h);
+        var x0 = floorBounded(r.x, self.w);
+        var y0 = floorBounded(r.y, self.h);
+        var x1 = ceilBounded(r.x + r.w, self.w);
+        var y1 = ceilBounded(r.y + r.h, self.h);
         if (clip) |cp| {
-            x0 = @max(x0, @as(i64, @intFromFloat(@floor(cp.x))));
-            y0 = @max(y0, @as(i64, @intFromFloat(@floor(cp.y))));
-            x1 = @min(x1, @as(i64, @intFromFloat(@ceil(cp.x + cp.w))));
-            y1 = @min(y1, @as(i64, @intFromFloat(@ceil(cp.y + cp.h))));
+            if (!std.math.isFinite(cp.x) or !std.math.isFinite(cp.y) or
+                !std.math.isFinite(cp.w) or !std.math.isFinite(cp.h)) return;
+            x0 = @max(x0, floorBounded(cp.x, self.w));
+            y0 = @max(y0, floorBounded(cp.y, self.h));
+            x1 = @min(x1, ceilBounded(cp.x + cp.w, self.w));
+            y1 = @min(y1, ceilBounded(cp.y + cp.h, self.h));
         }
         if (c.a == 0) return; // transparente: no-op
         if (c.a == 255) {
@@ -236,21 +246,17 @@ pub const SoftwareFramebuffer = struct {
         if (row_bytes > std.math.maxInt(u32) or @as(u64, stride) < row_bytes) return;
         if (@as(u64, stride) * img_h > std.math.maxInt(usize)) return;
 
-        var x0 = @as(i64, @intFromFloat(@floor(dst.x)));
-        var y0 = @as(i64, @intFromFloat(@floor(dst.y)));
-        var x1 = @as(i64, @intFromFloat(@ceil(dst.x + dst.w)));
-        var y1 = @as(i64, @intFromFloat(@ceil(dst.y + dst.h)));
-        x0 = @max(x0, 0);
-        y0 = @max(y0, 0);
-        x1 = @min(x1, self.w);
-        y1 = @min(y1, self.h);
+        var x0 = floorBounded(dst.x, self.w);
+        var y0 = floorBounded(dst.y, self.h);
+        var x1 = ceilBounded(dst.x + dst.w, self.w);
+        var y1 = ceilBounded(dst.y + dst.h, self.h);
         if (clip) |cp| {
             if (!std.math.isFinite(cp.x) or !std.math.isFinite(cp.y) or
                 !std.math.isFinite(cp.w) or !std.math.isFinite(cp.h)) return;
-            x0 = @max(x0, @as(i64, @intFromFloat(@floor(cp.x))));
-            y0 = @max(y0, @as(i64, @intFromFloat(@floor(cp.y))));
-            x1 = @min(x1, @as(i64, @intFromFloat(@ceil(cp.x + cp.w))));
-            y1 = @min(y1, @as(i64, @intFromFloat(@ceil(cp.y + cp.h))));
+            x0 = @max(x0, floorBounded(cp.x, self.w));
+            y0 = @max(y0, floorBounded(cp.y, self.h));
+            x1 = @min(x1, ceilBounded(cp.x + cp.w, self.w));
+            y1 = @min(y1, ceilBounded(cp.y + cp.h, self.h));
         }
         if (x1 <= x0 or y1 <= y0) return;
 
@@ -389,11 +395,11 @@ pub const SoftwareFramebuffer = struct {
         const y0f = @min(p0.y, p1.y) - r - 1;
         const x1f = @max(p0.x, p1.x) + r + 1;
         const y1f = @max(p0.y, p1.y) + r + 1;
-        var y = @max(0, @as(i64, @intFromFloat(@floor(y0f))));
-        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(y1f))));
+        var y = floorBounded(y0f, self.h);
+        const y_end = ceilBounded(y1f, self.h);
         while (y < y_end) : (y += 1) {
-            var x = @max(0, @as(i64, @intFromFloat(@floor(x0f))));
-            const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(x1f))));
+            var x = floorBounded(x0f, self.w);
+            const x_end = ceilBounded(x1f, self.w);
             while (x < x_end) : (x += 1) {
                 if (!inClip(x, y, clip)) continue;
                 const cx: f32 = @floatFromInt(x);
@@ -408,11 +414,11 @@ pub const SoftwareFramebuffer = struct {
     pub fn fillCircle(self: *Self, center: types.Vec2, radius: f32, clip: ?types.Rect, c: types.Color) void {
         if (!std.math.isFinite(center.x) or !std.math.isFinite(center.y) or
             !std.math.isFinite(radius) or radius < 0) return;
-        var y = @max(0, @as(i64, @intFromFloat(@floor(center.y - radius))));
-        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(center.y + radius))));
+        var y = floorBounded(center.y - radius, self.h);
+        const y_end = ceilBounded(center.y + radius, self.h);
         while (y < y_end) : (y += 1) {
-            var x = @max(0, @as(i64, @intFromFloat(@floor(center.x - radius))));
-            const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(center.x + radius))));
+            var x = floorBounded(center.x - radius, self.w);
+            const x_end = ceilBounded(center.x + radius, self.w);
             while (x < x_end) : (x += 1) {
                 if (!inClip(x, y, clip)) continue;
                 const cx: f32 = @floatFromInt(x);
@@ -435,11 +441,11 @@ pub const SoftwareFramebuffer = struct {
         const half = thickness / 2;
         const outer = radius + half;
         const inner = @max(0, radius - half);
-        var y = @max(0, @as(i64, @intFromFloat(@floor(center.y - outer))));
-        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(center.y + outer))));
+        var y = floorBounded(center.y - outer, self.h);
+        const y_end = ceilBounded(center.y + outer, self.h);
         while (y < y_end) : (y += 1) {
-            var x = @max(0, @as(i64, @intFromFloat(@floor(center.x - outer))));
-            const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(center.x + outer))));
+            var x = floorBounded(center.x - outer, self.w);
+            const x_end = ceilBounded(center.x + outer, self.w);
             while (x < x_end) : (x += 1) {
                 if (!inClip(x, y, clip)) continue;
                 const cx: f32 = @floatFromInt(x);
@@ -484,11 +490,11 @@ pub const SoftwareFramebuffer = struct {
         const circumference = 2 * std.math.pi * radius;
         // Se o perímetro cabe num único dash, desenha o anel inteiro.
         const full_dash = circumference <= dash_len;
-        var y = @max(0, @as(i64, @intFromFloat(@floor(center.y - outer))));
-        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(center.y + outer))));
+        var y = floorBounded(center.y - outer, self.h);
+        const y_end = ceilBounded(center.y + outer, self.h);
         while (y < y_end) : (y += 1) {
-            var x = @max(0, @as(i64, @intFromFloat(@floor(center.x - outer))));
-            const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(center.x + outer))));
+            var x = floorBounded(center.x - outer, self.w);
+            const x_end = ceilBounded(center.x + outer, self.w);
             while (x < x_end) : (x += 1) {
                 if (!inClip(x, y, clip)) continue;
                 const cx: f32 = @floatFromInt(x);
@@ -541,10 +547,10 @@ pub const SoftwareFramebuffer = struct {
             !std.math.isFinite(radius) or radius < 0) return;
         if (r.w <= 0 or r.h <= 0 or c.a == 0) return;
         const rad = @min(radius, @min(r.w, r.h) / 2);
-        const x0 = @max(0, @as(i64, @intFromFloat(@floor(r.x))));
-        const y0 = @max(0, @as(i64, @intFromFloat(@floor(r.y))));
-        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(r.x + r.w))));
-        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(r.y + r.h))));
+        const x0 = floorBounded(r.x, self.w);
+        const y0 = floorBounded(r.y, self.h);
+        const x_end = ceilBounded(r.x + r.w, self.w);
+        const y_end = ceilBounded(r.y + r.h, self.h);
         const base_a: f32 = @floatFromInt(c.a);
         var y = y0;
         while (y < y_end) : (y += 1) {
@@ -583,12 +589,15 @@ pub const SoftwareFramebuffer = struct {
             !std.math.isFinite(blur) or blur < 0) return;
         if (r.w <= 0 or r.h <= 0 or c.a == 0) return;
         const sr = types.Rect{ .x = r.x + off.x, .y = r.y + off.y, .w = r.w, .h = r.h };
+        // A soma de dois valores finitos pode transbordar f32. Sem uma
+        // posição representável, a avaliação do SDF geraria NaN.
+        if (!std.math.isFinite(sr.x) or !std.math.isFinite(sr.y)) return;
         const rad = @min(radius, @min(r.w, r.h) / 2);
         const pad = blur / 2 + 1;
-        const x0 = @max(0, @as(i64, @intFromFloat(@floor(sr.x - pad))));
-        const y0 = @max(0, @as(i64, @intFromFloat(@floor(sr.y - pad))));
-        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(sr.x + sr.w + pad))));
-        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(sr.y + sr.h + pad))));
+        const x0 = floorBounded(sr.x - pad, self.w);
+        const y0 = floorBounded(sr.y - pad, self.h);
+        const x_end = ceilBounded(sr.x + sr.w + pad, self.w);
+        const y_end = ceilBounded(sr.y + sr.h + pad, self.h);
         const denom = @max(blur, 1.0);
         const base_a: f32 = @floatFromInt(c.a);
         var y = y0;
@@ -620,16 +629,15 @@ pub const SoftwareFramebuffer = struct {
         if (!std.math.isFinite(r.x) or !std.math.isFinite(r.y) or
             !std.math.isFinite(r.w) or !std.math.isFinite(r.h) or
             !std.math.isFinite(radius)) return;
-        if (r.w <= 0 or r.h <= 0) return;
+        if (r.w <= 0 or r.h <= 0 or radius < 0.5) return;
         const ir: i64 = @intFromFloat(@round(@min(radius, 4096)));
-        if (ir <= 0) return;
         if (self.scratch.len < self.pixels.len) return;
         const iw: i64 = @intCast(self.w);
         const ih: i64 = @intCast(self.h);
-        const x0 = @max(@as(i64, 0), @as(i64, @intFromFloat(@floor(r.x))));
-        const y0 = @max(@as(i64, 0), @as(i64, @intFromFloat(@floor(r.y))));
-        const x1 = @min(iw, @as(i64, @intFromFloat(@ceil(r.x + r.w))));
-        const y1 = @min(ih, @as(i64, @intFromFloat(@ceil(r.y + r.h))));
+        const x0 = floorBounded(r.x, self.w);
+        const y0 = floorBounded(r.y, self.h);
+        const x1 = ceilBounded(r.x + r.w, self.w);
+        const y1 = ceilBounded(r.y + r.h, self.h);
         if (x1 <= x0 or y1 <= y0) return;
         const win: u32 = @intCast(2 * ir + 1);
         // Passo H: linhas da região expandidas de `ir` para cima/baixo,
@@ -637,7 +645,7 @@ pub const SoftwareFramebuffer = struct {
         const hy0 = @max(@as(i64, 0), y0 - ir);
         const hy1 = @min(ih, y1 + ir);
         const w_us: usize = self.w;
-        var y = hy0;
+        var y: i64 = hy0;
         while (y < hy1) : (y += 1) {
             var x = x0;
             while (x < x1) : (x += 1) {
@@ -710,10 +718,10 @@ pub const SoftwareFramebuffer = struct {
         const dx = to.x - from.x;
         const dy = to.y - from.y;
         const den = dx * dx + dy * dy;
-        const x0 = @max(0, @as(i64, @intFromFloat(@floor(r.x))));
-        const y0 = @max(0, @as(i64, @intFromFloat(@floor(r.y))));
-        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(r.x + r.w))));
-        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(r.y + r.h))));
+        const x0 = floorBounded(r.x, self.w);
+        const y0 = floorBounded(r.y, self.h);
+        const x_end = ceilBounded(r.x + r.w, self.w);
+        const y_end = ceilBounded(r.y + r.h, self.h);
         var y = y0;
         while (y < y_end) : (y += 1) {
             var x = x0;
@@ -759,10 +767,10 @@ pub const SoftwareFramebuffer = struct {
         // (para cobrir os cantos do rect).
         const half_diag = @sqrt((r.w / 2) * (r.w / 2) + (r.h / 2) * (r.h / 2));
         const eff_radius = if (radius > 0) radius else half_diag;
-        const x0 = @max(0, @as(i64, @intFromFloat(@floor(r.x))));
-        const y0 = @max(0, @as(i64, @intFromFloat(@floor(r.y))));
-        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(r.x + r.w))));
-        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(r.y + r.h))));
+        const x0 = floorBounded(r.x, self.w);
+        const y0 = floorBounded(r.y, self.h);
+        const x_end = ceilBounded(r.x + r.w, self.w);
+        const y_end = ceilBounded(r.y + r.h, self.h);
         var y = y0;
         while (y < y_end) : (y += 1) {
             var x = x0;
@@ -815,10 +823,10 @@ pub const SoftwareFramebuffer = struct {
             sw = @mod(sweep, two_pi);
             if (sw < 0) sw += two_pi;
         }
-        const x0 = @max(0, @as(i64, @intFromFloat(@floor(r.x))));
-        const y0 = @max(0, @as(i64, @intFromFloat(@floor(r.y))));
-        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(r.x + r.w))));
-        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(r.y + r.h))));
+        const x0 = floorBounded(r.x, self.w);
+        const y0 = floorBounded(r.y, self.h);
+        const x_end = ceilBounded(r.x + r.w, self.w);
+        const y_end = ceilBounded(r.y + r.h, self.h);
         var y = y0;
         while (y < y_end) : (y += 1) {
             var x = x0;
@@ -874,10 +882,10 @@ pub const SoftwareFramebuffer = struct {
         const min_y = @min(p0.y, p1.y) - half;
         const max_x = @max(p0.x, p1.x) + half;
         const max_y = @max(p0.y, p1.y) + half;
-        const x0 = @max(0, @as(i64, @intFromFloat(@floor(min_x))));
-        const y0 = @max(0, @as(i64, @intFromFloat(@floor(min_y))));
-        const x_end = @min(@as(i64, self.w), @as(i64, @intFromFloat(@ceil(max_x))));
-        const y_end = @min(@as(i64, self.h), @as(i64, @intFromFloat(@ceil(max_y))));
+        const x0 = floorBounded(min_x, self.w);
+        const y0 = floorBounded(min_y, self.h);
+        const x_end = ceilBounded(max_x, self.w);
+        const y_end = ceilBounded(max_y, self.h);
         const period = dash_len + gap_len;
         var y = y0;
         while (y < y_end) : (y += 1) {
@@ -2472,4 +2480,187 @@ test "software: caminho com clip respeita o recorte (M159)" {
     // Dentro do clip: branco. Fora: preto.
     try stdt.testing.expectEqual(@as(u8, 255), fb.get(8, 16)[0]);
     try stdt.testing.expectEqual(@as(u8, 0), fb.get(24, 16)[0]);
+}
+
+test "fillRect: limita coordenadas extremas e clips antes da conversão" {
+    var pixels: [4 * 4 * 4]u8 = undefined;
+    var fb = SoftwareFramebuffer{ .w = 4, .h = 4, .pixels = &pixels };
+    const black = types.Color.rgb(0, 0, 0);
+    const red = types.Color.rgb(255, 0, 0);
+    fb.clear(black);
+
+    // Totalmente fora, com coordenadas finitas maiores do que i64.
+    fb.fillRect(types.Rect.init(1e30, 0, 1e30, 4), null, red);
+    try std.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 0));
+
+    // Um retângulo enorme que cruza a tela deve preencher a interseção.
+    fb.fillRect(types.Rect.init(-1e30, 0, 2e30, 2), null, red);
+    try std.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(0, 0));
+    try std.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(3, 1));
+    try std.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 2));
+
+    fb.clear(black);
+    const full = types.Rect.init(0, 0, 4, 4);
+    fb.fillRect(full, types.Rect.init(1e30, 0, 1e30, 4), red);
+    try std.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 0));
+    fb.fillRect(full, types.Rect.init(-1e30, -1e30, 2e30, 2e30), red);
+    try std.testing.expectEqual([4]u8{ 255, 0, 0, 255 }, fb.get(3, 3));
+
+    // O caminho com mistura de alfa recebe os mesmos limites seguros.
+    fb.clear(black);
+    fb.fillRect(types.Rect.init(-1e30, 0, 2e30, 4), null, .{ .r = 255, .g = 0, .b = 0, .a = 128 });
+    try std.testing.expectEqual([4]u8{ 128, 0, 0, 255 }, fb.get(3, 3));
+
+    // Clip não finito é no-op, não uma conversão float → inteiro inválida.
+    fb.clear(black);
+    fb.fillRect(full, types.Rect.init(std.math.nan(f32), 0, 4, 4), red);
+    try std.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 0));
+}
+
+test "raster: primitivas aceitam limites finitos extremos sem trap" {
+    var pixels: [4 * 4 * 4]u8 = undefined;
+    var scratch: [4 * 4 * 4]u8 = undefined;
+    var fb = SoftwareFramebuffer{ .w = 4, .h = 4, .pixels = &pixels, .scratch = &scratch };
+    const black = types.Color.rgb(0, 0, 0);
+    const white = types.Color.rgb(255, 255, 255);
+    const large: f32 = 1e30;
+    const crossing = types.Rect.init(-large, -large, 2 * large, 2 * large);
+    const outside = types.Rect.init(large, large, large, large);
+    const p0 = types.Vec2.init(-large, 2);
+    const p1 = types.Vec2.init(large, 2);
+    fb.clear(black);
+
+    // Os limites são convertidos depois do recorte, mesmo quando as
+    // coordenadas originais não cabem em i64.
+    fb.strokeLine(p0, p1, 1, null, white);
+    fb.fillCircle(types.Vec2.init(large, large), large, null, white);
+    fb.strokeCircle(types.Vec2.init(large, large), large, 2, null, white);
+    fb.strokeCircleDashed(types.Vec2.init(large, large), large, 2, 3, 2, null, white);
+    fb.strokeLineDashed(p0, p1, 1, 3, 2, null, white);
+    fb.strokeRect(outside, 1, null, white);
+    fb.fillRoundRect(crossing, 3, null, white);
+    fb.fillGradient(crossing, p0, p1, black, white, null);
+    fb.fillGradientRadial(crossing, large, black, white, null);
+    fb.fillGradientConic(crossing, p0, 0, 1, black, white, null);
+    fb.fillShadow(crossing, 3, p0, large, null, white);
+    // Mesmo somas de f32 que transbordam são seguras.
+    const max = std.math.floatMax(f32);
+    fb.fillShadow(types.Rect.init(max, max, 1, 1), 0, types.Vec2.init(max, max), 1, null, white);
+    fb.blurRegion(outside, 2, null);
+    fb.blurRegion(types.Rect.init(0, 0, 4, 4), -large, null);
+    try std.testing.expectEqual(@as(usize, 4 * 4 * 4), fb.pixels.len);
+}
+
+test "blitImage: recorta destino e clip extremos antes da conversão" {
+    var pixels: [4 * 4 * 4]u8 = undefined;
+    var fb = SoftwareFramebuffer{ .w = 4, .h = 4, .pixels = &pixels };
+    const black = types.Color.rgb(0, 0, 0);
+    const white = types.Color.rgb(255, 255, 255);
+    const image = [_]u8{ 12, 34, 56, 255 };
+    const source = image_mod.Region.init(0, 0, 1, 1);
+    fb.clear(black);
+    fb.blitImage(types.Rect.init(1e30, 0, 1e30, 4), source, &image, 1, 1, 4, white, null);
+    try std.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 0));
+    fb.blitImage(types.Rect.init(-1e30, -1e30, 2e30, 2e30), source, &image, 1, 1, 4, white, null);
+    try std.testing.expectEqual([4]u8{ 12, 34, 56, 255 }, fb.get(3, 3));
+    fb.clear(black);
+    fb.blitImage(types.Rect.init(0, 0, 4, 4), source, &image, 1, 1, 4, white, types.Rect.init(1e30, 0, 1e30, 4));
+    try std.testing.expectEqual([4]u8{ 0, 0, 0, 255 }, fb.get(0, 0));
+    // Dimensões subnormais não podem causar conversão de NaN.
+    fb.blitImage(types.Rect.init(0.5, 0.5, 1e-40, 1e-40), source, &image, 1, 1, 4, white, null);
+}
+
+test "raster: casos extremos reproduzíveis preservam o buffer" {
+    var prng = std.Random.DefaultPrng.init(0x5241_5354_4552);
+    const random = prng.random();
+    const max = std.math.floatMax(f32);
+    const values = [_]f32{ 0, 0.5, -0.5, 1, -1, 8, -8, 1e30, -1e30, max, -max, std.math.inf(f32), -std.math.inf(f32), std.math.nan(f32) };
+    var storage: [8 + 4 * 4 * 4 + 8]u8 = undefined;
+    var scratch: [4 * 4 * 4]u8 = undefined;
+    const image = [_]u8{ 12, 34, 56, 255 };
+    const source = image_mod.Region.init(0, 0, 1, 1);
+    const white = types.Color.rgb(255, 255, 255);
+    const black = types.Color.rgb(0, 0, 0);
+
+    for (0..512) |_| {
+        var v: [8]f32 = undefined;
+        for (&v) |*entry| entry.* = values[random.uintLessThan(usize, values.len)];
+        @memset(&storage, 0xA5);
+        var fb = SoftwareFramebuffer{ .w = 4, .h = 4, .pixels = storage[8 .. 8 + 4 * 4 * 4], .scratch = &scratch };
+        fb.clear(black);
+        const rect = types.Rect.init(v[0], v[1], v[2], v[3]);
+        const p0 = types.Vec2.init(v[0], v[1]);
+        const p1 = types.Vec2.init(v[2], v[3]);
+        const cp: ?types.Rect = if (random.boolean()) types.Rect.init(v[4], v[5], v[6], v[7]) else null;
+        const radius = @abs(v[4]);
+        const width = @abs(v[5]) + 1;
+        fb.fillRect(rect, cp, white);
+        fb.blitImage(rect, source, &image, 1, 1, 4, white, cp);
+        fb.strokeLine(p0, p1, width, cp, white);
+        fb.strokeLineDashed(p0, p1, width, 2, 2, cp, white);
+        fb.fillCircle(p0, radius, cp, white);
+        fb.strokeCircle(p0, radius, width, cp, white);
+        fb.strokeCircleDashed(p0, radius, width, 2, 2, cp, white);
+        fb.strokeRect(rect, width, cp, white);
+        fb.fillRoundRect(rect, radius, cp, white);
+        fb.fillShadow(rect, radius, p1, radius, cp, white);
+        fb.fillGradient(rect, p0, p1, black, white, cp);
+        fb.fillGradientRadial(rect, radius, black, white, cp);
+        fb.fillGradientConic(rect, p0, v[6], v[7], black, white, cp);
+        fb.blurRegion(rect, 2, cp);
+        for (storage[0..8]) |byte| try std.testing.expectEqual(@as(u8, 0xA5), byte);
+        for (storage[storage.len - 8 ..]) |byte| try std.testing.expectEqual(@as(u8, 0xA5), byte);
+    }
+}
+
+test "repintura parcial remove pixels de widget quente que se move e desaparece" {
+    const Context = @import("../core/context.zig").Context;
+    const id_mod = @import("../core/id.zig");
+    const button_mod = @import("../widgets/button.zig");
+    const style_mod = @import("../style/style.zig");
+    const allocator = std.testing.allocator;
+    const viewport = types.Rect.init(0, 0, 20, 10);
+    const old = types.Rect.init(2, 2, 5, 5);
+    const new = types.Rect.init(12, 2, 5, 5);
+    const bg = types.Color.rgb(10, 20, 30);
+    const red = types.Color.rgb(200, 0, 0);
+    const style = style_mod.ButtonStyle{ .bg = red, .bg_hover = red, .bg_pressed = red, .border = red };
+    const id = id_mod.Id.fromString("raster:hot-move");
+    var ctx = try Context.init(allocator, .{ .viewport = viewport });
+    defer ctx.deinit();
+    var fb = try SoftwareFramebuffer.init(allocator, 20, 10);
+    defer fb.deinit(allocator);
+    fb.clear(bg);
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(4, 4) } });
+    try ctx.draw.clear(allocator, bg);
+    const b0 = try button_mod.button(&ctx, id, old, style);
+    try std.testing.expect(b0.hovered);
+    _ = try renderRegion(&fb, ctx.drawCommands(), viewport, ctx.dirty_rect);
+    try std.testing.expectEqual([4]u8{ 200, 0, 0, 255 }, fb.get(4, 4));
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try ctx.pushEvent(.{ .mouse_move = .{ .pos = types.Vec2.init(14, 4) } });
+    try ctx.draw.clear(allocator, bg);
+    const b1 = try button_mod.button(&ctx, id, new, style);
+    try std.testing.expect(b1.hovered);
+    try std.testing.expectEqual(old.unionWith(new), ctx.dirty_rect);
+    _ = try renderRegion(&fb, ctx.drawCommands(), viewport, ctx.dirty_rect);
+    try std.testing.expectEqual([4]u8{ 10, 20, 30, 255 }, fb.get(4, 4));
+    try std.testing.expectEqual([4]u8{ 200, 0, 0, 255 }, fb.get(14, 4));
+    ctx.endFrame();
+
+    // Sem chamada ao botão, o clear da cena remove a posição antiga.
+    ctx.beginFrame();
+    try ctx.draw.clear(allocator, bg);
+    try std.testing.expectEqual(new, ctx.dirty_rect);
+    _ = try renderRegion(&fb, ctx.drawCommands(), viewport, ctx.dirty_rect);
+    try std.testing.expectEqual([4]u8{ 10, 20, 30, 255 }, fb.get(14, 4));
+    ctx.endFrame();
+
+    ctx.beginFrame();
+    try std.testing.expect(ctx.dirty_rect.isEmpty());
+    ctx.endFrame();
 }
