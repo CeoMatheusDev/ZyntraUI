@@ -55,8 +55,8 @@ pub const RasterMetrics = extern struct {
     pixels_written: u64 = 0,
 };
 
-/// RGBA8 row-major. Conteúdo inicial INDEFINIDO (lixo do alocador —
-/// Debug preenche com 0xAA, Release zera): limpe com `clear` ou cubra
+/// RGBA8 row-major. Conteúdo inicial INDEFINIDO em qualquer modo de
+/// otimização: o alocador não garante zeros. Limpe com `clear` ou cubra
 /// tudo antes de ler pixels.
 pub const SoftwareFramebuffer = struct {
     w: u32,

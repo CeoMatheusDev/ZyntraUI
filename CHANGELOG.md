@@ -7,6 +7,11 @@ Todas as mudanças notáveis deste projeto serão documentadas aqui, no formato
 
 ### Corrigido
 
+- `examples/minimal`: limpa o framebuffer antes da renderização parcial e
+  do checksum, evitando ler pixels não inicializados. O CI verifica o mesmo
+  checksum em Debug e ReleaseFast; a documentação deixa explícito que
+  nenhum modo de otimização garante pixels inicialmente zerados.
+  Impacto PATCH, sem alteração de API/ABI ou versão publicada.
 - `widgets.rich_label` (continuidade M165): trechos com estilos diferentes
   na mesma linha compartilham a posição vertical calculada pelo layout,
   em vez de descer uma linha a cada trecho. O `line_spacing` é aplicado
